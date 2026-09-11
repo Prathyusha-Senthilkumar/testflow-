@@ -1,0 +1,14 @@
+{
+    "project_name": "College Website Testing Framework",
+    "base_url": "https://www.srmist.edu.in/",
+    "browser": "chromium",
+    "headed": true,
+    "timeout_ms": 30000,
+    "execution_timeout_seconds": 300,
+    "retry_count": 1,
+    "screenshot_on_failure": true,
+    "trace_on_failure": true,
+    "artifacts_directory": "results",
+    "test_directory": "tests",
+    "recording_target": "python-pytest"
+}
