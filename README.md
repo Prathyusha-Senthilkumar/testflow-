@@ -19,11 +19,9 @@ Working application areas:
 ```text
 React frontend
     ↓
-NestJS Controller
+FastAPI Router
     ↓
 Service
-    ↓
-Service Implementation
     ↓
 Repository
     ↓
@@ -35,24 +33,32 @@ Playwright execution is kept separately under `automation/`.
 ## Project structure
 
 ```text
-college_website_testing_framework/
+testflow/
 ├── frontend/
 │   └── src/
 │       ├── components/
 │       ├── pages/
 │       └── lib/
 ├── backend/
-│   └── src/
-│       ├── config/
-│       ├── models/
-│       ├── schema/
-│       ├── dto/
-│       ├── controller/
-│       ├── service/
-│       ├── serviceimpl/
-│       ├── repo/
-│       ├── app.module.ts
-│       └── main.ts
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── schemas/
+│   │   │   ├── project.py
+│   │   │   └── dashboard.py
+│   │   ├── services/
+│   │   │   ├── projects_service.py
+│   │   │   └── dashboard_service.py
+│   │   ├── repositories/
+│   │   │   └── project_repository.py
+│   │   └── routers/
+│   │       ├── projects.py
+│   │       └── dashboard.py
+│   ├── run.py
+│   ├── requirements.txt
+│   └── test_api.py
 ├── automation/
 │   ├── config/
 │   ├── framework/
@@ -81,12 +87,20 @@ npm run dev
 
 ```bash
 cd backend
-npm install
+python -m pip install -r requirements.txt
 copy .env.example .env
-npm run start:dev
+python run.py
 ```
 
 Without Supabase credentials, the backend runs with demo data so Dashboard and Projects can still be reviewed.
+
+## Run backend API tests
+
+With the backend server running:
+
+```bash
+python backend/test_api.py
+```
 
 ## Configure Supabase
 
