@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.config import settings
 from app.routers.dashboard import router as dashboard_router
 from app.routers.projects import router as projects_router
+from app.routers.crawler import router as crawler_router
 
 app = FastAPI(
     title="TestFlow API",
@@ -57,6 +58,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
 api_router = APIRouter(prefix="/api")
 api_router.include_router(dashboard_router)
 api_router.include_router(projects_router)
+api_router.include_router(crawler_router)
 
 app.include_router(api_router)
 

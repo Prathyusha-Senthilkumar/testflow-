@@ -42,17 +42,29 @@ college_website_testing_framework/
 │       ├── pages/
 │       └── lib/
 ├── backend/
-│   └── src/
-│       ├── config/
-│       ├── models/
-│       ├── schema/
-│       ├── dto/
-│       ├── controller/
-│       ├── service/
-│       ├── serviceimpl/
-│       ├── repo/
-│       ├── app.module.ts
-│       └── main.ts
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── schemas/
+│   │   │   ├── project.py
+│   │   │   ├── dashboard.py
+│   │   │   └── crawler.py
+│   │   ├── services/
+│   │   │   ├── projects_service.py
+│   │   │   ├── dashboard_service.py
+│   │   │   ├── crawler_service.py
+│   │   │   └── test_generator_service.py
+│   │   ├── repositories/
+│   │   │   └── project_repository.py
+│   │   └── routers/
+│   │       ├── projects.py
+│   │       ├── dashboard.py
+│   │       └── crawler.py
+│   ├── run.py
+│   ├── requirements.txt
+│   └── test_api.py
 ├── automation/
 │   ├── config/
 │   ├── framework/

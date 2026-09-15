@@ -104,6 +104,25 @@ def run_tests():
     print(f"Status: {status}, Dashboard projects count: {res['projects']}")
     assert res["projects"] >= 2
 
+    print("\n--- Test 11: POST /api/crawler/start ---")
+    crawl_dto = {
+        "project_id": "demo-project",
+        "base_url": "https://example.com",
+        "max_depth": 1,
+        "max_pages": 2
+    }
+    status, res = make_request(f"{BASE_URL}/crawler/start", method="POST", data=crawl_dto)
+    print(f"Status: {status}, Response: {json.dumps(res, indent=2)}")
+    assert status == 200
+    job_id = res["job_id"]
+    assert res["status"] in ("queued", "crawling")
+
+    print(f"\n--- Test 12: GET /api/crawler/status/{job_id} ---")
+    status, res = make_request(f"{BASE_URL}/crawler/status/{job_id}")
+    print(f"Status: {status}, Response: {json.dumps(res, indent=2)}")
+    assert status == 200
+    assert res["job_id"] == job_id
+
     print("\n================ ALL TESTS PASSED SUCCESSFULLY ================\n")
 
 if __name__ == "__main__":

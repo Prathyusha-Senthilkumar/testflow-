@@ -182,6 +182,85 @@ class ProjectRepository:
 
         return self.find_by_id(id)
 
+    def save_generated_suites(self, project_id: str, suites: list) -> None:
+        """
+        Persists generated suites and test cases to Supabase or demo in-memory storage.
+        """
+        if not self.db:
+            project = self.demo_projects.get(project_id)
+            if not project:
+                # If project doesn't exist in demo, create placeholder
+                project = ProjectDetail(
+                    id=project_id,
+                    name=f"Project {project_id}",
+                    baseUrl="https://example.com",
+                    description="Auto-generated project",
+                    suites=0,
+                    cases=0,
+                    passed=0,
+                    failed=0,
+                    passRate=0,
+                    lastRun=None,
+                    lastRunBy=None,
+                    suitesList=[],
+                )
+                self.demo_projects[project_id] = project
+
+            for suite in suites:
+                suite_id = suite.id or f"gen-suite-{int(time.time() * 1000)}-{len(project.suitesList) + 1}"
+                suite_summary = SuiteSummary(
+                    id=suite_id,
+                    name=suite.name,
+                    cases=len(suite.cases),
+                    passed=0,
+                    failed=0,
+                    notRun=len(suite.cases),
+                    passRate=0,
+                    lastRun=None,
+                    lastRunBy=None
+                )
+                project.suitesList.append(suite_summary)
+                project.suites += 1
+                project.cases += len(suite.cases)
+            return
+
+        # Supabase persistence
+        for suite in suites:
+            # 1. Insert into test_suites
+            s_res = (
+                self.db.from_("test_suites")
+                .insert({
+                    "project_id": project_id,
+                    "name": suite.name,
+                    "source": "Suggested"
+                })
+                .execute()
+            )
+            if s_res.data and len(s_res.data) > 0:
+                created_suite_id = s_res.data[0]["id"]
+                for case in suite.cases:
+                    # 2. Insert into test_cases
+                    c_res = (
+                        self.db.from_("test_cases")
+                        .insert({
+                            "project_id": project_id,
+                            "code": case.code,
+                            "name": case.name,
+                            "description": case.description,
+                            "test_file": case.test_file,
+                            "automation_status": "Automated",
+                            "suggested_suite_name": suite.name
+                        })
+                        .execute()
+                    )
+                    if c_res.data and len(c_res.data) > 0:
+                        created_case_id = c_res.data[0]["id"]
+                        # 3. Associate via test_suite_cases
+                        self.db.from_("test_suite_cases").insert({
+                            "test_suite_id": created_suite_id,
+                            "test_case_id": created_case_id
+                        }).execute()
+
     def _map_project(self, row: dict) -> ProjectSummary:
         return ProjectSummary(
             id=str(row.get("id")),
