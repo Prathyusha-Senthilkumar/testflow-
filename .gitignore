@@ -1,0 +1,36 @@
+# Python
+.pytest_cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Test artifacts
+results/
+test-results/
+playwright-report/
+trace.zip
+*.webm
+
+# Node / build output
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+backend/node_modules/
+backend/dist/
+
+# Environment / secrets
+.env
+frontend/.env
+backend/.env
+auth.json
+storage_state*.json
+playwright/.auth/
+tests/login/credentials.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
