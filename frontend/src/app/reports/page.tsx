@@ -1,2 +1,2 @@
-import { ReportsPage } from "@/pages/ReportsPage";
+import { ReportsPage } from "@/views/ReportsPage";
 export default function Page(){ return <ReportsPage/>; }

@@ -1,2 +1,2 @@
-import { LiveExecutionPage } from "@/pages/LiveExecutionPage";
+import { LiveExecutionPage } from "@/views/LiveExecutionPage";
 export default function Page(){ return <LiveExecutionPage/>; }

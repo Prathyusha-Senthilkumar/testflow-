@@ -1,2 +1,2 @@
-import { TestSuiteDetailPage } from "@/pages/TestSuiteDetailPage";
+import { TestSuiteDetailPage } from "@/views/TestSuiteDetailPage";
 export default function Page(){ return <TestSuiteDetailPage/>; }

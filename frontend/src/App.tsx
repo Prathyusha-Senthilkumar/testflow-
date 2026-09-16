@@ -7,11 +7,11 @@ import {
 
 import { AppShell } from "@/components/AppShell";
 
-import { LoginPage } from "@/pages/login/LoginPage";
-import { DashboardPage } from "@/pages/dashboard/DashboardPage";
-import { ProjectsPage } from "@/pages/projects/ProjectsPage";
-import { ProjectOverviewPage } from "@/pages/projects/ProjectOverviewPage";
-import { PlaceholderPage } from "@/pages/placeholder/PlaceholderPage";
+import { LoginPage } from "@/views/login/LoginPage";
+import { DashboardPage } from "@/views/dashboard/DashboardPage";
+import { ProjectsPage } from "@/views/projects/ProjectsPage";
+import { ProjectOverviewPage } from "@/views/projects/ProjectOverviewPage";
+import { PlaceholderPage } from "@/views/placeholder/PlaceholderPage";
 
 export default function App() {
   return (

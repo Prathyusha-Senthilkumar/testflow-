@@ -57,7 +57,7 @@ export function ProjectFormModal({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/35 p-4">
       <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 text-sm">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
             <p className="mt-1 text-sm text-slate-500">Define the application that your QA team will test.</p>
@@ -91,7 +91,7 @@ export function ProjectFormModal({
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
               placeholder="What is being tested in this project?"
               rows={4}
-              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              className="w-full resize-none rounded-lg-lg-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
             />
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}

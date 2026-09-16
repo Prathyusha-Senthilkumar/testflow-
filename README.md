@@ -17,15 +17,13 @@ Working application areas:
 ## Architecture
 
 ```text
-React frontend
+Next.js frontend
     ↓
-NestJS Controller
+FastAPI routers
     ↓
-Service
     ↓
-Service Implementation
     ↓
-Repository
+Repository and Supabase client
     ↓
 Supabase
 ```
@@ -38,9 +36,10 @@ Playwright execution is kept separately under `automation/`.
 college_website_testing_framework/
 ├── frontend/
 │   └── src/
-│       ├── components/
-│       ├── pages/
-│       └── lib/
+│       ├── app/              # Next.js App Router routes
+│       ├── components/       # Reusable TestFlow UI
+│       ├── views/            # Page-level view components
+│       └── lib/              # API and Supabase clients
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
@@ -89,14 +88,18 @@ copy .env.example .env
 npm run dev
 ```
 
+The frontend runs at `http://localhost:3000`.
+
 ## Start the backend
 
 ```bash
 cd backend
-npm install
+python -m pip install -r requirements.txt
 copy .env.example .env
-npm run start:dev
+python run.py
 ```
+
+The FastAPI backend runs at `http://localhost:8000`.
 
 Without Supabase credentials, the backend runs with demo data so Dashboard and Projects can still be reviewed.
 
@@ -111,16 +114,16 @@ Then configure:
 Frontend `.env`:
 
 ```text
-VITE_API_URL=http://localhost:3000/api
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
+NEXT_PUBLIC_API_URL=http://localhost:8000/api
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 ```
 
 Backend `.env`:
 
 ```text
-PORT=3000
-FRONTEND_URL=http://localhost:5173
+PORT=8000
+FRONTEND_URL=http://localhost:3000
 SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
 ```

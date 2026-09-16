@@ -1,9 +1,0 @@
-"use client";
-
-import { useState } from "react";
-import { FolderOpen, Plus } from "lucide-react";
-import { Link } from "@/lib/navigation";
-import { dashboardProjects } from "@/lib/demoData";
-import { Button } from "@/components/ui/button";
-import { ProjectFormModal } from "@/components/projects/ProjectFormModal";
-export function ProjectsPage(){const [open,setOpen]=useState(false);return <div className="p-6 lg:p-8"><div className="flex items-start justify-between"><div><h1 className="text-3xl font-bold">Projects</h1><p className="mt-1 text-sm text-slate-500">Manage the applications and websites being tested.</p></div><Button onClick={()=>setOpen(true)}><Plus size={16}/>New Project</Button></div><div className="mt-7 grid gap-4 lg:grid-cols-3">{dashboardProjects.map(p=><div key={p.id} className="rounded-xl bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><span className="grid h-10 w-10 place-items-center rounded-lg bg-blue-50 text-blue-600"><FolderOpen size={20}/></span><span className={`rounded px-2 py-1 text-xs ${p.passRate<80?'bg-red-100 text-red-700':'bg-teal-100 text-teal-700'}`}>{p.passRate}% Passed</span></div><h2 className="mt-4 text-lg font-semibold">{p.name}</h2><p className="mt-1 text-sm text-slate-500">{p.suites} suites · {p.tests} automated test cases</p><div className="mt-5 grid grid-cols-2 gap-3 border-y py-3 text-xs"><div><span className="text-slate-400">Last run</span><div className="mt-1 font-medium">{p.lastRun}</div></div><div><span className="text-slate-400">Run by</span><div className="mt-1 font-medium">{p.runBy}</div></div></div><Link to={`/projects/${p.id}`} className="mt-4 block rounded-md bg-blue-600 py-2 text-center text-sm font-medium text-white">Open Project</Link></div>)}</div><ProjectFormModal open={open} title="Create Project" submitLabel="Create Project" loading={false} onClose={()=>setOpen(false)} onSubmit={async()=>setOpen(false)}/></div>}
