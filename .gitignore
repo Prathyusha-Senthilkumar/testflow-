@@ -6,8 +6,11 @@ __pycache__/
 venv/
 
 # Test artifacts
+artifacts/
 results/
 test-results/
+backend/data/*
+!backend/data/.gitkeep
 playwright-report/
 trace.zip
 *.webm
@@ -26,6 +29,7 @@ frontend/.env
 backend/.env
 auth.json
 storage_state*.json
+auth/**/storage-state.json
 playwright/.auth/
 tests/login/credentials.json
 
