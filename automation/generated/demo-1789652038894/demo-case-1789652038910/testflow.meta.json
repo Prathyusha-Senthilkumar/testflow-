@@ -1,0 +1,14 @@
+{
+  "startPath": "/academics/",
+  "environmentId": "env-default",
+  "resolvedStartUrl": "https://example.com/academics/",
+  "assertions": [
+    {
+      "id": "1",
+      "type": "page_title_contains",
+      "value": "x"
+    }
+  ],
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}

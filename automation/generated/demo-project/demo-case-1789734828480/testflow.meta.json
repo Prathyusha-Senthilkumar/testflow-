@@ -1,0 +1,15 @@
+{
+  "startPath": "/admissions/",
+  "environmentId": "env-default",
+  "resolvedStartUrl": "https://www.srmist.edu.in/admissions/",
+  "assertions": [
+    {
+      "id": "expected-result",
+      "type": "text_visible",
+      "value": "admissions"
+    }
+  ],
+  "expectedResult": "admissions",
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_recorded"
+}
