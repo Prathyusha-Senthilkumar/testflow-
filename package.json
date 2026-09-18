@@ -1,0 +1,10 @@
+{
+  "name": "testflow-root",
+  "private": true,
+  "scripts": {
+    "test:playwright": "playwright test tests/playwright-js/login.spec.js --reporter=list"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}

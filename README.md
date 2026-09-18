@@ -1,135 +1,167 @@
-# TestFlow - Unified Test Automation Platform
+# TestFlow - Execution Architecture
 
-TestFlow is a QA-focused web application for managing testing projects, test suites, test cases, Playwright automation and execution results.
+TestFlow is a QA platform that manages test projects, suites, auth profiles, and Playwright executions. The current architecture keeps the control plane in FastAPI and moves the actual Playwright execution to a Node.js worker that runs the JavaScript/TypeScript Playwright test.
 
-## Current milestone
-
-Working application areas:
-
-- Supabase Auth login with demo fallback
-- Dashboard
-- Projects
-- Create/Edit Project
-- Project Overview
-- Suite summaries
-- Existing Python Playwright + pytest framework preserved
-
-## Architecture
+## Architecture diagram
 
 ```text
-React frontend
-    ↓
-NestJS Controller
-    ↓
-Service
-    ↓
-Service Implementation
-    ↓
-Repository
-    ↓
-Supabase
+Frontend / API Client
+    |
+    | POST /api/executions
+    v
+FastAPI Backend
+    |
+    v
+Execution Queue
+    |
+    | queued job
+    v
+Node.js Worker
+    |
+    v
+Docker Runner
+    |
+    v
+Playwright Docker Container
+    |
+    v
+Node.js Playwright Test
+    |
+    v
+PASS / FAIL
+    |
+    v
+FastAPI / Database
+    |
+    v
+Test Results
 ```
 
-Playwright execution is kept separately under `automation/`.
+## Current state of the repo
 
-## Project structure
+The project originally contained:
 
-```text
-college_website_testing_framework/
-├── frontend/
-│   └── src/
-│       ├── components/
-│       ├── pages/
-│       └── lib/
-├── backend/
-│   └── src/
-│       ├── config/
-│       ├── models/
-│       ├── schema/
-│       ├── dto/
-│       ├── controller/
-│       ├── service/
-│       ├── serviceimpl/
-│       ├── repo/
-│       ├── app.module.ts
-│       └── main.ts
-├── automation/
-│   ├── config/
-│   ├── framework/
-│   ├── runner/
-│   └── scripts/
-├── supabase/
-│   ├── schema.sql
-│   └── migrations/
-├── run_tests.py
-├── start_framework.bat
-└── requirements.txt
+- a NestJS backend under backend/
+- a Python automation framework under automation/
+- no real queue or worker infrastructure
+- no Node-based Playwright execution path
+- no execution platform for queued job lifecycle
+
+This update preserves the valid working project pieces, but changes the execution path so the real Playwright runner is Node.js-based and queued through the API.
+
+## FastAPI setup
+
+```powershell
+cd c:\college_website_testing_framework
+python -m pip install -r requirements.txt
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-See `RESTRUCTURE_NOTES.md` for the exact old-to-new file mapping and migration notes.
+## Node worker setup
 
-## Start the frontend
-
-```bash
-cd frontend
+```powershell
+cd c:\college_website_testing_framework\worker
 npm install
-copy .env.example .env
-npm run dev
+npm start
 ```
 
-## Start the backend
+## Docker setup
 
-```bash
-cd backend
-npm install
-copy .env.example .env
-npm run start:dev
+```powershell
+docker --version
+cd c:\college_website_testing_framework\worker
+docker build -t testflow-playwright .
 ```
 
-Without Supabase credentials, the backend runs with demo data so Dashboard and Projects can still be reviewed.
-
-## Configure Supabase
-
-For a fresh Supabase project, run `supabase/schema.sql` in the SQL editor.
-
-For an existing project created with the old schema, use `supabase/migrations/001_suite_case_many_to_many.sql` instead.
-
-Then configure:
-
-Frontend `.env`:
+The Docker runner is designed to create predictable names such as:
 
 ```text
-VITE_API_URL=http://localhost:3000/api
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
+testflow-exec-exec_123
 ```
 
-Backend `.env`:
+## Queue setup
 
-```text
-PORT=3000
-FRONTEND_URL=http://localhost:5173
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
+The repo had no Redis/RQ/Celery setup, so the queue is a lightweight in-project job store using JSON files stored in:
+
+- backend/data/execution_queue.json
+- backend/data/executions.json
+- backend/data/results.json
+
+This is a simple, reliable queue appropriate for the current repo without adding unnecessary infrastructure.
+
+## Trigger an execution
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/executions -ContentType "application/json" -Body '{"test_case_id":"TC_LOGIN_001"}'
 ```
 
-Never expose the service-role key in the frontend.
+Sample response:
 
-## Python Playwright framework
-
-The old command is intentionally preserved:
-
-```bash
-python run_tests.py
+```json
+{
+  "execution_id": "exec_001",
+  "status": "QUEUED"
+}
 ```
 
-Developer commands:
+## Monitor the queue and worker
 
-```bash
-python run_tests.py list
-python run_tests.py validate --config tests/<feature>/data.json
-python run_tests.py run --config tests/<feature>/data.json
-python run_tests.py record --title "Example" --output tests/example/test_example.py
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/worker/status
+Invoke-RestMethod http://127.0.0.1:8000/api/executions/exec_001
+Invoke-RestMethod http://127.0.0.1:8000/api/results/exec_001
 ```
 
-The framework configuration now lives at `automation/config/framework.json`.
+## See running containers
+
+```powershell
+docker ps --filter "name=testflow-exec-"
+```
+
+## Check execution status
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/executions/exec_001
+```
+
+## Retrieve results
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/results/exec_001
+Invoke-RestMethod http://127.0.0.1:8000/api/test-cases/TC_LOGIN_001/results
+```
+
+## End-to-end test
+
+```powershell
+cd c:\college_website_testing_framework
+python -m pytest backend/tests/test_execution_api.py -q
+cd worker
+node --test
+```
+
+## Required API endpoints
+
+- GET /api/health
+- GET /api/worker/status
+- POST /api/executions
+- GET /api/executions/{execution_id}
+- GET /api/results/{execution_id}
+- GET /api/test-cases/{test_case_id}/results
+- GET /api/containers
+- GET /api/containers/{execution_id}
+
+## Key files
+
+- backend/main.py - FastAPI execution control plane
+- backend/data/execution_queue.json - JSON queue file
+- worker/src/worker.js - Node worker
+- worker/src/docker-runner.js - Docker runner
+- worker/src/queue-store.js - queue abstraction
+- worker/src/runner.js - Playwright execution helper
+- tests/playwright-js/login.spec.js - Node Playwright test
+- auth/AUTH_STUDENT_001/storage-state.json - session storage profile
+
+## Important note
+
+Docker execution is implemented in the worker and runs the prebuilt `testflow-playwright:latest` image when Docker is available on the host. The image contains Node.js, the project dependencies, and the Chromium browser required by the JavaScript Playwright test.
