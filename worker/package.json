@@ -1,0 +1,18 @@
+{
+  "name": "testflow-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Node.js worker that polls TestFlow FastAPI and runs Playwright tests in Docker",
+  "main": "src/worker.js",
+  "scripts": {
+    "start": "node src/worker.js",
+    "test:local": "npx playwright test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@playwright/test": "1.55.0"
+  }
+}

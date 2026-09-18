@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
+    INTERNAL_WORKER_TOKEN: Optional[str] = None
+    PROJECT_ROOT: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

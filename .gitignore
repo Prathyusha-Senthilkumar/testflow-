@@ -6,6 +6,8 @@ __pycache__/
 venv/
 
 # Test artifacts
+artifacts/
+backend/artifacts/
 results/
 test-results/
 playwright-report/
@@ -26,6 +28,7 @@ frontend/.env
 backend/.env
 auth.json
 storage_state*.json
+/auth/*.json
 playwright/.auth/
 tests/login/credentials.json
 

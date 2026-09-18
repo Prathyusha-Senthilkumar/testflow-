@@ -1,0 +1,6 @@
+{
+  "title": "Sample Login & Page Load Test",
+  "test_file_location": "tests/sample_test/test_sample.spec.js",
+  "test_case_location": "tests/sample_test/test_case.md",
+  "test_result": "Not Run"
+}
