@@ -1,0 +1,56 @@
+---
+description: Execution rules for the Playwright runner, the queue and anything that starts a browser
+globs: worker/**/*.js,worker/**/*.ts,backend/app/services/**/*.py
+alwaysApply: false
+---
+
+# Runner and queue rules
+
+## The contract
+
+```
+API  ->  TestRun(status=queued)  ->  queue { run_id }  ->  runner  ->  Playwright  ->  results
+```
+
+- Queue payloads carry **identifiers only**. Never embed a full test definition, credentials or
+  storage state in a message. The runner fetches the run definition through the backend.
+- Status progression is `queued -> running -> passed | failed | cancelled | timed_out`.
+  Status updates must be idempotent; a retried update must not corrupt the record.
+- Runner code must not import frontend types or request and response models.
+
+## Executing the right test
+
+The runner receives a test case identifier and must resolve **that** test case's stored steps and
+assertions. A fixed path such as `tests/playwright-js/login.spec.js` is a defect, not a
+placeholder, regardless of what is passed alongside it. If the definition cannot be resolved,
+fail the run with a clear reason rather than running something else.
+
+## Two execution tiers
+
+See `docs/adr/ADR-013-two-tier-execution.md`. Both tiers run identical executor code against the
+same pinned Playwright and browser version.
+
+- **Interactive** triggers (`manual`, `replay`): warm worker pool, reused Chromium process, a
+  fresh `BrowserContext` per test. Optimised for latency. Recycle the process on crash, on idle
+  timeout and after a bounded number of runs.
+- **Batch** triggers (`ci`, `schedule`): ephemeral container per run. Optimised for
+  reproducibility, and the authority when a result is disputed.
+
+The platform picks the tier from the trigger. A caller never requests one.
+
+## Isolation and lifecycle
+
+Every test gets a fresh `BrowserContext`. Implement step timeout, test timeout, cancellation,
+cleanup and worker-crash recovery. A runner or Chromium crash must never take down the API, and
+run state must be recoverable from the database and the queue.
+
+## Persistence
+
+Runs, results and queue state belong in the database. Do not persist them to JSON files on disk
+and do not hold them only in process memory. Never implement a lock with a busy-wait loop; that
+burns a core while it spins.
+
+## Artifacts
+
+On failure capture a screenshot, a Playwright trace, console errors and failed network requests.
+Upload them through the storage adapter. Video is not required.

@@ -1,0 +1,29 @@
+---
+description: Checklist to apply before claiming a task, PR or feature is complete
+alwaysApply: false
+---
+
+# Definition of done
+
+Apply this before saying a piece of work is finished.
+
+- [ ] Acceptance criteria are demonstrably met, not merely implemented.
+- [ ] It runs end to end and can be demoed. Code complete without integrated behaviour is not
+      done. Verify the caller actually reaches the new code rather than assuming the wiring.
+- [ ] The happy path and the expected failure path both have tests.
+- [ ] No secret appears in code, logs, fixtures or responses.
+- [ ] Errors are handled intentionally. No bare catch, no silent swallow, no hang without a
+      timeout or a surfaced message.
+- [ ] Database changes include a migration.
+- [ ] Changed API contracts are documented.
+- [ ] New or changed reusable frontend components have Storybook stories.
+- [ ] Logs and identifiers are sufficient to diagnose a failure in production.
+- [ ] Lint, formatting and type checks pass.
+- [ ] The change is small enough to review and demo in one sitting.
+
+## Before you claim it works
+
+Start the app and exercise the path a user takes. Do not infer that a feature works from the
+code reading correctly. In this repo the dashboard component was written correctly, the API
+returned correct data, and the two never spoke to each other, which no amount of reading the
+component would have revealed.

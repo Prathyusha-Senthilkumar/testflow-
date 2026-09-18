@@ -1,0 +1,41 @@
+---
+alwaysApply: true
+---
+
+# TestFlow architecture boundaries
+
+QA E2E testing platform. Next.js frontend, FastAPI backend, separate Playwright runner,
+Supabase persistence. Full design in `CLAUDE.md` and `docs/adr/`. Read `CLAUDE.md` before
+non-trivial work.
+
+These six rules are not negotiable. Each one has already been broken in this repo.
+
+1. **FastAPI never launches a browser.** No `chromium.launch`, no `async_playwright()`, no
+   subprocess that starts Playwright anywhere under `backend/`. The API creates a TestRun with
+   status `queued`, enqueues `{ run_id }`, and returns. Browser work happens only in `worker/`.
+2. **The runner executes the test it was asked to execute.** Resolve the requested test case and
+   build the run from its stored definition. Never hardcode a path to a `.spec` file. If you
+   find yourself writing a fixed filename, the design is wrong.
+3. **Structured definitions are the source of truth.** Tests are stored as steps, locators and
+   assertions. Never make a generated `.spec.js` file the thing that gets edited or replayed.
+4. **Secrets are never plaintext.** Credentials and Playwright `storageState` are encrypted at
+   rest and never appear in API responses, logs, exports, traces or fixtures.
+5. **One entrypoint per service.** `backend/app/main.py` is the API. Do not add a second FastAPI
+   app. Do not add code under `backend/src/` — that is dead NestJS from an unfinished migration
+   and is pending deletion.
+6. **One component per screen.** Do not create a second copy of a page component. This repo
+   already has `src/views/X.tsx` and `src/views/<area>/X.tsx` pairs that drifted apart, and
+   the routes load whichever was wired first. Edit the file the route imports.
+
+## Scope discipline
+
+Functional and Responsive testing only. Do not build AI test generation, self-healing selectors,
+Firefox or WebKit, real devices, network or storage or accessibility capabilities, multi-tab
+authoring, visual regression, load testing, scheduling, or native CI integrations. These are
+designed in `docs/capability-roadmap.md` and deliberately deferred. Adding one is a scope change
+the lead decides, not an implementation detail.
+
+## Done means demonstrated
+
+Work is done when it runs end to end and can be demoed. Code that compiles but is not wired to
+the thing that calls it is not done, however complete it looks.

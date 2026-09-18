@@ -1,0 +1,33 @@
+---
+description: Database conventions, migrations and referential integrity for Supabase and repositories
+globs: supabase/**/*.sql,backend/app/repositories/**/*.py,backend/app/models/**/*.py
+alwaysApply: false
+---
+
+# Database rules
+
+## Identifiers and relationships
+
+UUID-style IDs for anything referenced externally.
+
+`project_id`, `suite_id` and `test_case_id` are **conceptual relationships, not database-enforced
+foreign keys**. That is a deliberate product decision and it moves the responsibility to the
+application:
+
+- Validate that a referenced record exists before writing when the relationship matters.
+- Define orphan handling explicitly on every delete. Nothing cascades for you.
+- Index every relationship column used for filtering or joining.
+- Add integrity tests that catch orphaned rows.
+
+## Migrations
+
+Every schema change ships as a migration under `supabase/migrations/`, numbered and ordered.
+Never hand-edit a shared schema and never assume a developer applied something manually.
+
+## Columns and lifecycle
+
+Use `created_at` and `updated_at` consistently. A TestRun is immutable in meaning once complete,
+apart from controlled artifact and metadata updates.
+
+Never store plaintext credentials or browser session state in ordinary columns. Secrets go
+through the secrets adapter.

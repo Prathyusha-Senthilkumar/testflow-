@@ -1,0 +1,47 @@
+---
+description: FastAPI layering, config, logging and error contract for backend Python code
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Backend rules
+
+## Layering
+
+Dependency direction is **router to service to repository**. It does not flow back.
+
+- **Routers** translate HTTP only. Validate input, call one service, map the result to a status
+  code. No SQL, no business rules, no queue calls, no encryption, no browser work.
+- **Services** own business rules, permission decisions and workflow orchestration.
+- **Repositories** own reads and writes. They return domain data and never import HTTP types,
+  never call services.
+- **Schemas** are Pydantic transport contracts. **Models** are persistence shapes. Neither
+  contains workflow.
+- **Integrations** wrap queue, storage, secrets and email behind small interfaces so the
+  implementation can be swapped. Do not call a vendor SDK directly from a service.
+
+A router that imports the database session, writes a record, encrypts a secret and starts
+execution is the exact anti-pattern these layers exist to prevent.
+
+## Configuration
+
+All settings come from `app/config.py`. Never call `os.getenv` anywhere else. Never hardcode a
+URL, port, host, key or path. There is a `USE_DEMO_DATA` flag; demo behaviour belongs behind it
+and must not be scattered through services.
+
+## Errors
+
+Error responses are `{"message": "..."}`. The frontend depends on that shape. Validation failures
+return 400 with field names in the message. Do not swallow an exception with a bare `except:` or
+an empty handler.
+
+## Logging
+
+Structured logs with an event name and identifiers. No bare `print`. Generate a correlation ID at
+the API edge and pass it into queue payloads and runner logs. Never log a credential, a session,
+an authorization header or a raw request body.
+
+## Naming
+
+Name after the domain: `TestCaseService`, `RunRepository`, `AuthProfile`. No `Manager`, no
+`Helper`, no `Utils` class holding business rules. Keep functions explainable in one sentence.
