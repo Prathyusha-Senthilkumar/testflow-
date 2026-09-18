@@ -1,10 +1,75 @@
-import { useMemo, useState } from "react";
-import { Search, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { testCases } from "@/lib/demoData";
-export function CreateSuiteModal({open,onClose}:{open:boolean,onClose:()=>void}){
- const [selected,setSelected]=useState<string[]>(["TC-001","TC-002"]); const [query,setQuery]=useState("");
- const rows=useMemo(()=>testCases.filter(t=>`${t.id} ${t.name}`.toLowerCase().includes(query.toLowerCase())),[query]);
- if(!open)return null;
- return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/35 p-4"><div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-6 py-4 text-sm"><div><h2 className="font-semibold">Create Test Suite</h2><p className="text-xs text-slate-500">Group related test cases into a reusable suite.</p></div><button onClick={onClose}><X size={18}/></button></div><div className="space-y-4 p-6"><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium">Suite Name<input defaultValue="Regression Suite - Admissions & Onboarding" className="mt-1.5 w-full rounded-lg-lg border border-slate-300 px-3 py-2 font-normal text-sm"/></label><label className="text-sm font-medium">Description<input defaultValue="Core regression scenarios covering prospective student registration flows." className="mt-1.5 w-full rounded-lg-lg border border-slate-300 px-3 py-2 font-normal text-sm"/></label></div><div><div className="mb-2 flex items-center justify-between"><h3 className="text-sm font-semibold">Select Test Cases <span className="font-normal text-slate-400">({selected.length} selected)</span></h3></div><div className="relative"><Search className="absolute left-3 top-2.5 text-slate-400" size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search test cases..." className="w-full rounded-md border border-slate-300 py-2 pl-9 pr-3 text-sm"/></div><div className="mt-2 max-h-72 overflow-auto rounded-lg border"><table className="w-full text-sm"><thead className="sticky top-0 bg-slate-50 text-xs text-slate-500"><tr><th className="w-10 p-3"></th><th className="p-3 text-left">Test case</th><th className="p-3 text-left">Suites</th></tr></thead><tbody>{rows.map(t=><tr key={t.id} className="border-t"><td className="p-3"><input type="checkbox" checked={selected.includes(t.id)} onChange={()=>setSelected(s=>s.includes(t.id)?s.filter(x=>x!==t.id):[...s,t.id])}/></td><td className="p-3"><span className="mr-2 rounded-lg bg-slate-100 px-1.5 py-0.5 font-mono text-xs">{t.id}</span>{t.name}</td><td className="p-3 text-xs text-slate-500">{t.suites.join(", ")||"Unassigned"}</td></tr>)}</tbody></table></div></div></div><div className="flex justify-end gap-2 border-t px-6 py-4 text-sm"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={onClose}>Create Suite</Button></div></div></div>
+import { Input } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
+import type { TestSuiteInput } from "@/lib/api";
+
+type Props = {
+  open: boolean;
+  loading?: boolean;
+  onClose: () => void;
+  onSubmit: (value: TestSuiteInput) => Promise<void> | void;
+};
+
+const emptyForm: TestSuiteInput = { name: "", description: "" };
+
+export function CreateSuiteModal({ open, loading = false, onClose, onSubmit }: Props) {
+  const [form, setForm] = useState<TestSuiteInput>(emptyForm);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setForm(emptyForm);
+      setError("");
+    }
+  }, [open]);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    if (!form.name.trim()) {
+      setError("Suite name is required.");
+      return;
+    }
+    await onSubmit({
+      name: form.name.trim(),
+      description: form.description?.trim() || undefined,
+    });
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="New Test Suite"
+      description="Group related test cases for this project."
+      footer={
+        <>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button type="submit" form="create-suite-form" loading={loading} disabled={loading}>
+            Create Suite
+          </Button>
+        </>
+      }
+    >
+      <form id="create-suite-form" onSubmit={submit} className="space-y-4">
+        <Input
+          label="Suite name"
+          required
+          value={form.name}
+          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+          placeholder="Admissions Regression"
+        />
+        <Input
+          label="Description"
+          value={form.description ?? ""}
+          onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+          placeholder="Optional summary"
+        />
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      </form>
+    </Modal>
+  );
 }

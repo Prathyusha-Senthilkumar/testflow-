@@ -1,0 +1,15 @@
+{
+  "startPath": "/faculty-gateway/",
+  "environmentId": "env-1789737310383",
+  "resolvedStartUrl": "https://www.srmist.edu.in/faculty-gateway/",
+  "assertions": [
+    {
+      "id": "expected-result",
+      "type": "text_visible",
+      "value": "faculty"
+    }
+  ],
+  "expectedResult": "faculty",
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_recorded"
+}

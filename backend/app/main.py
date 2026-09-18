@@ -8,6 +8,9 @@ from app.config import settings
 from app.routers.dashboard import router as dashboard_router
 from app.routers.projects import router as projects_router
 from app.routers.crawler import router as crawler_router
+from app.routers.test_cases import router as test_cases_router
+from app.routers.environments import router as environments_router
+from app.routers.test_suites import router as test_suites_router
 
 app = FastAPI(
     title="TestFlow API",
@@ -22,6 +25,7 @@ app.add_middleware(
         settings.FRONTEND_URL,
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
         "http://localhost:5173",
@@ -67,6 +71,9 @@ api_router = APIRouter(prefix="/api")
 api_router.include_router(dashboard_router)
 api_router.include_router(projects_router)
 api_router.include_router(crawler_router)
+api_router.include_router(test_cases_router)
+api_router.include_router(environments_router)
+api_router.include_router(test_suites_router)
 
 app.include_router(api_router)
 

@@ -1,12 +1,235 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Play, Plus, Search, Sparkles, Trash2, Upload } from "lucide-react";
 import { Link, useParams } from "@/lib/navigation";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
-import { testCases } from "@/lib/demoData";
-export function TestCasesPage(){const {id='demo-project'}=useParams(); const [selected,setSelected]=useState<string[]>(['TC-001','TC-002','TC-003','TC-004','TC-005']); const [q,setQ]=useState(''); const rows=useMemo(()=>testCases.filter(t=>`${t.id} ${t.name}`.toLowerCase().includes(q.toLowerCase())),[q]); const all=selected.length===rows.length;
- return <div className="p-6 lg:p-8"><PageHeader eyebrow={<><Link to="/projects">Projects</Link> <span className="mx-1">›</span> SRM Website Testing <span className="mx-1">›</span> <span className="text-indigo-600">Test Cases</span></>} title="Test Cases (All Suites)" description="Manage, organize into suites, and execute all automated test cases" actions={<><button className="rounded-lg-lg border bg-white px-4 py-2 text-sm font-medium"><Play size={15} className="mr-1 inline"/>Run Suite</button><button className="rounded-lg-lg border bg-white px-4 py-2 text-sm font-medium"><Upload size={15} className="mr-1 inline"/>Import Test Cases</button><button className="rounded-lg-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"><Plus size={15} className="mr-1 inline"/>Create Test Case</button></>}/><div className="mt-6 rounded-lg bg-white p-4 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-4"><div className="relative w-full max-w-sm"><Search className="absolute left-3 top-2.5 text-slate-400" size={17}/><input value={q} onChange={e=>setQ(e.target.value)} className="w-full rounded-md border border-slate-300 py-2 pl-9 pr-3 text-sm" placeholder="Search test cases..."/></div><div className="grid grid-cols-2 gap-2 md:grid-cols-4">{['All Statuses','All Suites','All Types','All Runs'].map(x=><select key={x} className="rounded-lg-lg border bg-indigo-50 px-3 py-2 text-sm"><option>{x}</option></select>)}</div></div></div>{selected.length>0&&<div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm"><b>{selected.length} test cases selected</b><button className="text-indigo-700">Select all 124 test cases</button><div className="ml-auto flex flex-wrap gap-2"><button className="rounded-lg-lg border bg-white px-3 py-1.5 text-sm"><Sparkles size={14} className="mr-1 inline"/>Automate</button><button className="rounded-lg-lg border bg-white px-3 py-1.5 text-sm">+ Add to Suite</button><button className="rounded-lg-lg bg-indigo-600 px-3 py-1.5 text-white text-sm"><Play size={14} className="mr-1 inline"/>Run Selected</button><button className="rounded-lg-lg border bg-white px-3 py-1.5 text-red-600 text-sm"><Trash2 size={14} className="mr-1 inline"/>Delete</button><button className="px-2 text-indigo-700" onClick={()=>setSelected([])}>Clear Selection</button></div></div>}<div className="mt-3 overflow-hidden rounded-lg bg-white shadow-sm"><table className="w-full min-w-[950px] text-sm"><thead className="bg-indigo-50 text-xs uppercase tracking-wide text-slate-600"><tr><th className="w-12 px-4 py-3"><input type="checkbox" checked={all} onChange={()=>setSelected(all?[]:rows.map(r=>r.id))}/></th><th className="px-3 py-3 text-left">Test ID</th><th className="px-3 py-3 text-left">Test Case</th><th className="px-3 py-3 text-left">Automation</th><th className="px-3 py-3 text-left">Suites</th><th className="px-3 py-3 text-left">Status</th><th className="px-3 py-3 text-left">Last Run</th><th className="px-3 py-3 text-left">Run By</th><th className="px-3 py-3 text-right">Actions</th></tr></thead><tbody>{rows.map(t=><tr key={t.id} className="border-t"><td className="px-4 py-4"><input type="checkbox" checked={selected.includes(t.id)} onChange={()=>setSelected(s=>s.includes(t.id)?s.filter(x=>x!==t.id):[...s,t.id])}/></td><td className="px-3 font-mono text-xs"><span className="rounded-lg bg-slate-100 px-2 py-1 text-sm">{t.id}</span></td><td className="px-3 font-medium">{t.name}</td><td className="px-3"><span className="rounded-lg-lg border bg-indigo-50 px-2 py-1 font-mono text-xs text-slate-600">{t.automation}</span></td><td className="px-3"><div className="flex max-w-52 flex-wrap gap-1">{t.suites.length?t.suites.map(s=><span key={s} className="rounded-lg-lg bg-indigo-50 px-2 py-1 font-mono text-[11px] text-slate-700 text-sm">{s}</span>):<span className="text-xs text-slate-400">Unassigned</span>}</div></td><td className="px-3"><StatusBadge status={t.status}/></td><td className="px-3 text-slate-500">{t.lastRun}</td><td className="px-3">{t.runBy}</td><td className="px-3 text-right"><Link to={`/projects/${id}/test-cases/${t.id}`} className={`${t.status==='Failed'?'text-red-600':'text-indigo-600'} font-medium`}>View</Link></td></tr>)}</tbody></table><div className="flex items-center justify-between border-t px-5 py-3 text-sm text-slate-600"><span>Showing 1–20 of 124</span><div className="flex items-center gap-2"><span>Rows per page: <b className="rounded-lg-lg bg-indigo-600 px-1.5 py-1 text-white text-sm">20</b></span><button className="rounded-lg-lg border px-3 py-1.5 text-sm">‹ Previous</button><span className="rounded-lg-lg bg-indigo-600 px-3 py-1.5 text-white text-sm">1</span><span>2</span><span>3</span><span>…</span><span>7</span><button className="rounded-lg-lg border px-3 py-1.5 text-sm">Next ›</button></div></div></div></div>}
+import { TestCaseFormModal } from "@/components/test-cases/TestCaseFormModal";
+import { api, type TestCaseInput, type TestCaseSummary } from "@/lib/api";
+
+export function TestCasesPage() {
+  const { id: projectId = "" } = useParams();
+  const [projectName, setProjectName] = useState("Project");
+  const [cases, setCases] = useState<TestCaseSummary[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [error, setError] = useState("");
+
+  const rows = useMemo(
+    () => cases.filter((t) => `${t.code} ${t.name}`.toLowerCase().includes(q.toLowerCase())),
+    [cases, q]
+  );
+  const all = rows.length > 0 && selected.length === rows.length;
+
+  useEffect(() => {
+    if (!projectId) return;
+    setLoading(true);
+    setError("");
+    Promise.all([api.project(projectId), api.testCases(projectId)])
+      .then(([project, testCases]) => {
+        setProjectName(project.name);
+        setCases(testCases);
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  async function createTestCase(input: TestCaseInput) {
+    if (!projectId) return;
+    setSaving(true);
+    setError("");
+    try {
+      const created = await api.createTestCase(projectId, input);
+      setCases((current) => [created, ...current]);
+      setModalOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create test case");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="p-6 lg:p-8">
+      <PageHeader
+        eyebrow={
+          <>
+            <Link to="/projects">Projects</Link>
+            <span className="mx-1">›</span>
+            {projectName}
+            <span className="mx-1">›</span>
+            <span className="text-indigo-600">Test Cases</span>
+          </>
+        }
+        title="Test Cases (All Suites)"
+        description="Manage, organize into suites, and execute all automated test cases"
+        actions={
+          <>
+            <button type="button" className="rounded-lg border bg-white px-4 py-2 text-sm font-medium">
+              <Play size={15} className="mr-1 inline" />
+              Run Suite
+            </button>
+            <button type="button" className="rounded-lg border bg-white px-4 py-2 text-sm font-medium">
+              <Upload size={15} className="mr-1 inline" />
+              Import Test Cases
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
+            >
+              <Plus size={15} className="mr-1 inline" />
+              Create Test Case
+            </button>
+          </>
+        }
+      />
+
+      {error && (
+        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      <div className="mt-6 rounded-lg bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="relative w-full max-w-sm">
+            <Search className="absolute left-3 top-2.5 text-slate-400" size={17} />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full rounded-md border border-slate-300 py-2 pl-9 pr-3 text-sm"
+              placeholder="Search test cases..."
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            {["All Statuses", "All Suites", "All Types", "All Runs"].map((x) => (
+              <select key={x} className="rounded-lg border bg-indigo-50 px-3 py-2 text-sm">
+                <option>{x}</option>
+              </select>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {selected.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm">
+          <b>{selected.length} test cases selected</b>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <button type="button" className="rounded-lg border bg-white px-3 py-1.5 text-sm">
+              <Sparkles size={14} className="mr-1 inline" />
+              Automate
+            </button>
+            <button type="button" className="rounded-lg border bg-white px-3 py-1.5 text-sm">
+              + Add to Suite
+            </button>
+            <button type="button" className="rounded-lg bg-indigo-600 px-3 py-1.5 text-white text-sm">
+              <Play size={14} className="mr-1 inline" />
+              Run Selected
+            </button>
+            <button type="button" className="rounded-lg border bg-white px-3 py-1.5 text-red-600 text-sm">
+              <Trash2 size={14} className="mr-1 inline" />
+              Delete
+            </button>
+            <button type="button" className="px-2 text-indigo-700" onClick={() => setSelected([])}>
+              Clear Selection
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-3 overflow-hidden rounded-lg bg-white shadow-sm">
+        {loading ? (
+          <div className="px-5 py-12 text-center text-sm text-slate-500">Loading test cases...</div>
+        ) : rows.length === 0 ? (
+          <div className="px-5 py-12 text-center text-sm text-slate-500">
+            No test cases yet. Create your first test case to get started.
+          </div>
+        ) : (
+          <table className="w-full min-w-[950px] text-sm">
+            <thead className="bg-indigo-50 text-xs uppercase tracking-wide text-slate-600">
+              <tr>
+                <th className="w-12 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={all}
+                    onChange={() => setSelected(all ? [] : rows.map((r) => r.id))}
+                  />
+                </th>
+                <th className="px-3 py-3 text-left">Test ID</th>
+                <th className="px-3 py-3 text-left">Test Case</th>
+                <th className="px-3 py-3 text-left">Category</th>
+                <th className="px-3 py-3 text-left">Scenario</th>
+                <th className="px-3 py-3 text-left">Automation</th>
+                <th className="px-3 py-3 text-left">Suites</th>
+                <th className="px-3 py-3 text-left">Status</th>
+                <th className="px-3 py-3 text-left">Last Run</th>
+                <th className="px-3 py-3 text-left">Run By</th>
+                <th className="px-3 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((t) => (
+                <tr key={t.id} className="border-t">
+                  <td className="px-4 py-4">
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(t.id)}
+                      onChange={() =>
+                        setSelected((s) =>
+                          s.includes(t.id) ? s.filter((x) => x !== t.id) : [...s, t.id]
+                        )
+                      }
+                    />
+                  </td>
+                  <td className="px-3 font-mono text-xs">
+                    <span className="rounded-lg bg-slate-100 px-2 py-1 text-sm">{t.code}</span>
+                  </td>
+                  <td className="px-3 font-medium">{t.name}</td>
+                  <td className="px-3 text-slate-700">{t.category ?? "Functional"}</td>
+                  <td className="px-3 text-slate-700">{t.scenario ?? "Happy Path"}</td>
+                  <td className="px-3">
+                    <span className="rounded-lg border bg-indigo-50 px-2 py-1 font-mono text-xs text-slate-600">
+                      {t.automationStatus}
+                    </span>
+                  </td>
+                  <td className="px-3">
+                    <span className="text-xs text-slate-400">Unassigned</span>
+                  </td>
+                  <td className="px-3">
+                    <StatusBadge status="Untested" />
+                  </td>
+                  <td className="px-3 text-slate-500">Not run</td>
+                  <td className="px-3">—</td>
+                  <td className="px-3 text-right">
+                    <Link to={`/projects/${projectId}/test-cases/${t.id}`} className="font-medium text-indigo-600">
+                      View
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!loading && rows.length > 0 && (
+          <div className="flex items-center justify-between border-t px-5 py-3 text-sm text-slate-600">
+            <span>Showing {rows.length} test case{rows.length === 1 ? "" : "s"}</span>
+          </div>
+        )}
+      </div>
+
+      <TestCaseFormModal
+        open={modalOpen}
+        loading={saving}
+        onClose={() => setModalOpen(false)}
+        onSubmit={createTestCase}
+      />
+    </div>
+  );
+}
 
 export default TestCasesPage;

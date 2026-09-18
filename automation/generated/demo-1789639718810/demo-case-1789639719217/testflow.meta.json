@@ -1,0 +1,14 @@
+{
+  "startPath": "/login",
+  "environmentId": "env-1789639719129",
+  "resolvedStartUrl": "https://staging.example.com/login",
+  "assertions": [
+    {
+      "id": "a1",
+      "type": "page_title_contains",
+      "value": "Example"
+    }
+  ],
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}

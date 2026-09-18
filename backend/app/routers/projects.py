@@ -1,6 +1,7 @@
 from typing import List
 from fastapi import APIRouter, Depends
-from app.repositories.project_repository import ProjectRepository
+from pydantic import BaseModel, Field
+from app.repositories.project_repository import ProjectRepository, project_repository
 from app.services.projects_service import ProjectsService
 from app.schemas.project import (
     ProjectSummary,
@@ -11,7 +12,7 @@ from app.schemas.project import (
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
-_repository = ProjectRepository()
+_repository = project_repository
 _service = ProjectsService(_repository)
 
 def get_projects_service() -> ProjectsService:
@@ -24,6 +25,24 @@ def get_project_repository() -> ProjectRepository:
 @router.get("/", response_model=List[ProjectSummary], include_in_schema=False)
 def list_projects(service: ProjectsService = Depends(get_projects_service)):
     return service.list()
+
+class ResolvedStartUrlResponse(BaseModel):
+    resolvedStartUrl: str = Field(..., alias="resolvedStartUrl")
+
+    model_config = {"populate_by_name": True}
+
+
+@router.get("/{id}/resolve-start-url", response_model=ResolvedStartUrlResponse)
+def resolve_project_start_url(
+    id: str,
+    startPath: str = "/",
+    environmentId: str | None = None,
+    service: ProjectsService = Depends(get_projects_service),
+):
+    return ResolvedStartUrlResponse(
+        resolvedStartUrl=service.resolve_start_url(id, startPath, environmentId)
+    )
+
 
 @router.get("/{id}", response_model=ProjectDetail)
 def get_project(id: str, service: ProjectsService = Depends(get_projects_service)):
