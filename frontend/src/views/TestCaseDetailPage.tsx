@@ -1,9 +1,1077 @@
 "use client";
 
-import { Clock3, Code2, FileText, Play, UserRound } from "lucide-react";
+
+
+import { useEffect, useState } from "react";
+
+import { CirclePlay, Code2, History, Mic, Play } from "lucide-react";
+
 import { Link, useParams } from "@/lib/navigation";
-import { StatusBadge } from "@/components/common/StatusBadge";
-import { testCases } from "@/lib/demoData";
-export function TestCaseDetailPage(){const {id='demo-project',caseId='TC-001'}=useParams(); const tc=testCases.find(t=>t.id===caseId)||testCases[0]; return <div className="p-6 lg:p-8"><div className="rounded-xl bg-white p-6 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-5"><div><div className="mb-2 flex items-center gap-2"><span className="rounded-lg-lg bg-indigo-50 px-2 py-1 font-mono text-xs text-indigo-700">{tc.id}</span><StatusBadge status={tc.status}/><span className="text-xs text-slate-500">• <Clock3 size={13} className="inline"/> Last executed {tc.lastRun} ({tc.runtime})</span></div><h1 className="text-3xl font-bold">{tc.name}</h1><p className="mt-1.5 max-w-3xl text-sm text-slate-500">Automated Playwright test definition for this user journey. The executable script is the source of truth for test behavior.</p></div><div className="flex gap-2"><Link to={`/projects/${id}/runs/104/live`} className="rounded-lg-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"><Play size={15} className="mr-1 inline"/>Run Test</Link><button className="rounded-lg-lg bg-indigo-50 px-4 py-2 text-sm font-medium">Edit Test</button><button className="rounded-lg bg-slate-100 px-3 py-2 text-sm">•••</button></div></div><div className="mt-6 grid gap-2 border-t pt-2 sm:grid-cols-2 lg:grid-cols-5">{[['TEST SUITE','Admissions Suite'],['LAST RUN BY',tc.runBy],['RUNTIME',tc.runtime],['CREATED BY','Priya'],['LAST MODIFIED BY','Arun']].map(([a,b],i)=><div key={a} className="rounded-md bg-indigo-50 p-3"><p className="text-xs text-slate-500">{a}</p><p className="mt-1 font-semibold">{b}</p><p className="mt-1 text-xs text-slate-500">{i===1?'10 mins ago':i===3?'Oct 12, 2024':i===4?'Yesterday, 4:15 PM':''}</p></div>)}</div></div><div className="mt-6 grid gap-5 lg:grid-cols-[1.2fr_.8fr]"><div className="rounded-xl bg-white shadow-sm"><div className="flex gap-2 border-b p-3"><button className="rounded-lg-lg bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700"><Code2 size={15} className="mr-1 inline"/>Automation Script</button><button className="px-3 py-2 text-sm text-slate-500">Run History <span className="ml-1 rounded bg-slate-100 px-1">3</span></button><button className="px-3 py-2 text-sm text-slate-500">Artifacts <span className="ml-1 rounded bg-slate-100 px-1">3</span></button></div><div className="p-5"><div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">Playwright Script</h2><p className="mt-1 font-mono text-xs text-slate-500">{tc.script}</p></div><span className="rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs">Python</span></div><pre className="overflow-auto rounded-lg bg-slate-950 p-5 text-xs leading-6 text-slate-200"><code>{`from playwright.sync_api import Page, expect\n\ndef test_${tc.id.toLowerCase().replace('-','_')}(page: Page):\n    page.goto(\"https://srmist.edu.in/admissions\")\n    expect(page).to_have_title(/Admissions/)\n    expect(page.get_by_role(\"button\", name=\"Apply Now\")).to_be_visible()`}</code></pre></div></div><div className="space-y-4"><div className="rounded-xl bg-white p-5 shadow-sm"><h2 className="font-semibold">Configuration</h2><div className="mt-4 space-y-3 text-sm">{[['Browser','Chromium'],['Runtime','Headless'],['Target','srmist.edu.in/admissions'],['Automation',tc.automation]].map(([a,b])=><div key={a} className="flex justify-between gap-3"><span className="text-slate-500">{a}</span><span className="font-medium text-right">{b}</span></div>)}</div></div><div className="rounded-xl bg-white p-5 shadow-sm"><h2 className="font-semibold">Latest Execution</h2><div className="mt-4 flex items-center justify-between"><StatusBadge status={tc.status}/><Link to={`/projects/${id}/results/103`} className="text-sm font-medium text-indigo-600">View result →</Link></div></div></div></div></div>}
+
+import { Button } from "@/components/ui/button";
+
+import { Input } from "@/components/ui/input";
+
+import { Modal } from "@/components/ui/modal";
+
+import { Select } from "@/components/ui/select";
+
+import { Badge } from "@/components/ui/badge";
+
+import {
+
+  api,
+
+  TEST_CASE_CATEGORIES,
+
+  TEST_CASE_SCENARIOS,
+
+  type TestCaseCategory,
+
+  type TestCaseScenario,
+
+  type EnvironmentSummary,
+
+  type TestCaseSummary,
+
+  type TestCaseVersionDetail,
+
+  type TestCaseVersionSummary,
+
+  type TestRunResult,
+
+} from "@/lib/api";
+
+import { versionLabel } from "@/lib/roman";
+
+
+
+function resolveExpectedResult(data: TestCaseSummary): string {
+
+  if (data.expectedResult) return data.expectedResult;
+
+  const legacy = data.assertions?.find((item) => item.value?.trim());
+
+  return legacy?.value ?? "";
+
+}
+
+
+
+function statusLabel(testCase: TestCaseSummary): string {
+
+  if (testCase.isDraft && (testCase.publishedVersion ?? 0) === 0) return "Draft";
+
+  if (testCase.isDraft) {
+
+    return `Draft · ${versionLabel(testCase.publishedVersion ?? 0)} published`;
+
+  }
+
+  return `Published · ${versionLabel(testCase.publishedVersion ?? 0)}`;
+
+}
+
+
+
+export function TestCaseDetailPage() {
+
+  const { id: projectId = "", caseId: testCaseId = "" } = useParams();
+
+  const [testCase, setTestCase] = useState<TestCaseSummary | null>(null);
+
+  const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
+
+  const [environmentId, setEnvironmentId] = useState<string>("env-default");
+
+  const [startPath, setStartPath] = useState("/");
+
+  const [resolvedPreview, setResolvedPreview] = useState("");
+
+  const [category, setCategory] = useState<TestCaseCategory>("Functional");
+
+  const [scenario, setScenario] = useState<TestCaseScenario>("Happy Path");
+
+  const [expectedResult, setExpectedResult] = useState("");
+
+  const [loading, setLoading] = useState(true);
+
+  const [saving, setSaving] = useState(false);
+
+  const [recording, setRecording] = useState(false);
+
+  const [running, setRunning] = useState(false);
+
+  const [publishing, setPublishing] = useState(false);
+
+  const [error, setError] = useState("");
+
+  const [lastResult, setLastResult] = useState<TestRunResult | null>(null);
+
+
+
+  const [scriptOpen, setScriptOpen] = useState(false);
+
+  const [scriptContent, setScriptContent] = useState("");
+
+  const [scriptPath, setScriptPath] = useState("");
+
+  const [scriptLoading, setScriptLoading] = useState(false);
+
+  const [scriptSaving, setScriptSaving] = useState(false);
+
+
+
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  const [versions, setVersions] = useState<TestCaseVersionSummary[]>([]);
+
+  const [selectedVersion, setSelectedVersion] = useState<TestCaseVersionDetail | null>(null);
+
+
+
+  const hasScript = Boolean(testCase?.testFile);
+
+
+
+  useEffect(() => {
+
+    if (!projectId || !testCaseId) return;
+
+    setLoading(true);
+
+    setError("");
+
+    Promise.all([api.testCase(projectId, testCaseId), api.environments(projectId)])
+
+      .then(([data, envs]) => {
+
+        setEnvironments(envs);
+
+        setTestCase(data);
+
+        setEnvironmentId(data.environmentId ?? envs[0]?.id ?? "env-default");
+
+        setStartPath(data.startPath ?? "/");
+
+        setResolvedPreview(data.resolvedStartUrl ?? "");
+
+        setCategory(data.category ?? "Functional");
+
+        setScenario(data.scenario ?? "Happy Path");
+
+        setExpectedResult(resolveExpectedResult(data));
+
+      })
+
+      .catch((err: Error) => setError(err.message))
+
+      .finally(() => setLoading(false));
+
+  }, [projectId, testCaseId]);
+
+
+
+  useEffect(() => {
+
+    if (!projectId) return;
+
+    const timer = window.setTimeout(() => {
+
+      api
+
+        .resolveStartUrl(projectId, startPath, environmentId)
+
+        .then((data) => setResolvedPreview(data.resolvedStartUrl))
+
+        .catch(() => setResolvedPreview(""));
+
+    }, 200);
+
+    return () => window.clearTimeout(timer);
+
+  }, [projectId, startPath, environmentId]);
+
+
+
+  async function handleSave() {
+
+    if (!projectId || !testCaseId) return;
+
+    setSaving(true);
+
+    setError("");
+
+    try {
+
+      const updated = await api.updateTestCase(projectId, testCaseId, {
+
+        environmentId,
+
+        startPath,
+
+        expectedResult: expectedResult.trim() || null,
+
+        category,
+
+        scenario,
+
+      });
+
+      setTestCase(updated);
+
+      setEnvironmentId(updated.environmentId ?? environmentId);
+
+      setStartPath(updated.startPath ?? "/");
+
+      setResolvedPreview(updated.resolvedStartUrl ?? "");
+
+      setCategory(updated.category ?? "Functional");
+
+      setScenario(updated.scenario ?? "Happy Path");
+
+      setExpectedResult(resolveExpectedResult(updated));
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Could not save test case");
+
+    } finally {
+
+      setSaving(false);
+
+    }
+
+  }
+
+
+
+  async function handlePublish() {
+
+    if (!projectId || !testCaseId) return;
+
+    setPublishing(true);
+
+    setError("");
+
+    try {
+
+      await handleSave();
+
+      const updated = await api.publishTestCase(projectId, testCaseId);
+
+      setTestCase(updated);
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Could not publish test case");
+
+    } finally {
+
+      setPublishing(false);
+
+    }
+
+  }
+
+
+
+  async function openScriptViewer() {
+
+    if (!projectId || !testCaseId) return;
+
+    setScriptOpen(true);
+
+    setScriptLoading(true);
+
+    setError("");
+
+    try {
+
+      const data = await api.getTestScript(projectId, testCaseId);
+
+      setScriptContent(data.content);
+
+      setScriptPath(data.testFile);
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Could not load script");
+
+      setScriptContent("");
+
+    } finally {
+
+      setScriptLoading(false);
+
+    }
+
+  }
+
+
+
+  async function handleSaveScript() {
+
+    if (!projectId || !testCaseId) return;
+
+    setScriptSaving(true);
+
+    setError("");
+
+    try {
+
+      const updated = await api.saveTestScript(projectId, testCaseId, scriptContent);
+
+      setTestCase(updated);
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Could not save script");
+
+    } finally {
+
+      setScriptSaving(false);
+
+    }
+
+  }
+
+
+
+  async function handleRecord() {
+
+    if (!projectId || !testCaseId) return;
+
+    setRecording(true);
+
+    setError("");
+
+    try {
+
+      const updated = await api.recordTestCase(projectId, testCaseId);
+
+      setTestCase(updated);
+
+      if (scriptOpen) {
+
+        const data = await api.getTestScript(projectId, testCaseId);
+
+        setScriptContent(data.content);
+
+        setScriptPath(data.testFile);
+
+      }
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Recording failed");
+
+    } finally {
+
+      setRecording(false);
+
+    }
+
+  }
+
+
+
+  async function handleRun() {
+
+    if (!projectId || !testCaseId || !hasScript) return;
+
+    setRunning(true);
+
+    setError("");
+
+    setLastResult(null);
+
+    try {
+
+      const updated = await api.updateTestCase(projectId, testCaseId, {
+
+        environmentId,
+
+        startPath,
+
+        expectedResult: expectedResult.trim() || null,
+
+        category,
+
+        scenario,
+
+      });
+
+      setTestCase(updated);
+
+      const result = await api.runTestCase(projectId, testCaseId);
+
+      setLastResult(result);
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Test run failed");
+
+    } finally {
+
+      setRunning(false);
+
+    }
+
+  }
+
+
+
+  async function openVersionHistory() {
+
+    if (!projectId || !testCaseId) return;
+
+    setHistoryOpen(true);
+
+    setSelectedVersion(null);
+
+    setError("");
+
+    try {
+
+      const items = await api.testCaseVersions(projectId, testCaseId);
+
+      setVersions(items);
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Could not load version history");
+
+    }
+
+  }
+
+
+
+  async function viewVersion(versionNumber: number) {
+
+    if (!projectId || !testCaseId) return;
+
+    try {
+
+      const detail = await api.testCaseVersion(projectId, testCaseId, versionNumber);
+
+      setSelectedVersion(detail);
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Could not load version");
+
+    }
+
+  }
+
+
+
+  if (loading) {
+
+    return <div className="p-6 text-sm text-slate-500 lg:p-8">Loading test case...</div>;
+
+  }
+
+
+
+  if (error && !testCase) {
+
+    return (
+
+      <div className="p-6 lg:p-8">
+
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+
+      </div>
+
+    );
+
+  }
+
+
+
+  if (!testCase) {
+
+    return (
+
+      <div className="p-6 lg:p-8">
+
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">Test case not found.</div>
+
+      </div>
+
+    );
+
+  }
+
+
+
+  return (
+
+    <div className="p-6 lg:p-8">
+
+      <div className="rounded-xl bg-white p-6 shadow-sm">
+
+        <div className="flex flex-wrap items-start justify-between gap-5">
+
+          <div>
+
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+
+              <span className="rounded-lg bg-indigo-50 px-2 py-1 font-mono text-xs text-indigo-700">{testCase.code}</span>
+
+              <Badge variant={testCase.isDraft ? "warning" : "success"}>{statusLabel(testCase)}</Badge>
+
+              <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+
+                {testCase.automationStatus}
+
+              </span>
+
+            </div>
+
+            <h1 className="text-3xl font-bold">{testCase.name}</h1>
+
+            <p className="mt-1.5 max-w-3xl text-sm text-slate-500">
+
+              {testCase.description || "No description provided."}
+
+            </p>
+
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+
+            <Button type="button" variant="secondary" onClick={handleSave} disabled={saving || recording || running}>
+
+              {saving ? "Saving..." : "Save"}
+
+            </Button>
+
+            <Button type="button" variant="secondary" onClick={handlePublish} disabled={publishing || saving || recording}>
+
+              {publishing ? "Publishing..." : "Publish"}
+
+            </Button>
+
+            <Button type="button" variant="secondary" onClick={openVersionHistory}>
+
+              <History size={15} className="mr-1 inline" />
+
+              Version History
+
+            </Button>
+
+            <Button type="button" variant="secondary" onClick={handleRecord} disabled={recording || running}>
+
+              <Mic size={15} className="mr-1 inline" />
+
+              {recording ? "Recording..." : "Record Test"}
+
+            </Button>
+
+            <Button type="button" onClick={handleRun} disabled={!hasScript || recording || running}>
+
+              <Play size={15} className="mr-1 inline" />
+
+              {running ? "Running..." : "Run Test"}
+
+            </Button>
+
+            <Link
+
+              to={`/projects/${projectId}/test-cases`}
+
+              className="inline-flex h-10 items-center justify-center rounded-lg border bg-white px-4 text-sm font-medium"
+
+            >
+
+              ← Back to Test Cases
+
+            </Link>
+
+          </div>
+
+        </div>
+
+
+
+        {recording && (
+
+          <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+
+            Playwright Codegen should be open on this machine. Perform your actions, then close the Codegen window to
+
+            finish recording.
+
+          </div>
+
+        )}
+
+
+
+        {error && (
+
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+
+        )}
+
+
+
+        <div className="mt-6 grid gap-4 border-t pt-6 lg:grid-cols-2">
+
+          <div className="space-y-4">
+
+            <div className="rounded-xl border border-slate-100 p-5">
+
+              <h2 className="font-semibold">CLASSIFICATION</h2>
+
+              <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+
+                <div>
+
+                  <dt className="mb-1 text-slate-500">Category</dt>
+
+                  <dd>
+
+                    <Select
+
+                      value={category}
+
+                      onChange={(value) => setCategory(value as TestCaseCategory)}
+
+                      options={TEST_CASE_CATEGORIES.map((option) => ({ value: option, label: option }))}
+
+                    />
+
+                  </dd>
+
+                </div>
+
+                <div>
+
+                  <dt className="mb-1 text-slate-500">Scenario</dt>
+
+                  <dd>
+
+                    <Select
+
+                      value={scenario}
+
+                      onChange={(value) => setScenario(value as TestCaseScenario)}
+
+                      options={TEST_CASE_SCENARIOS.map((option) => ({ value: option, label: option }))}
+
+                    />
+
+                  </dd>
+
+                </div>
+
+              </dl>
+
+            </div>
+
+
+
+            <div className="rounded-xl border border-slate-100 p-5">
+
+              <h2 className="font-semibold">ARRANGE</h2>
+
+              <dl className="mt-4 space-y-3 text-sm">
+
+                <div>
+
+                  <dt className="mb-1 text-slate-500">Environment</dt>
+
+                  <dd>
+
+                    <Select
+
+                      value={environmentId}
+
+                      onChange={setEnvironmentId}
+
+                      options={environments.map((env) => ({ value: env.id, label: env.name }))}
+
+                    />
+
+                  </dd>
+
+                </div>
+
+                <div>
+
+                  <dt className="text-slate-500">Start path</dt>
+
+                  <dd className="mt-1">
+
+                    <input
+
+                      className="w-full rounded-lg border px-3 py-2 font-mono text-sm"
+
+                      value={startPath}
+
+                      onChange={(e) => setStartPath(e.target.value)}
+
+                      placeholder="/ or https://example.com"
+
+                    />
+
+                  </dd>
+
+                </div>
+
+                <div className="flex justify-between gap-3">
+
+                  <dt className="text-slate-500">Resolved start URL</dt>
+
+                  <dd className="max-w-[16rem] truncate font-mono text-xs text-right text-slate-700">
+
+                    {resolvedPreview || testCase.resolvedStartUrl || "—"}
+
+                  </dd>
+
+                </div>
+
+              </dl>
+
+            </div>
+
+
+
+            <div className="rounded-xl border border-slate-100 p-5">
+
+              <div className="flex items-center justify-between gap-3">
+
+                <h2 className="font-semibold">ACT</h2>
+
+                <Button type="button" variant="secondary" size="sm" onClick={openScriptViewer}>
+
+                  <Code2 size={14} className="mr-1 inline" />
+
+                  View Script
+
+                </Button>
+
+              </div>
+
+              <dl className="mt-4 space-y-3 text-sm">
+
+                <div className="flex justify-between gap-3">
+
+                  <dt className="text-slate-500">Automation status</dt>
+
+                  <dd className="font-medium">{testCase.automationStatus}</dd>
+
+                </div>
+
+                <div className="flex justify-between gap-3">
+
+                  <dt className="text-slate-500">Script path</dt>
+
+                  <dd className="max-w-[16rem] truncate font-mono text-xs text-right">{testCase.testFile || "—"}</dd>
+
+                </div>
+
+              </dl>
+
+            </div>
+
+
+
+            <div className="rounded-xl border border-slate-100 p-5">
+
+              <h2 className="font-semibold">ASSERT</h2>
+
+              <div className="mt-4">
+
+                <Input
+
+                  label="Expected result"
+
+                  value={expectedResult}
+
+                  onChange={(event) => setExpectedResult(event.target.value)}
+
+                  placeholder="Welcome to Dashboard"
+
+                />
+
+                <p className="mt-2 text-xs text-slate-500">
+
+                  Optional while drafting. When provided, Run Test checks that this text is visible on the page after ACT.
+
+                </p>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+
+          <div className="rounded-xl border border-slate-100 p-5">
+
+            <h2 className="flex items-center gap-2 font-semibold">
+
+              <CirclePlay size={16} className="text-indigo-600" />
+
+              RESULT
+
+            </h2>
+
+            {!lastResult ? (
+
+              <p className="mt-4 text-sm text-slate-500">Run the test to see pass/fail here.</p>
+
+            ) : (
+
+              <dl className="mt-4 space-y-3 text-sm">
+
+                <div className="flex justify-between gap-3">
+
+                  <dt className="text-slate-500">Outcome</dt>
+
+                  <dd
+
+                    className={`font-semibold ${lastResult.status === "Passed" ? "text-teal-700" : "text-red-600"}`}
+
+                  >
+
+                    {lastResult.status === "Passed" ? "PASS" : "FAIL"}
+
+                  </dd>
+
+                </div>
+
+                <div className="flex justify-between gap-3">
+
+                  <dt className="text-slate-500">Duration</dt>
+
+                  <dd className="font-medium">{lastResult.duration.toFixed(2)}s</dd>
+
+                </div>
+
+                {lastResult.error && (
+
+                  <div>
+
+                    <dt className="text-slate-500">Error</dt>
+
+                    <dd className="mt-1 max-h-40 overflow-auto rounded-lg bg-slate-950 p-3 font-mono text-xs text-red-200">
+
+                      {lastResult.error}
+
+                    </dd>
+
+                  </div>
+
+                )}
+
+              </dl>
+
+            )}
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+
+      <Modal
+
+        open={scriptOpen}
+
+        onClose={() => setScriptOpen(false)}
+
+        title="Playwright script"
+
+        description={scriptPath || "Python Playwright test for this case"}
+
+        panelClassName="max-w-4xl"
+
+        footer={
+
+          <>
+
+            <Button type="button" variant="secondary" onClick={() => setScriptOpen(false)}>Close</Button>
+
+            <Button type="button" onClick={handleSaveScript} loading={scriptSaving} disabled={scriptLoading}>
+
+              Save Script
+
+            </Button>
+
+          </>
+
+        }
+
+      >
+
+        {scriptLoading ? (
+
+          <p className="text-sm text-slate-500">Loading script...</p>
+
+        ) : (
+
+          <>
+
+            {!scriptContent.trim() ? (
+
+              <p className="mb-3 text-sm text-slate-500">
+
+                No Playwright script is saved for this test case yet. Use <strong>Record Test</strong> to generate one
+
+                from browser actions, or paste a Python Playwright script below and click <strong>Save Script</strong>.
+
+              </p>
+
+            ) : null}
+
+            <textarea
+
+              className="min-h-[320px] w-full rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-xs text-slate-100"
+
+              value={scriptContent}
+
+              onChange={(event) => setScriptContent(event.target.value)}
+
+              spellCheck={false}
+
+            />
+
+            {scriptPath ? (
+
+              <p className="mt-2 font-mono text-xs text-slate-500">File: {scriptPath}</p>
+
+            ) : null}
+
+          </>
+
+        )}
+
+      </Modal>
+
+
+
+      <Modal
+
+        open={historyOpen}
+
+        onClose={() => {
+
+          setHistoryOpen(false);
+
+          setSelectedVersion(null);
+
+        }}
+
+        title="Version history"
+
+        description="Published snapshots of this test case"
+
+        panelClassName="max-w-3xl"
+
+        footer={
+
+          <Button type="button" variant="secondary" onClick={() => setHistoryOpen(false)}>Close</Button>
+
+        }
+
+      >
+
+        {versions.length === 0 ? (
+
+          <p className="text-sm text-slate-500">No published versions yet.</p>
+
+        ) : (
+
+          <div className="grid gap-4 md:grid-cols-2">
+
+            <ul className="space-y-2">
+
+              {versions.map((version) => (
+
+                <li key={version.versionNumber}>
+
+                  <button
+
+                    type="button"
+
+                    onClick={() => viewVersion(version.versionNumber)}
+
+                    className="w-full rounded-lg border border-slate-100 px-3 py-2 text-left text-sm hover:border-indigo-200"
+
+                  >
+
+                    <span className="font-medium">{version.label}</span>
+
+                    <span className="mt-1 block text-xs text-slate-500">{version.publishedAt}</span>
+
+                  </button>
+
+                </li>
+
+              ))}
+
+            </ul>
+
+            <div className="rounded-lg border border-slate-100 p-3 text-sm">
+
+              {!selectedVersion ? (
+
+                <p className="text-slate-500">Select a version to view its snapshot.</p>
+
+              ) : (
+
+                <dl className="space-y-2">
+
+                  <div><dt className="text-slate-500">Name</dt><dd>{selectedVersion.name}</dd></div>
+
+                  <div><dt className="text-slate-500">Classification</dt><dd>{selectedVersion.category} · {selectedVersion.scenario}</dd></div>
+
+                  <div><dt className="text-slate-500">Start path</dt><dd className="font-mono text-xs">{selectedVersion.startPath}</dd></div>
+
+                  <div><dt className="text-slate-500">Expected result</dt><dd>{selectedVersion.expectedResult || "—"}</dd></div>
+
+                  <div><dt className="text-slate-500">Script</dt><dd className="font-mono text-xs">{selectedVersion.testFile || "—"}</dd></div>
+
+                  {selectedVersion.scriptSnapshot ? (
+
+                    <pre className="mt-2 max-h-48 overflow-auto rounded bg-slate-950 p-2 text-xs text-slate-100">
+
+                      {selectedVersion.scriptSnapshot}
+
+                    </pre>
+
+                  ) : null}
+
+                </dl>
+
+              )}
+
+            </div>
+
+          </div>
+
+        )}
+
+      </Modal>
+
+    </div>
+
+  );
+
+}
+
+
 
 export default TestCaseDetailPage;
+
+

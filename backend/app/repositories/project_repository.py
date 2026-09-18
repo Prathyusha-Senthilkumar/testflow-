@@ -2,7 +2,7 @@ import time
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from fastapi import HTTPException
-from app.database import supabase_client
+from app.database import get_supabase_client
 from app.schemas.project import (
     ProjectSummary,
     ProjectDetail,
@@ -47,14 +47,17 @@ initial_demo_project = ProjectDetail(
 
 class ProjectRepository:
     def __init__(self):
-        self.db = supabase_client
         self.demo_projects: Dict[str, ProjectDetail] = {
             initial_demo_project.id: initial_demo_project.model_copy(deep=True)
         }
 
+    @property
+    def db(self):
+        return get_supabase_client()
+
     def find_all(self) -> List[ProjectSummary]:
         if not self.db:
-            return [
+            projects = [
                 ProjectSummary(
                     id=p.id,
                     name=p.name,
@@ -70,6 +73,7 @@ class ProjectRepository:
                 )
                 for p in self.demo_projects.values()
             ]
+            return sorted(projects, key=lambda item: item.id, reverse=True)
 
         res = (
             self.db.from_("project_overview")
@@ -288,3 +292,7 @@ class ProjectRepository:
             lastRun=row.get("last_run"),
             lastRunBy=row.get("last_run_by"),
         )
+
+
+# Shared demo/in-memory store for all API routers in Phase 1.
+project_repository = ProjectRepository()
