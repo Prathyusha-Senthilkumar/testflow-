@@ -5,6 +5,7 @@ from rq.exceptions import NoSuchJobError
 from rq.job import Job
 
 from app.execution.config_path import resolve_runner_config_path
+from app.execution.runner_sidecar import ensure_runner_config_for_script
 from app.queue.connection import get_redis_connection
 from app.queue.jobs import run_test_case_job
 from app.schemas.execution import (
@@ -88,10 +89,14 @@ def _to_response(job: Job) -> ExecutionStatusResponse:
 class ExecutionService:
     def start(self, request: StartExecutionRequest) -> ExecutionStatusResponse:
         try:
-            config_path = resolve_runner_config_path(
-                config_path=request.config_path,
-                script_path=request.script_path,
-            )
+            if request.script_path and request.script_path.strip():
+                title = (request.test_case_code or "TestFlow test case").strip()
+                config_path = ensure_runner_config_for_script(request.script_path, title=title)
+            else:
+                config_path = resolve_runner_config_path(
+                    config_path=request.config_path,
+                    script_path=request.script_path,
+                )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

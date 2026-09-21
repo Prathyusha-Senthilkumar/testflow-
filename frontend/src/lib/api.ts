@@ -1,12 +1,16 @@
-import { supabase } from "./supabase";
+import { isSupabaseConfigured, supabase } from "./supabase";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8001/api";
+const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api").replace(/\/$/, "");
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const { data } = await supabase.auth.getSession();
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
-  if (data.session) headers.set("Authorization", `Bearer ${data.session.access_token}`);
+  if (isSupabaseConfigured) {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) {
+      headers.set("Authorization", `Bearer ${data.session.access_token}`);
+    }
+  }
 
   let response: Response;
   try {
@@ -15,7 +19,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const message = err instanceof Error ? err.message : "Network request failed";
     throw new Error(
       message === "Failed to fetch"
-        ? `Could not reach the API at ${API_URL}. Is the backend running on port 8001?`
+        ? `Could not reach the API at ${API_URL}. Is FastAPI running (e.g. uvicorn on port 8000)?`
         : message
     );
   }

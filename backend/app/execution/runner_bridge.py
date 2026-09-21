@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -19,6 +21,38 @@ def _resolve_config_path(config_path: str) -> Path:
     return candidate
 
 
+def _run_testflow_harness(
+    root: Path,
+    settings: dict,
+    case_dir: Path,
+    headed: Optional[bool],
+) -> int:
+    from automation.framework.runner import TestRunner
+
+    harness_path = (root / "automation" / "framework" / "testflow_harness.py").resolve()
+    if not harness_path.is_file():
+        return 2
+
+    effective_headed = settings.get("headed", False) if headed is None else headed
+    runner = TestRunner(root, settings)
+    command = runner._build_command(harness_path, effective_headed)
+    timeout_seconds = max(1, int(settings.get("execution_timeout_seconds", 300)))
+    env = {**os.environ, "TESTFLOW_CASE_DIR": str(case_dir.resolve())}
+
+    try:
+        result = subprocess.run(
+            command,
+            cwd=root,
+            timeout=timeout_seconds,
+            env=env,
+        )
+        return int(result.returncode)
+    except subprocess.TimeoutExpired:
+        return 124
+    except OSError:
+        return 1
+
+
 def execute_test_case_config(
     config_path: str,
     headed: Optional[bool] = None,
@@ -38,7 +72,28 @@ def execute_test_case_config(
 
     settings = load_framework_config(root)
     runner = TestRunner(root, settings)
-    return_code = runner.run(config_file, confirm=False, headed=headed)
+    case_dir = config_file.parent
+    meta_path = case_dir / "testflow.meta.json"
+    if meta_path.is_file():
+        data, errors = runner.validate(config_file)
+        if errors:
+            return {
+                "success": False,
+                "status": "Fail",
+                "pytest_return_code": 2,
+                "config_path": relative_config,
+                "title": None,
+                "test_file_location": None,
+                "test_case_location": None,
+                "validation_errors": errors,
+            }
+        return_code = _run_testflow_harness(root, settings, case_dir, headed)
+        from automation.framework.result_handler import update_result
+
+        status = "Pass" if return_code == 0 else "Fail"
+        update_result(config_file, data, status, return_code)
+    else:
+        return_code = runner.run(config_file, confirm=False, headed=headed)
 
     if return_code == 2:
         _, errors = runner.validate(config_file)

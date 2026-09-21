@@ -403,7 +403,7 @@ export function TestCaseDetailPage() {
 
       setTestCase(updated);
 
-      const scriptPath = updated.testFile ?? testCase.testFile;
+      const scriptPath = updated.testFile ?? testCase?.testFile;
 
       if (!scriptPath) {
 
