@@ -8,6 +8,7 @@ from app.repositories.project_repository import ProjectRepository
 from app.repositories.test_case_repository import TestCaseRepository
 from app.repositories.test_case_version_repository import test_case_version_repository
 from app.repositories.environment_repository import environment_repository
+from app.repositories.auth_profile_repository import auth_profile_repository
 from app.schemas.test_case import TestCaseSummary, CreateTestCaseDto, UpdateTestCaseDto
 from app.schemas.test_case_version import TestCaseVersionDetail, TestCaseVersionSummary
 from app.schemas.test_run import TestRunResult
@@ -21,6 +22,7 @@ from app.services.automation_service import (
     write_test_script,
 )
 from app.services.environments_service import EnvironmentsService
+from app.services.auth_profiles_service import AuthProfilesService
 
 if str(_REPO_ROOT) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(_REPO_ROOT))
@@ -38,6 +40,9 @@ class TestCasesService:
         self.test_cases = test_case_repository
         self.projects = project_repository
         self.environments = EnvironmentsService(environment_repository, project_repository)
+        self.auth_profiles = AuthProfilesService(
+            auth_profile_repository, project_repository, test_case_repository
+        )
         self.versions = test_case_version_repository
 
     def list_for_project(self, project_id: str) -> List[TestCaseSummary]:
@@ -64,6 +69,11 @@ class TestCasesService:
             input_dto = input_dto.model_copy(
                 update={"startPath": normalize_start_path(input_dto.startPath)}
             )
+        if "authProfileId" in input_dto.model_fields_set:
+            profile_id = (input_dto.authProfileId or "").strip() or None
+            if profile_id:
+                self.auth_profiles.get(project_id, profile_id)
+            input_dto = input_dto.model_copy(update={"authProfileId": profile_id})
         updated = self.test_cases.update(project_id, test_case_id, input_dto)
         if existing.publishedVersion > 0:
             updated = self.test_cases.mark_draft(project_id, test_case_id)
@@ -111,6 +121,7 @@ class TestCasesService:
             category=test_case.category,
             scenario=test_case.scenario,
             environmentId=test_case.environmentId,
+            authProfileId=test_case.authProfileId,
             startPath=test_case.startPath,
             expectedResult=test_case.expectedResult,
             testFile=test_case.testFile,
@@ -140,11 +151,16 @@ class TestCasesService:
         if not resolved:
             raise HTTPException(status_code=400, detail="A valid environment base URL is required for recording")
 
+        load_storage = None
+        if test_case.authProfileId:
+            load_storage = self.auth_profiles.require_storage_path(project_id, test_case.authProfileId)
+
         relative_script = record_test_case(
             title=test_case.name,
             start_url=resolved,
             project_id=project_id,
             test_case_id=test_case_id,
+            load_storage=load_storage,
         )
         updated = self.test_cases.update_automation(
             project_id,
@@ -171,8 +187,16 @@ class TestCasesService:
         test_case = self._attach_resolved_url(project_id, test_case)
         self._sync_testflow_meta(project_id, test_case_id, test_case)
 
+        storage_state_path = None
+        if test_case.authProfileId:
+            storage_state_path = self.auth_profiles.require_storage_path(
+                project_id, test_case.authProfileId
+            )
+
         try:
-            status, duration, error = run_test_case_script(test_case.testFile)
+            status, duration, error = run_test_case_script(
+                test_case.testFile, storage_state_path=storage_state_path
+            )
         except HTTPException:
             raise
         except Exception as exc:
@@ -242,6 +266,7 @@ class TestCasesService:
             assertions_payload,
             test_case.environmentId,
             test_case.expectedResult,
+            test_case.authProfileId,
         )
 
     def _ensure_project_exists(self, project_id: str):

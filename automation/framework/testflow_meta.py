@@ -17,6 +17,7 @@ def write_meta(
     assertions: list[dict],
     environment_id: str | None = None,
     expected_result: str | None = None,
+    auth_profile_id: str | None = None,
 ) -> Path:
     case_dir = (repo_root / case_dir_for_script(relative_test_file)).resolve()
     case_dir.mkdir(parents=True, exist_ok=True)
@@ -24,6 +25,7 @@ def write_meta(
     payload = {
         "startPath": start_path or "/",
         "environmentId": environment_id,
+        "authProfileId": auth_profile_id,
         "resolvedStartUrl": resolved_start_url,
         "assertions": assertions,
         "expectedResult": (expected_result or "").strip() or None,

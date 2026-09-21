@@ -63,6 +63,20 @@ export const api = {
     }),
   deleteEnvironment: (projectId: string, environmentId: string) =>
     request<void>(`/projects/${projectId}/environments/${environmentId}`, { method: "DELETE" }),
+  authProfiles: (projectId: string) =>
+    request<AuthProfileSummary[]>(`/projects/${projectId}/auth-profiles`),
+  createAuthProfile: (projectId: string, input: AuthProfileInput) =>
+    request<AuthProfileSummary>(`/projects/${projectId}/auth-profiles`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  recordAuthProfileLogin: (projectId: string, profileId: string) =>
+    request<AuthProfileSummary>(`/projects/${projectId}/auth-profiles/${profileId}/record`, {
+      method: "POST",
+      signal: AbortSignal.timeout(60 * 60 * 1000),
+    }),
+  deleteAuthProfile: (projectId: string, profileId: string) =>
+    request<void>(`/projects/${projectId}/auth-profiles/${profileId}`, { method: "DELETE" }),
   createProject: (input: ProjectInput) =>
     request<ProjectDetail>("/projects", { method: "POST", body: JSON.stringify(input) }),
   updateProject: (id: string, input: Partial<ProjectInput>) =>
@@ -187,8 +201,23 @@ export type EnvironmentSummary = {
   baseUrl: string;
 };
 
+export type AuthProfileInput = {
+  name: string;
+  loginUrl?: string;
+};
+
+export type AuthProfileSummary = {
+  id: string;
+  projectId: string;
+  name: string;
+  loginUrl: string;
+  hasStorageState: boolean;
+  createdAt: string;
+};
+
 export type UpdateTestCaseInput = {
   environmentId?: string | null;
+  authProfileId?: string | null;
   startPath?: string;
   expectedResult?: string | null;
   category?: TestCaseCategory;
@@ -205,6 +234,7 @@ export type TestCaseSummary = {
   automationStatus: string;
   testFile?: string | null;
   environmentId?: string | null;
+  authProfileId?: string | null;
   startPath?: string;
   resolvedStartUrl?: string | null;
   expectedResult?: string | null;
@@ -230,6 +260,7 @@ export type TestCaseVersionDetail = TestCaseVersionSummary & {
   category?: TestCaseCategory;
   scenario?: TestCaseScenario;
   environmentId?: string | null;
+  authProfileId?: string | null;
   startPath: string;
   expectedResult?: string | null;
   testFile?: string | null;

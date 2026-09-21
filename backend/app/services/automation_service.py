@@ -68,7 +68,13 @@ def _ensure_playwright_browser_available() -> None:
         )
 
 
-def record_test_case(title: str, start_url: str, project_id: str, test_case_id: str) -> str:
+def record_test_case(
+    title: str,
+    start_url: str,
+    project_id: str,
+    test_case_id: str,
+    load_storage: str | None = None,
+) -> str:
     _ensure_playwright_browser_available()
     settings = load_framework_config(_REPO_ROOT)
     relative_output = relative_script_path(project_id, test_case_id)
@@ -78,6 +84,7 @@ def record_test_case(title: str, start_url: str, project_id: str, test_case_id: 
         url=start_url,
         output=relative_output,
         browser=settings.get("browser", "chromium"),
+        load_storage=load_storage,
     )
     if exit_code != 0:
         raise HTTPException(
@@ -110,7 +117,25 @@ def write_test_script(test_file: str, content: str) -> str:
     return test_file.replace("\\", "/")
 
 
-def run_test_case_script(test_file: str) -> tuple[str, float, str | None]:
+def record_auth_profile_login(login_url: str, save_path: Path) -> None:
+    _ensure_playwright_browser_available()
+    settings = load_framework_config(_REPO_ROOT)
+    recorder = PlaywrightRecorder(_REPO_ROOT, settings)
+    exit_code, error_detail = recorder.record_storage_state(
+        url=login_url,
+        save_path=save_path,
+        browser=settings.get("browser", "chromium"),
+    )
+    if exit_code != 0:
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail or "Login recording did not save a session.",
+        )
+
+
+def run_test_case_script(
+    test_file: str, storage_state_path: str | None = None
+) -> tuple[str, float, str | None]:
     started = time.perf_counter()
     try:
         settings = load_framework_config(_REPO_ROOT)
@@ -129,6 +154,8 @@ def run_test_case_script(test_file: str) -> tuple[str, float, str | None]:
         timeout_seconds = max(1, int(settings.get("execution_timeout_seconds", 300)))
         case_dir = test_path.parent
         env = {**os.environ, "TESTFLOW_CASE_DIR": str(case_dir)}
+        if storage_state_path:
+            env["TESTFLOW_STORAGE_STATE"] = storage_state_path
 
         result = subprocess.run(
             command,
