@@ -278,15 +278,21 @@ class TestCaseRepository:
         expected_result = row.get("expected_result") or row.get("expectedResult")
         if not expected_result and assertions:
             expected_result = assertions[0].value
+        # Deployed schema stores the code as test_case_code and has no
+        # automation_status column, so status is derived from test_file.
+        test_file = (row.get("test_file") or "").strip() or None
+        automation_status = row.get("automation_status") or (
+            "Automated" if test_file else "Not Configured"
+        )
         return TestCaseSummary(
             id=str(row.get("id")),
-            code=str(row.get("code")),
+            code=str(row.get("test_case_code") or row.get("code") or ""),
             name=str(row.get("name")),
             description=row.get("description"),
             category=_coerce_category(row.get("category")),
             scenario=_coerce_scenario(row.get("scenario")),
-            automationStatus=str(row.get("automation_status") or "Not Configured"),
-            testFile=row.get("test_file"),
+            automationStatus=str(automation_status),
+            testFile=test_file,
             startPath=str(row.get("start_path") or "/"),
             environmentId=row.get("environment_id") or DEFAULT_ENVIRONMENT_ID,
             expectedResult=expected_result,
