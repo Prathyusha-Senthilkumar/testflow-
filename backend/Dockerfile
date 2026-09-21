@@ -23,6 +23,9 @@ COPY backend /app/backend
 COPY automation /app/automation
 COPY tests /app/tests
 
+# Record Test (backend) and Run Test (worker) both use Playwright from the same pip version.
+RUN playwright install chromium --with-deps
+
 FROM python-base AS backend
 
 EXPOSE 8000
@@ -30,7 +33,5 @@ EXPOSE 8000
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM python-base AS worker
-
-RUN playwright install chromium --with-deps
 
 CMD ["python", "worker_main.py"]

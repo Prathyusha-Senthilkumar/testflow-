@@ -48,7 +48,11 @@ def test_testflow(page: Page) -> None:
 
     expected_result = (meta.get("expectedResult") or "").strip()
     if expected_result:
-        run_assertions(page, [{"type": "text_visible", "value": expected_result}])
+        # Single slug-like values (from Arrange) assert URL reachability, not page copy.
+        if " " not in expected_result and len(expected_result) <= 64:
+            run_assertions(page, [{"type": "url_contains", "value": expected_result}])
+        else:
+            run_assertions(page, [{"type": "text_visible", "value": expected_result}])
     else:
         assertions = meta.get("assertions") or []
         if assertions:

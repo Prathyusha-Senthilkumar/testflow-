@@ -12,6 +12,7 @@ class StartExecutionRequest(BaseModel):
     script_path: Optional[str] = Field(None, alias="scriptPath")
     project_id: Optional[str] = Field(None, alias="projectId")
     test_case_code: Optional[str] = Field(None, alias="testCaseCode")
+    test_case_id: Optional[str] = Field(None, alias="testCaseId")
     headed: Optional[bool] = None
 
     @model_validator(mode="after")

@@ -14,6 +14,7 @@ from app.schemas.execution import (
     ExecutionStatusResponse,
     StartExecutionRequest,
 )
+from app.repositories.test_run_repository import test_run_repository
 from app.services.queue_service import get_queue_service
 
 
@@ -108,8 +109,25 @@ class ExecutionService:
                 "config_path": config_path,
                 "project_id": request.project_id,
                 "test_case_code": request.test_case_code,
+                "test_case_id": request.test_case_id,
             },
         )
+
+        # Persist run history in Supabase when a real test-case id is provided.
+        if request.test_case_id:
+            try:
+                test_run_repository.create_queued(
+                    test_case_id=request.test_case_id,
+                    job_id=job.id,
+                    config_path=config_path,
+                )
+            except Exception as exc:  # pragma: no cover - persistence is best-effort at enqueue
+                import logging
+
+                logging.getLogger("testflow.execution").warning(
+                    "Could not persist queued test run: %s", exc
+                )
+
         return ExecutionStatusResponse(
             job_id=job.id,
             state="queued",

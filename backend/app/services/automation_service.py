@@ -1,11 +1,16 @@
+import json
 import os
 import re
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from fastapi import HTTPException
+
+from app.config import settings
 
 def _locate_repo_root() -> Path:
     here = Path(__file__).resolve()
@@ -68,22 +73,72 @@ def _ensure_playwright_browser_available() -> None:
         )
 
 
-def record_test_case(title: str, start_url: str, project_id: str, test_case_id: str) -> str:
+def _recording_delegate_url() -> str | None:
+    url = os.environ.get("RECORDING_DELEGATE_URL") or settings.RECORDING_DELEGATE_URL
+    return url.strip() if url and url.strip() else None
+
+
+def run_playwright_recording(title: str, start_url: str, relative_output: str) -> None:
+    """Run headed Playwright codegen on this machine (host dev recorder or local API)."""
     _ensure_playwright_browser_available()
-    settings = load_framework_config(_REPO_ROOT)
-    relative_output = relative_script_path(project_id, test_case_id)
-    recorder = PlaywrightRecorder(_REPO_ROOT, settings)
+    framework_settings = load_framework_config(_REPO_ROOT)
+    recorder = PlaywrightRecorder(_REPO_ROOT, framework_settings)
     exit_code, error_detail = recorder.record(
         title=title,
         url=start_url,
         output=relative_output,
-        browser=settings.get("browser", "chromium"),
+        browser=framework_settings.get("browser", "chromium"),
     )
     if exit_code != 0:
         raise HTTPException(
             status_code=400,
             detail=error_detail or "Recording failed before a script could be saved.",
         )
+
+
+def _record_via_delegate(delegate_base: str, title: str, start_url: str, relative_output: str) -> None:
+    payload = json.dumps(
+        {"title": title, "url": start_url, "output": relative_output},
+    ).encode("utf-8")
+    url = f"{delegate_base.rstrip('/')}/record"
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60 * 60) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            err_payload = json.loads(exc.read().decode("utf-8"))
+            detail = err_payload.get("detail") or err_payload.get("message") or str(exc)
+        except Exception:
+            detail = str(exc)
+        raise HTTPException(status_code=400, detail=detail) from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Host Playwright recorder is not reachable. "
+                f"Start it on your machine: python host_recorder_main.py "
+                f"(expected at {delegate_base}). "
+                f"Underlying error: {exc.reason}"
+            ),
+        ) from exc
+
+    if not body.get("ok"):
+        raise HTTPException(status_code=400, detail=body.get("detail") or "Host recording failed.")
+
+
+def record_test_case(title: str, start_url: str, project_id: str, test_case_id: str) -> str:
+    relative_output = relative_script_path(project_id, test_case_id)
+    delegate = _recording_delegate_url()
+    if delegate:
+        _record_via_delegate(delegate, title, start_url, relative_output)
+    else:
+        run_playwright_recording(title, start_url, relative_output)
 
     script_path = (_REPO_ROOT / relative_output).resolve()
     if not script_path.is_file() or script_path.stat().st_size == 0:

@@ -33,14 +33,39 @@ class TestCaseRepository:
     def db(self):
         return get_supabase_client()
 
+    # ---- Deployed-schema helpers -----------------------------------------
+    # Real schema: project -> test_suites(project_id) -> test_cases(suite_id).
+    # There is no test_cases.project_id and no test_suite_cases table.
+    def _suite_ids_for_project(self, project_id: str) -> List[str]:
+        res = (
+            self.db.from_("test_suites")
+            .select("id")
+            .eq("project_id", project_id)
+            .order("created_at")
+            .execute()
+        )
+        return [str(row["id"]) for row in (res.data or [])]
+
+    def _default_suite_id(self, project_id: str) -> str:
+        """suite_id is NOT NULL, so new cases need a suite. Reuse the first one."""
+        suite_ids = self._suite_ids_for_project(project_id)
+        if suite_ids:
+            return suite_ids[0]
+        from app.repositories.test_suite_repository import test_suite_repository
+
+        return test_suite_repository._ensure_unassigned_suite(project_id)
+
     def list_by_project(self, project_id: str) -> List[TestCaseSummary]:
         if not self.db:
             return list(self.demo_cases.get(project_id, []))
 
+        suite_ids = self._suite_ids_for_project(project_id)
+        if not suite_ids:
+            return []
         res = (
             self.db.from_("test_cases")
             .select("*")
-            .eq("project_id", project_id)
+            .in_("suite_id", suite_ids)
             .order("created_at")
             .execute()
         )
@@ -58,13 +83,15 @@ class TestCaseRepository:
         res = (
             self.db.from_("test_cases")
             .select("*")
-            .eq("project_id", project_id)
             .eq("id", test_case_id)
             .execute()
         )
         if not res.data or len(res.data) == 0:
             raise HTTPException(status_code=404, detail="Test case not found")
-        return self._map_row(res.data[0])
+        row = res.data[0]
+        if str(row.get("suite_id")) not in set(self._suite_ids_for_project(project_id)):
+            raise HTTPException(status_code=404, detail="Test case not found")
+        return self._map_row(row)
 
     def create(self, project_id: str, input_dto: CreateTestCaseDto) -> TestCaseSummary:
         desc = (
@@ -95,18 +122,25 @@ class TestCaseRepository:
             self.demo_cases.setdefault(project_id, []).insert(0, case)
             return case
 
+        # Deployed schema: no project_id / automation_status / code columns.
+        # suite_id and test_file are NOT NULL.
         res = (
             self.db.from_("test_cases")
             .insert(
                 {
-                    "project_id": project_id,
-                    "code": code,
+                    "suite_id": self._default_suite_id(project_id),
+                    "test_case_code": code,
                     "name": input_dto.name,
                     "description": desc,
-                    "automation_status": "Not Configured",
+                    "category": input_dto.category,
+                    "scenario": input_dto.scenario,
+                    "start_path": "/",
+                    "expected_result": None,
+                    "test_file": "",
+                    "is_draft": True,
+                    "published_version": 0,
                 }
             )
-            .select("*")
             .execute()
         )
         if not res.data or len(res.data) == 0:
@@ -134,22 +168,13 @@ class TestCaseRepository:
                     return updated
             raise HTTPException(status_code=404, detail="Test case not found")
 
-        res = (
-            self.db.from_("test_cases")
-            .update(
-                {
-                    "test_file": test_file,
-                    "automation_status": automation_status,
-                }
-            )
-            .eq("project_id", project_id)
-            .eq("id", test_case_id)
-            .select("*")
-            .execute()
-        )
-        if not res.data or len(res.data) == 0:
-            raise HTTPException(status_code=404, detail="Test case not found")
-        return self._map_row(res.data[0])
+        # automation_status has no column in the deployed schema; it is derived
+        # from test_file in _map_row.
+        self.find_by_id(project_id, test_case_id)
+        self.db.from_("test_cases").update({"test_file": test_file}).eq(
+            "id", test_case_id
+        ).execute()
+        return self.find_by_id(project_id, test_case_id)
 
     def update(self, project_id: str, test_case_id: str, input_dto: UpdateTestCaseDto) -> TestCaseSummary:
         if not self.db:
@@ -180,7 +205,26 @@ class TestCaseRepository:
                     return updated
             raise HTTPException(status_code=404, detail="Test case not found")
 
-        raise HTTPException(status_code=501, detail="Test case updates require demo mode in Phase 1")
+        changes: dict = {}
+        if input_dto.startPath is not None:
+            changes["start_path"] = normalize_start_path(input_dto.startPath)
+        if input_dto.expectedResult is not None:
+            trimmed = input_dto.expectedResult.strip()
+            changes["expected_result"] = trimmed or None
+        elif input_dto.assertions is not None:
+            changes["expected_result"] = (
+                input_dto.assertions[0].value.strip() if input_dto.assertions else None
+            )
+        if input_dto.category is not None:
+            changes["category"] = input_dto.category
+        if input_dto.scenario is not None:
+            changes["scenario"] = input_dto.scenario
+        if input_dto.environmentId is not None:
+            changes["environment_id"] = self._normalize_environment_id(input_dto.environmentId)
+        if changes:
+            self.find_by_id(project_id, test_case_id)
+            self.db.from_("test_cases").update(changes).eq("id", test_case_id).execute()
+        return self.find_by_id(project_id, test_case_id)
 
     def apply_publish_state(self, project_id: str, test_case_id: str, version_number: int) -> TestCaseSummary:
         if not self.db:
@@ -191,21 +235,33 @@ class TestCaseRepository:
                     cases[index] = updated
                     return updated
             raise HTTPException(status_code=404, detail="Test case not found")
-        raise HTTPException(status_code=501, detail="Test case updates require demo mode in Phase 1")
+
+        self.db.from_("test_cases").update(
+            {"is_draft": False, "published_version": version_number}
+        ).eq("id", test_case_id).execute()
+        return self.find_by_id(project_id, test_case_id)
 
     def mark_draft(self, project_id: str, test_case_id: str) -> TestCaseSummary:
         if not self.db:
             cases = self.demo_cases.get(project_id, [])
             for index, case in enumerate(cases):
                 if case.id == test_case_id:
-                    if case.publishedVersion <= 0:
-                        updated = case.model_copy(update={"isDraft": True})
-                    else:
-                        updated = case.model_copy(update={"isDraft": True})
+                    updated = case.model_copy(update={"isDraft": True})
                     cases[index] = updated
                     return updated
             raise HTTPException(status_code=404, detail="Test case not found")
-        raise HTTPException(status_code=501, detail="Test case updates require demo mode in Phase 1")
+
+        self.db.from_("test_cases").update({"is_draft": True}).eq(
+            "id", test_case_id
+        ).execute()
+        return self.find_by_id(project_id, test_case_id)
+
+    @staticmethod
+    def _normalize_environment_id(environment_id: str | None) -> str | None:
+        # The sentinel "env-default" means "project default"; store NULL in Supabase.
+        if not environment_id or environment_id == DEFAULT_ENVIRONMENT_ID:
+            return None
+        return environment_id
 
     def _next_code(self, project_id: str) -> str:
         existing = self.list_by_project(project_id)

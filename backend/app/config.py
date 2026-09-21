@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
     REDIS_URL: Optional[str] = None
+    RECORDING_DELEGATE_URL: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -22,7 +22,15 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       FRONTEND_URL: http://localhost:3000
-      USE_DEMO_DATA: "true"
+      # Storage mode: demo by default; set USE_DEMO_DATA=false + Supabase creds in the
+      # root .env (gitignored) to persist to Supabase.
+      USE_DEMO_DATA: ${USE_DEMO_DATA:-true}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Headed Playwright codegen runs on the Windows host (host_recorder_main.py).
+      RECORDING_DELEGATE_URL: http://host.docker.internal:8765
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./automation:/app/automation
       - ./tests:/app/tests
@@ -38,6 +46,9 @@ services:
       target: worker
     environment:
       REDIS_URL: redis://redis:6379/0
+      USE_DEMO_DATA: ${USE_DEMO_DATA:-true}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
     volumes:
       - ./automation:/app/automation
       - ./tests:/app/tests

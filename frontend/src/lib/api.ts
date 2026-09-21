@@ -70,6 +70,7 @@ export type StartExecutionInput = {
   scriptPath?: string;
   projectId?: string;
   testCaseCode?: string;
+  testCaseId?: string;
   headed?: boolean | null;
 };
 

@@ -415,6 +415,8 @@ export function TestCaseDetailPage() {
 
         projectId,
 
+        testCaseId: updated.id,
+
         testCaseCode: updated.code,
 
         scriptPath,

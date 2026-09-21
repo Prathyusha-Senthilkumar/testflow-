@@ -33,9 +33,9 @@ def _run_testflow_harness(
     if not harness_path.is_file():
         return 2
 
-    effective_headed = settings.get("headed", False) if headed is None else headed
+    # Match automation_service.run_test_case_script: playback is headless (no display in worker).
     runner = TestRunner(root, settings)
-    command = runner._build_command(harness_path, effective_headed)
+    command = runner._build_command(harness_path, effective_headed=False)
     timeout_seconds = max(1, int(settings.get("execution_timeout_seconds", 300)))
     env = {**os.environ, "TESTFLOW_CASE_DIR": str(case_dir.resolve())}
 
@@ -87,13 +87,13 @@ def execute_test_case_config(
                 "test_case_location": None,
                 "validation_errors": errors,
             }
-        return_code = _run_testflow_harness(root, settings, case_dir, headed)
+        return_code = _run_testflow_harness(root, settings, case_dir, headed=None)
         from automation.framework.result_handler import update_result
 
         status = "Pass" if return_code == 0 else "Fail"
         update_result(config_file, data, status, return_code)
     else:
-        return_code = runner.run(config_file, confirm=False, headed=headed)
+        return_code = runner.run(config_file, confirm=False, headed=False)
 
     if return_code == 2:
         _, errors = runner.validate(config_file)
