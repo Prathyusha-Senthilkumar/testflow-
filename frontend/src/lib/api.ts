@@ -38,6 +38,37 @@ export type ProjectInput = {
   description?: string;
 };
 
+export type ExecutionState = "queued" | "running" | "completed" | "failed";
+
+export type ExecutionResultPayload = {
+  success: boolean;
+  status: string;
+  pytestReturnCode: number;
+  configPath: string;
+  title?: string | null;
+  testFileLocation?: string | null;
+  testCaseLocation?: string | null;
+  validationErrors?: string[] | null;
+};
+
+export type ExecutionStatus = {
+  jobId: string;
+  state: ExecutionState;
+  configPath?: string | null;
+  projectId?: string | null;
+  testCaseCode?: string | null;
+  result?: ExecutionResultPayload | null;
+  error?: string | null;
+};
+
+export type StartExecutionInput = {
+  configPath?: string;
+  scriptPath?: string;
+  projectId?: string;
+  testCaseCode?: string;
+  headed?: boolean | null;
+};
+
 export const api = {
   dashboard: () => request<DashboardData>("/dashboard"),
   projects: () => request<ProjectSummary[]>("/projects"),
@@ -134,6 +165,12 @@ export const api = {
       `/projects/${projectId}/test-suites/${suiteId}/test-cases/${testCaseId}`,
       { method: "DELETE" }
     ),
+  startExecution: (input: StartExecutionInput) =>
+    request<ExecutionStatus>("/executions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  getExecution: (jobId: string) => request<ExecutionStatus>(`/executions/${jobId}`),
 };
 
 export type TestSuiteInput = {

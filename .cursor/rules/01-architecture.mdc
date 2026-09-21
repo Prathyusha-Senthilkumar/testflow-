@@ -1,0 +1,55 @@
+---
+description: "Locked TestFlow technology stack and architecture; prevents framework or platform substitutions"
+alwaysApply: true
+---
+
+# TestFlow Architecture Rules
+
+The existing TestFlow technology stack is a fixed architectural decision.
+Do NOT change, replace, or add an alternative technology stack unless explicitly requested.
+
+## Frontend
+Active stack:
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+- Existing shared UI/component system
+- Storybook where already used
+
+Reuse the existing frontend architecture and shared components. Do not introduce another frontend framework unless explicitly requested.
+
+## Backend
+The authoritative backend is Python + FastAPI.
+New backend functionality must integrate with the existing FastAPI application.
+
+DO NOT:
+- migrate FastAPI to Node.js, NestJS, or Express
+- create a parallel Node.js/NestJS backend
+- implement new backend features in another backend framework
+- infer that legacy Node.js or NestJS files represent the active architecture
+
+Treat legacy Node.js/NestJS backend code as legacy unless the user explicitly states otherwise.
+
+Before implementing backend functionality, inspect and reuse existing FastAPI routers, services, repositories, schemas/models, configuration, and utilities.
+
+## Database and authentication
+Supabase/PostgreSQL is the selected data platform where applicable.
+- Do not replace Supabase without explicit permission.
+- Do not modify the database schema without explicit permission.
+- Never expose, hardcode, print, or commit secrets, API keys, service-role keys, passwords, or credentials.
+
+## Browser automation
+Playwright is the browser automation framework.
+Reuse existing recorder, runner, generated-script structure, URL resolution, metadata, and harness mechanisms where applicable.
+Do not replace Playwright with Selenium, Cypress, Puppeteer, or another automation framework unless explicitly requested.
+
+## Architecture preservation
+Before implementing:
+1. Inspect the relevant existing implementation.
+2. Identify which existing component/service/repository/module owns the responsibility.
+3. Extend or connect that implementation.
+4. Avoid parallel implementations.
+
+Do not redesign working architecture because another design appears cleaner.
+If an architectural change is genuinely required, explain why and ask permission before changing it.

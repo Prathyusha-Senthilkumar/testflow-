@@ -1,0 +1,6 @@
+{
+    "title": "Example Domain smoke test",
+    "test_file_location": "tests/admissions/test_open_admissions.py",
+    "test_case_location": "tests/admissions/test_case.md",
+    "test_result": "Not Run"
+}

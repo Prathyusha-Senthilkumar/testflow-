@@ -1,0 +1,54 @@
+---
+description: "Core TestFlow product context, Phase 1 scope, and non-negotiable product decisions"
+alwaysApply: true
+---
+
+# TestFlow Core Product Rules
+
+TestFlow is a web-based QA test management and browser automation platform.
+
+## Phase 1 purpose
+TestFlow Phase 1 allows a tester to define a specific test case or functionality, configure it, automate browser actions using Playwright record-and-playback, execute it, inspect the result, and manage published versions.
+
+Primary workflow:
+Project → Environment → Test Suite / Test Case → Configure Test Case → Arrange → Act → Assert → Record Playwright Actions → Review/Edit Generated Script → Run Test → View Result → Publish / Version Test Case
+
+## Scope boundary
+- Phase 1 tests explicitly defined test cases and functionalities.
+- Phase 1 is NOT an autonomous whole-website crawler or whole-site testing system.
+- A base URL is configuration, not an instruction to discover or test the entire website.
+- Do not add whole-site crawling, autonomous page discovery, AI-generated testing, CI/CD functionality, or future-phase features unless explicitly requested.
+
+## Core model
+- Project: application or website under test.
+- Environment: configuration such as a base URL.
+- Test Case: one specific functionality or behavior to test.
+- Test Suite: organization/grouping of test cases.
+- Preserve existing many-to-many suite membership where implemented.
+
+### Arrange
+Setup/preconditions, environment selection, relative/start path, and applicable test configuration/data.
+
+### Act
+Browser interactions through Playwright record-and-playback and the generated Playwright script. Preserve script viewing/editing where supported.
+
+### Assert
+Defines the expected result. Keep assertion behavior consistent with the existing implementation unless explicitly changed.
+
+### Result
+Shows execution outcome and relevant execution information.
+
+## URL handling
+Use the existing environment-aware relative URL mechanism:
+Environment Base URL + Test Case Start Path = Resolved Test URL.
+Do not replace this with hardcoded URLs when the existing resolver applies.
+
+## Versioning
+- Test cases support draft and published states.
+- Publishing creates a version snapshot.
+- Changes after publishing may create a new draft and later another published version.
+- Preserve the existing versioning model unless explicitly asked to change it.
+
+## Product philosophy
+Keep TestFlow practical, minimal, understandable, and focused on QA workflows.
+Do not over-engineer. Implement the requested requirement only.

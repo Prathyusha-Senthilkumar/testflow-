@@ -1,12 +1,10 @@
 "use client";
 
-
-
 import { useEffect, useState } from "react";
 
 import { CirclePlay, Code2, History, Mic, Play } from "lucide-react";
 
-import { Link, useParams } from "@/lib/navigation";
+import { Link, useNavigate, useParams } from "@/lib/navigation";
 
 import { Button } from "@/components/ui/button";
 
@@ -77,6 +75,7 @@ function statusLabel(testCase: TestCaseSummary): string {
 export function TestCaseDetailPage() {
 
   const { id: projectId = "", caseId: testCaseId = "" } = useParams();
+  const navigate = useNavigate();
 
   const [testCase, setTestCase] = useState<TestCaseSummary | null>(null);
 
@@ -404,9 +403,25 @@ export function TestCaseDetailPage() {
 
       setTestCase(updated);
 
-      const result = await api.runTestCase(projectId, testCaseId);
+      const scriptPath = updated.testFile ?? testCase.testFile;
 
-      setLastResult(result);
+      if (!scriptPath) {
+
+        throw new Error("No Playwright script path is configured for this test case.");
+
+      }
+
+      const execution = await api.startExecution({
+
+        projectId,
+
+        testCaseCode: updated.code,
+
+        scriptPath,
+
+      });
+
+      navigate(`/projects/${projectId}/runs/${execution.jobId}/live`);
 
     } catch (err) {
 
@@ -1069,8 +1084,6 @@ export function TestCaseDetailPage() {
   );
 
 }
-
-
 
 export default TestCaseDetailPage;
 

@@ -1,0 +1,98 @@
+---
+description: "Database, Supabase, schema, connection, and data-safety rules for TestFlow"
+globs:
+  - "backend/**/*.py"
+  - "supabase/**/*"
+  - "**/*.sql"
+  - "**/.env*"
+alwaysApply: false
+---
+
+# TestFlow Database Rules
+
+## Database Technology
+
+TestFlow uses Supabase/PostgreSQL.
+
+Do not replace Supabase/PostgreSQL or introduce another database technology unless explicitly requested.
+
+## Schema Changes
+
+Do NOT modify the database schema without explicit user approval.
+
+This includes:
+- creating tables
+- deleting tables
+- adding/removing columns
+- changing column types
+- changing primary keys
+- changing foreign keys
+- changing constraints
+- changing relationships
+- creating migrations
+- changing indexes
+- changing views
+- changing database functions/triggers
+
+If a feature appears to require a schema change:
+1. Explain the required change.
+2. Explain why it is necessary.
+3. Identify affected tables/relationships.
+4. Ask for approval.
+5. Do not execute the change until approved.
+
+Reuse the existing schema wherever possible.
+
+Do not create duplicate tables or fields representing concepts already stored elsewhere.
+
+## Database Connections
+
+Use the project's existing database configuration and connection mechanism.
+
+Do not create a second database connection implementation if one already exists.
+
+Database connection strings and credentials must come from environment configuration.
+
+Never hardcode database connection strings.
+
+Never hardcode:
+- database passwords
+- Supabase service-role keys
+- API keys
+- access tokens
+- credentials
+
+Never print secrets to logs or responses.
+
+Never commit secrets to Git.
+
+## Environment Variables
+
+Use the existing environment-variable naming and configuration conventions.
+
+Do not overwrite `.env`, `.env.local`, or other environment files without explicit permission.
+
+If a required environment variable is missing, tell the user which variable is required without exposing or inventing its value.
+
+## Data Access
+
+Follow the existing repository/service architecture.
+
+Do not bypass an existing repository/data-access layer by adding direct database queries inside frontend components or unrelated backend modules.
+
+Frontend code must not receive privileged database credentials.
+
+Supabase service-role credentials must remain server-side only.
+
+## Existing Data
+
+Do not:
+- truncate tables
+- delete existing data
+- reset the database
+- reseed the database
+- run destructive SQL
+
+without explicit permission.
+
+Use migrations/schema changes only after approval and follow the existing project's migration approach.

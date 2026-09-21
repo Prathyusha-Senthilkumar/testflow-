@@ -1,0 +1,46 @@
+---
+description: "Strict scope control, approval gates, and ambiguity handling for TestFlow changes"
+alwaysApply: true
+---
+
+# Scope and Change Control
+
+Implement ONLY what the user requested.
+
+Do not independently add future-phase functionality, nice-to-have features, speculative improvements, unrelated bug fixes, architectural refactors, UI redesigns, additional database tables, API endpoints, dependencies, abstractions, workflows, or cleanup.
+
+## Explicit approval required
+Ask before changing:
+- technology stack
+- database schema
+- folder/project structure
+- dependencies
+- environment architecture or environment files
+- API contracts that affect other features
+- major shared interfaces
+- established architectural patterns
+- Git branches, commits, remote state, or history
+
+If such a change appears necessary:
+1. STOP before making it.
+2. Explain what needs to change.
+3. Explain why.
+4. Explain what existing functionality may be affected.
+5. Ask permission.
+
+Do not make the change first and explain afterward.
+
+## Ambiguous requirements
+When a requirement is unclear, incomplete, contradictory, or has materially different valid implementations:
+- Ask a focused clarification question.
+- Do not silently choose an interpretation.
+- Do not invent requirements.
+- Do not assume future requirements.
+- Do not implement what the user "probably wants."
+
+## Unrelated problems
+If an unrelated issue is discovered:
+1. Do not fix it automatically.
+2. Tell the user what was found.
+3. Explain whether it affects the requested task.
+4. Ask permission before modifying or committing a fix.

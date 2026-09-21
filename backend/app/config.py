@@ -1,4 +1,3 @@
-import os
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,6 +7,7 @@ class Settings(BaseSettings):
     USE_DEMO_DATA: bool = False
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
+    REDIS_URL: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

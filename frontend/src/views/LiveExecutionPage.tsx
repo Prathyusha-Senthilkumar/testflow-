@@ -1,7 +1,73 @@
 "use client";
 
-import { Check, Circle, ExternalLink, Play, StopCircle } from "lucide-react";
-import { Link, useParams } from "@/lib/navigation";
-export function LiveExecutionPage(){const {id='demo-project'}=useParams(); const steps=[['Open Admissions Page','Verified URL loaded in 420ms','Passed'],['Verify Page Title','Expected title matched in 110ms','Passed'],['Check Apply Now Button','Verifying button presence and visibility...','Running'],['Explore Programs','Waiting for Step 3','Queued'],['Verify Programs','Waiting for Step 4','Queued']]; return <div className="p-6 lg:p-8"><div className="rounded-lg-lg-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-800">✓ Validation successful: Test configuration and target URL verified <span className="float-right rounded-lg bg-white px-2 py-1 font-mono text-xs">Pre-check OK</span></div><div className="mt-4 flex flex-wrap items-center gap-6 rounded-lg bg-white p-4 shadow-sm"><span className="rounded-lg-full bg-indigo-100 px-3 py-1 font-mono text-xs font-semibold text-indigo-700">● RUNNING</span><div><p className="text-xs text-slate-500">Test Case</p><p className="font-semibold">TC-001 Open Admissions Page</p></div><div><p className="text-xs text-slate-500">Progress</p><p className="font-semibold">3 / 5 steps</p></div><div><p className="text-xs text-slate-500">Runtime</p><p className="font-mono text-sm font-semibold">00:03.2s</p></div><div><p className="text-xs text-slate-500">Browser</p><p className="font-semibold">◉ Chromium</p></div><div><p className="text-xs text-slate-500">Run By</p><p className="font-semibold">Priya</p></div><Link to={`/projects/${id}/results/103`} className="ml-auto rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white"><StopCircle size={15} className="mr-1 inline"/>Stop Test</Link></div><div className="mt-4 rounded-lg bg-white p-4 shadow-sm"><div className="flex justify-between text-sm"><span><b className="text-indigo-700">EXECUTION PIPELINE</b> <span className="text-slate-400">•</span> Step 3 of 5 running</span><span className="font-mono text-xs text-indigo-700">60% Complete</span></div><div className="mt-3 h-2 overflow-hidden rounded bg-indigo-100"><div className="h-full w-3/5 rounded bg-indigo-600"/></div></div><div className="mt-4 grid gap-4 xl:grid-cols-[.72fr_1.28fr]"><div className="rounded-lg bg-white p-4 shadow-sm"><div className="flex justify-between"><h2 className="font-semibold">Step Timeline</h2><span className="font-mono text-xs text-slate-400">Target: SRM Admissions</span></div><div className="mt-5 space-y-1">{steps.map(([name,sub,status],i)=><div key={name} className={`relative flex gap-3 rounded-md p-3 ${status==='Running'?'border border-indigo-300 bg-indigo-50':status==='Queued'?'text-slate-400':''}`}><div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${status==='Passed'?'bg-teal-100 text-teal-700':status==='Running'?'bg-indigo-600 text-white':'bg-slate-100 text-slate-400'}`}>{status==='Passed'?<Check size={16}/>:status==='Running'?<Play size={13}/>:<Circle size={14}/>}</div><div><p className="text-sm font-semibold">Step {i+1} — {name}</p><p className="mt-0.5 text-xs">{sub}</p></div><span className="ml-auto rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-medium text-sm">{status}</span></div>)}</div></div><div className="overflow-hidden rounded-lg bg-white shadow-sm"><div className="flex h-8 items-center gap-2 border-b bg-slate-100 px-3"><span className="h-2.5 w-2.5 rounded-full bg-red-400"/><span className="h-2.5 w-2.5 rounded-full bg-amber-400"/><span className="h-2.5 w-2.5 rounded-full bg-teal-500"/><div className="mx-auto rounded-lg bg-white px-5 py-1 font-mono text-xs text-slate-600">🔒 https://srmist.edu.in/admissions</div></div><div className="bg-slate-900 px-6 py-4 text-white text-sm"><div className="flex items-center justify-between"><b>SRM Institute of Science and Technology</b><div className="flex gap-5 text-xs"><span>Academics</span><span className="underline">Admissions</span><span>Research</span><span>Campus Life</span></div></div></div><div className="grid min-h-[390px] grid-cols-[1.3fr_.7fr] gap-8 p-8"><div className="pt-10"><span className="rounded-lg-lg-full bg-indigo-50 px-3 py-1 font-mono text-xs text-slate-500">ADMISSIONS OPEN 2025-26</span><h2 className="mt-5 text-4xl font-bold">Shape Your Tomorrow at SRM</h2><p className="mt-4 max-w-lg text-slate-500">Join over 52,000 students across engineering, management, medicine, and humanities in India's leading multidisciplinary university.</p><div className="mt-6 flex gap-3"><button className="rounded-lg-lg bg-indigo-600 px-5 py-3 font-semibold text-white text-sm">Apply Now →</button><button className="rounded-lg-lg bg-indigo-50 px-5 py-3 text-sm">Explore Programs</button></div><p className="mt-2 inline-block rounded-lg-lg bg-indigo-600 px-2 py-0.5 font-mono text-xs text-white">locator.toBeVisible()</p></div><div className="rounded-lg bg-gradient-to-br from-indigo-300 via-indigo-100 to-amber-100 p-4 shadow-inner"><div className="flex h-full items-end rounded bg-white/40 p-4 text-sm font-semibold text-slate-700">SRM Campus preview</div></div></div></div></div></div>}
+import { useEffect } from "react";
+import { Link, useNavigate, useParams } from "@/lib/navigation";
+import { useExecutionPolling } from "@/hooks/useExecutionPolling";
+import { testCases } from "@/lib/demoData";
+
+const stateLabel: Record<string, string> = {
+  queued: "Queued",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+export function LiveExecutionPage() {
+  const { id = "demo-project", runId } = useParams();
+  const navigate = useNavigate();
+  const { execution, error } = useExecutionPolling(runId);
+  const testCaseCode = execution?.testCaseCode;
+  const tc = testCases.find((t) => t.id === testCaseCode);
+
+  useEffect(() => {
+    if (!execution || !runId) return;
+    if (execution.state === "completed" || execution.state === "failed") {
+      navigate(`/projects/${id}/results/${runId}`);
+    }
+  }, [execution, id, navigate, runId]);
+
+  const state = execution?.state ?? "queued";
+  const title = execution?.result?.title ?? tc?.name ?? testCaseCode ?? "Test case";
+
+  return (
+    <div className="p-6 lg:p-8">
+      <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+        Async execution via Redis queue and RQ worker
+        <span className="float-right rounded-lg bg-white px-2 py-1 font-mono text-xs">Job {runId}</span>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-6 rounded-lg bg-white p-4 shadow-sm">
+        <span className="rounded-lg-full bg-indigo-100 px-3 py-1 font-mono text-xs font-semibold text-indigo-700">
+          ● {stateLabel[state] ?? state}
+        </span>
+        <div>
+          <p className="text-xs text-slate-500">Test Case</p>
+          <p className="font-semibold">{testCaseCode ? `${testCaseCode} — ${title}` : title}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Runner config</p>
+          <p className="max-w-md truncate font-mono text-xs">{execution?.configPath ?? "—"}</p>
+        </div>
+        <Link
+          to={`/projects/${id}/test-cases/${testCaseCode ?? "TC-001"}`}
+          className="ml-auto rounded-lg border bg-white px-4 py-2 text-sm font-medium"
+        >
+          ← Back to test case
+        </Link>
+      </div>
+
+      <div className="mt-4 rounded-lg bg-white p-5 shadow-sm text-sm text-slate-600">
+        <p>
+          Polling execution status every 2 seconds. When the job finishes, you will be redirected to the result page.
+        </p>
+        {execution?.error && <p className="mt-3 text-red-600">{execution.error}</p>}
+      </div>
+    </div>
+  );
+}
 
 export default LiveExecutionPage;
