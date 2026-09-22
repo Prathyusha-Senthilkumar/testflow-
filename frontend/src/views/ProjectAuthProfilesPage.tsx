@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Mic, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Mic, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Link, useParams } from "@/lib/navigation";
 import { api, type AuthProfileInput, type AuthProfileSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,38 @@ import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 
 const emptyForm: AuthProfileInput = { name: "", loginUrl: "" };
+
+function formatStamp(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+}
+
+function sessionLabel(profile: AuthProfileSummary): string {
+  const expires = formatStamp(profile.sessionExpiresAt);
+  const recorded = formatStamp(profile.sessionRecordedAt);
+  switch (profile.sessionStatus) {
+    case "expired":
+      return expires
+        ? `Session expired ${expires} - renew it`
+        : `Session may have expired (recorded ${recorded}) - renew it`;
+    case "expiring":
+      return expires
+        ? `Session expires ${expires} - renew it soon`
+        : `Session is close to expiring (recorded ${recorded}) - renew it soon`;
+    case "active":
+      return expires ? `Session active until ${expires}` : `Session saved ${recorded}`;
+    default:
+      return "No session yet";
+  }
+}
+
+function sessionToneClass(status: AuthProfileSummary["sessionStatus"]): string {
+  if (status === "expired") return "text-red-600";
+  if (status === "expiring") return "text-amber-700";
+  if (status === "active") return "text-emerald-700";
+  return "text-slate-500";
+}
 
 export function ProjectAuthProfilesPage() {
   const { id: projectId = "" } = useParams();
@@ -86,6 +118,8 @@ export function ProjectAuthProfilesPage() {
     }
   }
 
+  const renewals = profiles.filter((profile) => profile.needsRenewal);
+
   return (
     <div className="p-6 lg:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -114,6 +148,20 @@ export function ProjectAuthProfilesPage() {
           Playwright Codegen is open. Log in, then close the Inspector to save the session.
         </div>
       )}
+      {!loading && renewals.length > 0 && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <p className="font-medium">
+            <AlertTriangle size={14} className="mr-1 inline" />
+            {renewals.length === 1
+              ? "1 auth profile needs session renewal"
+              : `${renewals.length} auth profiles need session renewal`}
+          </p>
+          <p className="mt-1">
+            {renewals.map((profile) => profile.name).join(", ")} - use Renew session so recording and
+            test runs keep starting logged in.
+          </p>
+        </div>
+      )}
 
       <div className="mt-6 rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
         <h2 className="font-semibold">AUTH PROFILES</h2>
@@ -124,25 +172,34 @@ export function ProjectAuthProfilesPage() {
         ) : (
           <ul className="mt-4 space-y-3">
             {profiles.map((profile) => (
-              <li key={profile.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-100 px-4 py-3">
+              <li
+                key={profile.id}
+                className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
+                  profile.needsRenewal ? "border-amber-200 bg-amber-50/50" : "border-slate-100"
+                }`}
+              >
                 <div>
                   <p className="font-medium">{profile.name}</p>
                   <p className="font-mono text-xs text-slate-600">{profile.loginUrl}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {profile.hasStorageState ? "Session saved" : "No session yet"}
+                  <p className={`mt-1 text-xs ${sessionToneClass(profile.sessionStatus)}`}>
+                    {sessionLabel(profile)}
                   </p>
                 </div>
                 <div className="flex gap-2">
                   <Button
                     type="button"
-                    variant="outline"
+                    variant={profile.needsRenewal ? "primary" : "outline"}
                     size="sm"
                     onClick={() => recordLogin(profile.id)}
                     disabled={recordingId !== null}
                     loading={recordingId === profile.id}
                   >
-                    <Mic size={14} className="mr-1 inline" />
-                    {profile.hasStorageState ? "Re-record" : "Record login"}
+                    {profile.hasStorageState ? (
+                      <RefreshCw size={14} className="mr-1 inline" />
+                    ) : (
+                      <Mic size={14} className="mr-1 inline" />
+                    )}
+                    {profile.hasStorageState ? "Renew session" : "Record login"}
                   </Button>
                   <Button type="button" variant="outline" size="sm" onClick={() => removeProfile(profile.id)}>
                     <Trash2 size={14} />
