@@ -9,4 +9,5 @@ export class DashboardController {
   get() {
     return this.dashboard.getOverview();
   }
+  
 }
