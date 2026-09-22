@@ -8,17 +8,50 @@ from typing import List, Optional, Tuple
 
 from fastapi import HTTPException
 
-from app.schemas.auth_profile import AuthProfileSummary, CreateAuthProfileDto
+from app.schemas.auth_profile import AuthProfileSummary, AuthRefreshConfig, CreateAuthProfileDto
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _SEGMENT_RE = re.compile(r"^[\w\-]+$")
 _PROFILES_ROOT = _REPO_ROOT / "automation" / "auth-profiles"
 _META_FILENAME = "profile.json"
 _STORAGE_FILENAME = "storage_state.json"
+_CREDENTIALS_FILENAME = "credentials.enc"
 # A session is flagged for renewal once it is inside this window of its expiry.
 _EXPIRING_WINDOW = timedelta(hours=24)
 # Used when the saved cookies carry no expiry (session cookies only).
 _MAX_SESSION_AGE = timedelta(days=7)
+
+
+def _public_refresh(refresh: AuthRefreshConfig) -> dict:
+    """Keep only configured names and the endpoint. Drop anything that is not a setting."""
+    data = refresh.model_dump(exclude_none=True)
+    if refresh.strategy == "cookie":
+        return {
+            "strategy": "cookie",
+            "url": refresh.url.strip(),
+            "method": refresh.method,
+        }
+    stored = {
+        "strategy": "localStorage",
+        "url": refresh.url.strip(),
+        "method": refresh.method,
+        "sendToken": refresh.sendToken,
+        "authorizationHeader": (refresh.authorizationHeader or "Authorization").strip() or "Authorization",
+    }
+    for key in ("origin", "accessTokenKey", "refreshTokenKey", "accessTokenJsonPath", "refreshTokenJsonPath"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            stored[key] = value.strip()
+    return stored
+
+
+def _refresh_from_payload(raw: object) -> Optional[AuthRefreshConfig]:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return AuthRefreshConfig.model_validate(raw)
+    except Exception:
+        return None
 
 
 def _validate_segment(value: str, label: str) -> str:
@@ -98,6 +131,62 @@ class AuthProfileRepository:
     def storage_state_path(self, project_id: str, profile_id: str) -> Path:
         return self._profile_dir(project_id, profile_id) / _STORAGE_FILENAME
 
+    # ---- Credentials (encrypted at rest, never in profile.json) ----------
+    def credentials_path(self, project_id: str, profile_id: str) -> Path:
+        return self._profile_dir(project_id, profile_id) / _CREDENTIALS_FILENAME
+
+    def save_credentials(
+        self, project_id: str, profile_id: str, username: str, password: str
+    ) -> None:
+        from app.services.secret_store import SecretUnavailableError, encrypt_mapping
+
+        profile_dir = self._profile_dir(project_id, profile_id)
+        if not (profile_dir / _META_FILENAME).is_file():
+            raise HTTPException(status_code=404, detail="Auth profile not found")
+        try:
+            token = encrypt_mapping({"username": username, "password": password})
+        except SecretUnavailableError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        self.credentials_path(project_id, profile_id).write_text(token, encoding="utf-8")
+
+    def read_credentials(self, project_id: str, profile_id: str) -> Optional[dict]:
+        """Decrypted {username, password}. Callers must never log or return this."""
+        from app.services.secret_store import decrypt_mapping
+
+        path = self.credentials_path(project_id, profile_id)
+        if not path.is_file():
+            return None
+        payload = decrypt_mapping(path.read_text(encoding="utf-8").strip())
+        if not payload or not payload.get("username"):
+            return None
+        return payload
+
+    def save_refresh(
+        self, project_id: str, profile_id: str, refresh: Optional[AuthRefreshConfig]
+    ) -> None:
+        """Store non-secret refresh settings on profile.json. Credentials stay encrypted."""
+        profile_dir = self._profile_dir(project_id, profile_id)
+        meta_path = profile_dir / _META_FILENAME
+        if not meta_path.is_file():
+            raise HTTPException(status_code=404, detail="Auth profile not found")
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"Could not read auth profile: {exc}") from exc
+        if refresh is None:
+            payload.pop("refresh", None)
+        else:
+            payload["refresh"] = _public_refresh(refresh)
+        meta_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def credential_username(self, project_id: str, profile_id: str) -> Optional[str]:
+        payload = self.read_credentials(project_id, profile_id)
+        return payload.get("username") if payload else None
+
+    def _has_credentials(self, profile_dir: Path) -> bool:
+        path = profile_dir / _CREDENTIALS_FILENAME
+        return path.is_file() and path.stat().st_size > 0
+
     def _project_dir(self, project_id: str) -> Path:
         return self.root / _validate_segment(project_id, "project id")
 
@@ -152,6 +241,13 @@ class AuthProfileRepository:
         except (OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=500, detail=f"Could not read auth profile: {exc}")
         session_status, recorded_at, expires_at = self._session_state(profile_dir)
+        has_credentials = self._has_credentials(profile_dir)
+        # Username is not a secret and helps the tester confirm setup; the
+        # password is never read back out to the API layer.
+        username = None
+        if has_credentials:
+            stored = self.read_credentials(project_id, profile_id)
+            username = stored.get("username") if stored else None
         return AuthProfileSummary(
             id=str(payload.get("id") or profile_id),
             projectId=str(payload.get("projectId") or project_id),
@@ -162,6 +258,9 @@ class AuthProfileRepository:
             sessionRecordedAt=recorded_at,
             sessionExpiresAt=expires_at,
             needsRenewal=session_status in ("expiring", "expired"),
+            hasCredentials=has_credentials,
+            username=username,
+            refresh=_refresh_from_payload(payload.get("refresh")),
             createdAt=str(payload.get("createdAt") or ""),
         )
 

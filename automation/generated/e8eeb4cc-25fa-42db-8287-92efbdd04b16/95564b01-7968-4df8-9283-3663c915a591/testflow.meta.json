@@ -1,0 +1,20 @@
+{
+  "startPath": "/events/",
+  "environmentId": "659cc721-2847-4950-b6de-bb35422b8df0",
+  "authProfileId": null,
+  "resolvedStartUrl": "https://www.srmist.edu.in/events/",
+  "assertions": [
+    {
+      "id": "expected-result",
+      "type": "text_visible",
+      "value": "Events"
+    }
+  ],
+  "storageSeeds": [],
+  "storageAssertions": [],
+  "accessibilityEnabled": false,
+  "networkCheckEnabled": false,
+  "expectedResult": "Events",
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}

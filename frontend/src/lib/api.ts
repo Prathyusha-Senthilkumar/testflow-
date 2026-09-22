@@ -135,6 +135,24 @@ export const api = {
       method: "POST",
       signal: AbortSignal.timeout(60 * 60 * 1000),
     }),
+  setAuthProfileCredentials: (
+    projectId: string,
+    profileId: string,
+    input: AuthProfileCredentialsInput
+  ) =>
+    request<AuthProfileSummary>(
+      `/projects/${projectId}/auth-profiles/${profileId}/credentials`,
+      { method: "PUT", body: JSON.stringify(input) }
+    ),
+  setAuthProfileRefresh: (
+    projectId: string,
+    profileId: string,
+    refresh: AuthRefreshConfig | null
+  ) =>
+    request<AuthProfileSummary>(
+      `/projects/${projectId}/auth-profiles/${profileId}/refresh`,
+      { method: "PUT", body: JSON.stringify({ refresh }) }
+    ),
   deleteAuthProfile: (projectId: string, profileId: string) =>
     request<void>(`/projects/${projectId}/auth-profiles/${profileId}`, { method: "DELETE" }),
   createProject: (input: ProjectInput) =>
@@ -275,9 +293,24 @@ export type EnvironmentSummary = {
 export type AuthProfileInput = {
   name: string;
   loginUrl?: string;
+  username?: string;
+  password?: string;
 };
 
 export type AuthSessionStatus = "none" | "active" | "expiring" | "expired";
+
+export type AuthRefreshConfig = {
+  strategy: "cookie" | "localStorage";
+  url: string;
+  method?: "GET" | "POST";
+  origin?: string | null;
+  accessTokenKey?: string | null;
+  refreshTokenKey?: string | null;
+  sendToken?: "accessToken" | "refreshToken";
+  accessTokenJsonPath?: string | null;
+  refreshTokenJsonPath?: string | null;
+  authorizationHeader?: string | null;
+};
 
 export type AuthProfileSummary = {
   id: string;
@@ -289,7 +322,15 @@ export type AuthProfileSummary = {
   sessionRecordedAt: string | null;
   sessionExpiresAt: string | null;
   needsRenewal: boolean;
+  hasCredentials: boolean;
+  username?: string | null;
+  refresh?: AuthRefreshConfig | null;
   createdAt: string;
+};
+
+export type AuthProfileCredentialsInput = {
+  username: string;
+  password: string;
 };
 
 export const STORAGE_KINDS = ["localStorage", "sessionStorage", "cookie"] as const;

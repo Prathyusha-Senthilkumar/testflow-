@@ -27,6 +27,7 @@ backend/.env
 auth.json
 storage_state*.json
 automation/auth-profiles/**/storage_state.json
+automation/auth-profiles/**/credentials.enc
 automation/auth-profiles/**/_codegen*.log
 playwright/.auth/
 tests/login/credentials.json

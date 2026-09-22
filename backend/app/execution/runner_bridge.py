@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import subprocess
@@ -68,11 +69,55 @@ def _extract_failure_message(output: str) -> Optional[str]:
     return tail or None
 
 
+def _resolve_auth_storage_state(root: Path, case_dir: Path, meta: dict) -> Optional[str]:
+    """Establish a usable authenticated session for the test's Auth Profile.
+
+    Returns the storage-state path to hand to Playwright, or None when the test
+    has no Auth Profile (unauthenticated tests are untouched).
+    """
+    profile_id = (meta.get("authProfileId") or "").strip()
+    if not profile_id:
+        return None
+
+    from automation.framework.auth_session import ensure_authenticated_session
+
+    # Generated scripts live at automation/generated/<projectId>/<caseId>/
+    project_id = case_dir.parent.name
+    profile_dir = root / "automation" / "auth-profiles" / project_id / profile_id
+    storage_path = profile_dir / "storage_state.json"
+
+    login_url = ""
+    refresh = None
+    profile_meta_path = profile_dir / "profile.json"
+    if profile_meta_path.is_file():
+        try:
+            profile_meta = json.loads(profile_meta_path.read_text(encoding="utf-8"))
+            login_url = str(profile_meta.get("loginUrl") or "")
+            candidate = profile_meta.get("refresh")
+            if isinstance(candidate, dict):
+                refresh = candidate
+        except (OSError, ValueError):
+            login_url = ""
+
+    from app.repositories.auth_profile_repository import auth_profile_repository
+
+    credentials = auth_profile_repository.read_credentials(project_id, profile_id)
+
+    return ensure_authenticated_session(
+        storage_path=storage_path,
+        login_url=login_url,
+        target_url=str(meta.get("resolvedStartUrl") or ""),
+        credentials=credentials,
+        refresh=refresh,
+    )
+
+
 def _run_testflow_harness(
     root: Path,
     settings: dict,
     case_dir: Path,
     headed: Optional[bool],
+    meta: Optional[dict] = None,
 ) -> tuple[int, Optional[str]]:
     from automation.framework.runner import TestRunner
 
@@ -80,11 +125,23 @@ def _run_testflow_harness(
     if not harness_path.is_file():
         return 2, "TestFlow harness file is missing."
 
+    auth_storage_state = None
+    if meta:
+        from automation.framework.auth_session import AuthRecoveryError
+
+        try:
+            auth_storage_state = _resolve_auth_storage_state(root, case_dir, meta)
+        except AuthRecoveryError as exc:
+            return 1, str(exc)
+
     # Match automation_service.run_test_case_script: playback is headless (no display in worker).
     runner = TestRunner(root, settings)
     command = runner._build_command(harness_path, effective_headed=False)
     timeout_seconds = max(1, int(settings.get("execution_timeout_seconds", 300)))
     env = {**os.environ, "TESTFLOW_CASE_DIR": str(case_dir.resolve())}
+    if auth_storage_state:
+        # Reuses the existing conftest hook that seeds the Playwright context.
+        env["TESTFLOW_STORAGE_STATE"] = auth_storage_state
 
     try:
         result = subprocess.run(
@@ -146,8 +203,13 @@ def execute_test_case_config(
                 "validation_errors": errors,
                 "error_message": "; ".join(errors),
             }
+        meta = {}
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
         return_code, failure_message = _run_testflow_harness(
-            root, settings, case_dir, headed=None
+            root, settings, case_dir, headed=None, meta=meta
         )
         from automation.framework.result_handler import update_result
 

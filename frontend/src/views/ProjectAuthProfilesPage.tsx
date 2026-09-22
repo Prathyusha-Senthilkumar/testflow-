@@ -3,12 +3,51 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Mic, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Link, useParams } from "@/lib/navigation";
-import { api, type AuthProfileInput, type AuthProfileSummary } from "@/lib/api";
+import { api, type AuthProfileInput, type AuthProfileSummary, type AuthRefreshConfig } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 
-const emptyForm: AuthProfileInput = { name: "", loginUrl: "" };
+const emptyForm: AuthProfileInput = { name: "", loginUrl: "", username: "", password: "" };
+
+type RefreshForm = {
+  strategy: "" | "cookie" | "localStorage";
+  url: string;
+  method: "GET" | "POST";
+  origin: string;
+  accessTokenKey: string;
+  refreshTokenKey: string;
+  sendToken: "accessToken" | "refreshToken";
+  accessTokenJsonPath: string;
+  refreshTokenJsonPath: string;
+};
+
+const emptyRefresh: RefreshForm = {
+  strategy: "",
+  url: "",
+  method: "POST",
+  origin: "",
+  accessTokenKey: "",
+  refreshTokenKey: "",
+  sendToken: "refreshToken",
+  accessTokenJsonPath: "",
+  refreshTokenJsonPath: "",
+};
+
+function refreshToForm(refresh: AuthRefreshConfig | null | undefined): RefreshForm {
+  if (!refresh) return { ...emptyRefresh };
+  return {
+    strategy: refresh.strategy,
+    url: refresh.url || "",
+    method: refresh.method === "GET" ? "GET" : "POST",
+    origin: refresh.origin || "",
+    accessTokenKey: refresh.accessTokenKey || "",
+    refreshTokenKey: refresh.refreshTokenKey || "",
+    sendToken: refresh.sendToken === "accessToken" ? "accessToken" : "refreshToken",
+    accessTokenJsonPath: refresh.accessTokenJsonPath || "",
+    refreshTokenJsonPath: refresh.refreshTokenJsonPath || "",
+  };
+}
 
 function formatStamp(value: string | null): string {
   if (!value) return "";
@@ -53,6 +92,9 @@ export function ProjectAuthProfilesPage() {
   const [error, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<AuthProfileInput>(emptyForm);
+  const [refreshProfileId, setRefreshProfileId] = useState<string | null>(null);
+  const [refreshForm, setRefreshForm] = useState<RefreshForm>(emptyRefresh);
+  const [savingRefresh, setSavingRefresh] = useState(false);
 
   useEffect(() => {
     if (!projectId) return;
@@ -68,7 +110,7 @@ export function ProjectAuthProfilesPage() {
   }, [projectId]);
 
   function openCreate() {
-    setForm({ name: "", loginUrl: defaultLoginUrl });
+    setForm({ name: "", loginUrl: defaultLoginUrl, username: "", password: "" });
     setFormOpen(true);
     setError("");
   }
@@ -82,6 +124,8 @@ export function ProjectAuthProfilesPage() {
       const created = await api.createAuthProfile(projectId, {
         name: form.name,
         loginUrl: form.loginUrl || undefined,
+        username: form.username?.trim() || undefined,
+        password: form.password || undefined,
       });
       setProfiles((current) => [...current, created]);
       setFormOpen(false);
@@ -104,6 +148,46 @@ export function ProjectAuthProfilesPage() {
       setError(err instanceof Error ? err.message : "Login recording did not save a session");
     } finally {
       setRecordingId(null);
+    }
+  }
+
+  function openRefresh(profile: AuthProfileSummary) {
+    setRefreshProfileId(profile.id);
+    setRefreshForm(refreshToForm(profile.refresh));
+    setError("");
+  }
+
+  async function submitRefresh(event: React.FormEvent) {
+    event.preventDefault();
+    if (!projectId || !refreshProfileId) return;
+    setSavingRefresh(true);
+    setError("");
+    try {
+      const refresh: AuthRefreshConfig | null =
+        refreshForm.strategy === ""
+          ? null
+          : {
+              strategy: refreshForm.strategy,
+              url: refreshForm.url.trim(),
+              method: refreshForm.method,
+              ...(refreshForm.strategy === "localStorage"
+                ? {
+                    origin: refreshForm.origin.trim() || undefined,
+                    accessTokenKey: refreshForm.accessTokenKey.trim(),
+                    refreshTokenKey: refreshForm.refreshTokenKey.trim(),
+                    sendToken: refreshForm.sendToken,
+                    accessTokenJsonPath: refreshForm.accessTokenJsonPath.trim(),
+                    refreshTokenJsonPath: refreshForm.refreshTokenJsonPath.trim() || undefined,
+                  }
+                : {}),
+            };
+      const updated = await api.setAuthProfileRefresh(projectId, refreshProfileId, refresh);
+      setProfiles((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setRefreshProfileId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save refresh settings");
+    } finally {
+      setSavingRefresh(false);
     }
   }
 
@@ -184,8 +268,21 @@ export function ProjectAuthProfilesPage() {
                   <p className={`mt-1 text-xs ${sessionToneClass(profile.sessionStatus)}`}>
                     {sessionLabel(profile)}
                   </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {profile.hasCredentials
+                      ? `Credentials configured${profile.username ? ` (${profile.username})` : ""} — TestFlow can sign in automatically`
+                      : "No credentials stored — automatic sign-in unavailable"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {profile.refresh
+                      ? `Refresh configured (${profile.refresh.strategy})`
+                      : "No refresh configured"}
+                  </p>
                 </div>
                 <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => openRefresh(profile)}>
+                    Refresh
+                  </Button>
                   <Button
                     type="button"
                     variant={profile.needsRenewal ? "primary" : "outline"}
@@ -239,8 +336,149 @@ export function ProjectAuthProfilesPage() {
             onChange={(e) => setForm((current) => ({ ...current, loginUrl: e.target.value }))}
             placeholder="https://example.com/login"
           />
+          <Input
+            label="Username or email"
+            value={form.username ?? ""}
+            onChange={(e) => setForm((current) => ({ ...current, username: e.target.value }))}
+            placeholder="qa.user@example.com"
+          />
+          <Input
+            label="Password"
+            type="password"
+            value={form.password ?? ""}
+            onChange={(e) => setForm((current) => ({ ...current, password: e.target.value }))}
+            placeholder="••••••••"
+          />
           <p className="text-xs text-slate-500">
-            Playwright will open this URL. Log in, then close the Inspector to save cookies and storage.
+            Credentials are encrypted before they are stored and are never shown again. TestFlow
+            uses them to sign in automatically when a saved session stops working, so Run Test
+            never needs you to log in manually.
+          </p>
+          <p className="text-xs text-slate-500">
+            Playwright will open the login URL. Log in, then close the Inspector to save cookies and storage.
+          </p>
+        </form>
+      </Modal>
+
+      <Modal
+        open={refreshProfileId !== null}
+        onClose={() => setRefreshProfileId(null)}
+        title="Refresh settings"
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setRefreshProfileId(null)}>Cancel</Button>
+            <Button type="submit" form="auth-refresh-form" loading={savingRefresh} disabled={savingRefresh}>
+              Save refresh
+            </Button>
+          </>
+        }
+      >
+        <form id="auth-refresh-form" onSubmit={submitRefresh} className="space-y-4">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Strategy</span>
+            <select
+              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+              value={refreshForm.strategy}
+              onChange={(e) =>
+                setRefreshForm((current) => ({
+                  ...current,
+                  strategy: e.target.value as RefreshForm["strategy"],
+                }))
+              }
+            >
+              <option value="">Off — use saved session, then credentials</option>
+              <option value="cookie">Cookie session</option>
+              <option value="localStorage">localStorage tokens</option>
+            </select>
+          </label>
+          {refreshForm.strategy !== "" && (
+            <>
+              <Input
+                label="Refresh URL"
+                required
+                value={refreshForm.url}
+                onChange={(e) => setRefreshForm((current) => ({ ...current, url: e.target.value }))}
+                placeholder="https://example.com/api/auth/refresh"
+              />
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Method</span>
+                <select
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  value={refreshForm.method}
+                  onChange={(e) =>
+                    setRefreshForm((current) => ({
+                      ...current,
+                      method: e.target.value === "GET" ? "GET" : "POST",
+                    }))
+                  }
+                >
+                  <option value="POST">POST</option>
+                  <option value="GET">GET</option>
+                </select>
+              </label>
+            </>
+          )}
+          {refreshForm.strategy === "localStorage" && (
+            <>
+              <Input
+                label="Origin"
+                value={refreshForm.origin}
+                onChange={(e) => setRefreshForm((current) => ({ ...current, origin: e.target.value }))}
+                placeholder="https://example.com"
+              />
+              <Input
+                label="Access token key"
+                required
+                value={refreshForm.accessTokenKey}
+                onChange={(e) => setRefreshForm((current) => ({ ...current, accessTokenKey: e.target.value }))}
+                placeholder="Name of the localStorage key"
+              />
+              <Input
+                label="Refresh token key"
+                required
+                value={refreshForm.refreshTokenKey}
+                onChange={(e) => setRefreshForm((current) => ({ ...current, refreshTokenKey: e.target.value }))}
+                placeholder="Name of the localStorage key"
+              />
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Send</span>
+                <select
+                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+                  value={refreshForm.sendToken}
+                  onChange={(e) =>
+                    setRefreshForm((current) => ({
+                      ...current,
+                      sendToken: e.target.value === "accessToken" ? "accessToken" : "refreshToken",
+                    }))
+                  }
+                >
+                  <option value="refreshToken">Refresh token key</option>
+                  <option value="accessToken">Access token key</option>
+                </select>
+              </label>
+              <Input
+                label="Access token JSON path"
+                required
+                value={refreshForm.accessTokenJsonPath}
+                onChange={(e) =>
+                  setRefreshForm((current) => ({ ...current, accessTokenJsonPath: e.target.value }))
+                }
+                placeholder="accessToken"
+              />
+              <Input
+                label="Refresh token JSON path"
+                value={refreshForm.refreshTokenJsonPath}
+                onChange={(e) =>
+                  setRefreshForm((current) => ({ ...current, refreshTokenJsonPath: e.target.value }))
+                }
+                placeholder="refreshToken"
+              />
+            </>
+          )}
+          <p className="text-xs text-slate-500">
+            These fields name the endpoint and the storage keys. Token values and passwords stay out of
+            this configuration. When a saved session fails, TestFlow calls this refresh, and only then
+            the encrypted credentials.
           </p>
         </form>
       </Modal>

@@ -27,6 +27,8 @@ services:
       USE_DEMO_DATA: ${USE_DEMO_DATA:-true}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Encrypts Auth Profile credentials at rest. Never commit this value.
+      TESTFLOW_SECRET_KEY: ${TESTFLOW_SECRET_KEY:-}
       # Headed Playwright codegen runs on the Windows host (host_recorder_main.py).
       RECORDING_DELEGATE_URL: http://host.docker.internal:8765
     extra_hosts:
@@ -49,6 +51,7 @@ services:
       USE_DEMO_DATA: ${USE_DEMO_DATA:-true}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      TESTFLOW_SECRET_KEY: ${TESTFLOW_SECRET_KEY:-}
     volumes:
       - ./automation:/app/automation
       - ./tests:/app/tests
