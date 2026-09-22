@@ -98,6 +98,20 @@ function statusLabel(testCase: TestCaseSummary): string {
 
 
 
+function authProfileLabel(profile: AuthProfileSummary): string {
+
+  if (!profile.hasStorageState) return `${profile.name} (no session)`;
+
+  if (profile.sessionStatus === "expired") return `${profile.name} (session expired)`;
+
+  if (profile.sessionStatus === "expiring") return `${profile.name} (session expiring)`;
+
+  return profile.name;
+
+}
+
+
+
 export function TestCaseDetailPage() {
 
   const { id: projectId = "", caseId: testCaseId = "" } = useParams();
@@ -161,6 +175,8 @@ export function TestCaseDetailPage() {
 
 
   const hasScript = Boolean(testCase?.testFile);
+
+  const selectedAuthProfile = authProfiles.find((profile) => profile.id === authProfileId);
 
 
 
@@ -808,11 +824,21 @@ export function TestCaseDetailPage() {
                         { value: "", label: "None" },
                         ...authProfiles.map((profile) => ({
                           value: profile.id,
-                          label: profile.hasStorageState ? profile.name : `${profile.name} (no session)`,
+                          label: authProfileLabel(profile),
                         })),
                       ]}
 
                     />
+
+                    {selectedAuthProfile?.needsRenewal && (
+                      <p className="mt-1 text-xs text-amber-700">
+                        This session is expired or expiring. Renew it on the{" "}
+                        <Link to={`/projects/${projectId}/auth-profiles`} className="underline">
+                          Auth Profiles
+                        </Link>{" "}
+                        page before recording or running.
+                      </p>
+                    )}
 
                   </dd>
 

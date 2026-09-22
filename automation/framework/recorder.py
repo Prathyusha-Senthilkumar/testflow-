@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -135,10 +136,13 @@ The detailed browser actions are stored in the generated Playwright test script 
         save_file.parent.mkdir(parents=True, exist_ok=True)
         browser = browser or self.settings.get("browser", "chromium")
         save_arg = save_file.as_posix()
+        # Renewal writes to a pending file so an abandoned login keeps the current session.
+        pending_file = save_file.with_name(f"{save_file.stem}.pending{save_file.suffix}")
+        pending_file.unlink(missing_ok=True)
         command = build_codegen_command(
             browser=browser,
             url=url,
-            save_storage=save_arg,
+            save_storage=pending_file.as_posix(),
         )
 
         log_path = save_file.parent / "_codegen_login_last_run.log"
@@ -157,9 +161,11 @@ The detailed browser actions are stored in the generated Playwright test script 
 
         result = subprocess.run(command, **self._codegen_run_kwargs())
 
-        if save_file.is_file() and save_file.stat().st_size > 0:
+        if pending_file.is_file() and pending_file.stat().st_size > 0:
+            os.replace(pending_file, save_file)
             return 0, None
 
+        pending_file.unlink(missing_ok=True)
         log_text = (
             f"Playwright codegen exited with code {result.returncode}. "
             f"No storage state was written to {save_arg}. "

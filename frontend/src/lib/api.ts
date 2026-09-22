@@ -250,12 +250,18 @@ export type AuthProfileInput = {
   loginUrl?: string;
 };
 
+export type AuthSessionStatus = "none" | "active" | "expiring" | "expired";
+
 export type AuthProfileSummary = {
   id: string;
   projectId: string;
   name: string;
   loginUrl: string;
   hasStorageState: boolean;
+  sessionStatus: AuthSessionStatus;
+  sessionRecordedAt: string | null;
+  sessionExpiresAt: string | null;
+  needsRenewal: boolean;
   createdAt: string;
 };
 
