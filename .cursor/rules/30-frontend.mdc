@@ -1,0 +1,61 @@
+---
+description: Next.js design system, component structure, data fetching and Storybook rules
+globs: frontend/src/**/*.tsx,frontend/src/**/*.ts,frontend/src/**/*.css
+alwaysApply: false
+---
+
+# Frontend rules
+
+## One component per screen
+
+Before creating a page component, check whether one already exists. This repo has duplicate
+pairs such as `src/views/DashboardPage.tsx` and `src/views/dashboard/DashboardPage.tsx` that
+drifted apart, with the route importing only one of them. Edit the file the route imports.
+Do not add a parallel `src/pages/` tree; App Router routes live in `src/app/`.
+
+## Data fetching
+
+All backend calls go through `src/lib/api.ts`. No `fetch` to the API from a component.
+
+Every request must **settle**. A request that can hang leaves the UI stuck on a loading
+placeholder with no error, which is worse than a visible failure. Guard anything awaited before
+the fetch, give it a timeout, and surface failures. This has already happened: in demo mode the
+API client awaits a Supabase session that never resolves, so every page loads forever and shows
+no error.
+
+When `isSupabaseConfigured` is false the app is in demo mode. Demo mode must not block requests
+to the backend.
+
+## Design system, not pages
+
+Build primitives in `src/components/ui/` and compose them. Button, Input, Select, Modal, Tabs,
+Drawer, Table, Badge. Domain components under `src/components/<area>/`. A page assembles
+existing primitives; it does not restyle its own buttons.
+
+- Tailwind utilities for layout and routine styling.
+- Cascade layers to keep intent explicit: `@layer properties, base, components, utilities`.
+- Semantic tokens as CSS variables, for example `--semantic-border-primary` and
+  `--semantic-background-ground`. Components consume tokens, never raw hex values.
+- Dark theme switches at the root with `data-theme="dark"`. No ad-hoc dark overrides in
+  components.
+- Icons come from `lucide-react`.
+
+## Visual quality
+
+Quiet and dense. Restrained colour, subtle borders, deliberate whitespace. Reserve strong
+emphasis for failures, primary actions and important state. Define typography in tokens.
+Polish every state: default, hover, focus-visible, active, disabled, loading, error, empty,
+success. Animations communicate state change and stay fast.
+
+## Storybook is required
+
+Every reusable primitive has a story before or with its production use, covering meaningful
+states rather than the default alone. For interactive primitives that means Default, Disabled,
+Loading, Error and Empty where relevant. A run status badge needs Queued, Running, Passed,
+Failed and Cancelled.
+
+## No business logic in components
+
+Components render and dispatch. Rules, permission decisions and data shaping live outside them.
+Use `next/dynamic` for genuinely heavy client-only components rather than making the whole app a
+client bundle.
