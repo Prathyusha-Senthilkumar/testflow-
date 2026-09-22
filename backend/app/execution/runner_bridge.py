@@ -21,17 +21,42 @@ def _resolve_config_path(config_path: str) -> Path:
     return candidate
 
 
+def _extract_failure_message(output: str) -> Optional[str]:
+    """Pull the assertion / Playwright error out of pytest output for the UI."""
+    if not output:
+        return None
+    lines = [line.rstrip() for line in output.splitlines()]
+
+    for marker in ("AssertionError", "Error:", "error:"):
+        for position, line in enumerate(lines):
+            if marker in line:
+                block: list[str] = []
+                for candidate in lines[position : position + 6]:
+                    stripped = candidate.strip()
+                    if not stripped:
+                        continue
+                    if stripped.startswith("===") or stripped.startswith("---"):
+                        break
+                    block.append(candidate.lstrip("E ").strip())
+                message = "\n".join(block).strip()
+                if message:
+                    return message[:1500]
+
+    tail = "\n".join(line for line in lines if line.strip())[-1500:]
+    return tail or None
+
+
 def _run_testflow_harness(
     root: Path,
     settings: dict,
     case_dir: Path,
     headed: Optional[bool],
-) -> int:
+) -> tuple[int, Optional[str]]:
     from automation.framework.runner import TestRunner
 
     harness_path = (root / "automation" / "framework" / "testflow_harness.py").resolve()
     if not harness_path.is_file():
-        return 2
+        return 2, "TestFlow harness file is missing."
 
     # Match automation_service.run_test_case_script: playback is headless (no display in worker).
     runner = TestRunner(root, settings)
@@ -45,12 +70,23 @@ def _run_testflow_harness(
             cwd=root,
             timeout=timeout_seconds,
             env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
-        return int(result.returncode)
     except subprocess.TimeoutExpired:
-        return 124
-    except OSError:
-        return 1
+        return 124, f"Test exceeded the execution limit of {timeout_seconds} seconds."
+    except OSError as exc:
+        return 1, str(exc)
+
+    combined = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
+    # Keep worker logs useful for debugging.
+    if combined.strip():
+        print(combined)
+    if result.returncode == 0:
+        return 0, None
+    return int(result.returncode), _extract_failure_message(combined)
 
 
 def execute_test_case_config(
@@ -86,14 +122,18 @@ def execute_test_case_config(
                 "test_file_location": None,
                 "test_case_location": None,
                 "validation_errors": errors,
+                "error_message": "; ".join(errors),
             }
-        return_code = _run_testflow_harness(root, settings, case_dir, headed=None)
+        return_code, failure_message = _run_testflow_harness(
+            root, settings, case_dir, headed=None
+        )
         from automation.framework.result_handler import update_result
 
         status = "Pass" if return_code == 0 else "Fail"
         update_result(config_file, data, status, return_code)
     else:
         return_code = runner.run(config_file, confirm=False, headed=False)
+        failure_message = None
 
     if return_code == 2:
         _, errors = runner.validate(config_file)
@@ -106,6 +146,7 @@ def execute_test_case_config(
             "test_file_location": None,
             "test_case_location": None,
             "validation_errors": errors,
+            "error_message": "; ".join(errors) if errors else failure_message,
         }
 
     data = load_config(config_file)
@@ -119,4 +160,5 @@ def execute_test_case_config(
         "test_file_location": data.get("test_file_location"),
         "test_case_location": data.get("test_case_location"),
         "validation_errors": None,
+        "error_message": None if return_code == 0 else failure_message,
     }

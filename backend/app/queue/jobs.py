@@ -36,6 +36,7 @@ def run_test_case_job(config_path: str, headed: Optional[bool] = None) -> dict[s
     started = time.perf_counter()
     result = execute_test_case_config(config_path, headed=headed)
     duration_ms = int((time.perf_counter() - started) * 1000)
+    result["duration_ms"] = duration_ms
 
     if job_id:
         try:
@@ -46,7 +47,7 @@ def run_test_case_job(config_path: str, headed: Optional[bool] = None) -> dict[s
                 error = (
                     "; ".join(errors)
                     if errors
-                    else f"pytest return code {result.get('pytest_return_code')}"
+                    else result.get("error_message") or "The test did not pass."
                 )
             test_run_repository.mark_result(job_id, status, duration_ms, error)
         except Exception:  # pragma: no cover - persistence is best-effort

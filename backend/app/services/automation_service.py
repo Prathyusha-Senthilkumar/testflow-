@@ -102,19 +102,24 @@ def run_playwright_recording(
         )
 
 
-def _record_via_delegate(
-    delegate_base: str,
-    title: str,
-    start_url: str,
-    relative_output: str,
-    load_storage: str | None = None,
-) -> None:
-    body: dict = {"title": title, "url": start_url, "output": relative_output}
-    if load_storage:
-        # Auth Profile session reuse; forwarded so the host recorder can apply it.
-        body["loadStorage"] = load_storage
+def _repo_relative(path: str | Path) -> str:
+    """Repo-relative POSIX path, so container paths translate to the host repo."""
+    candidate = Path(str(path).replace("\\", "/"))
+    if not candidate.is_absolute():
+        return candidate.as_posix()
+    try:
+        return candidate.resolve().relative_to(_REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Recording paths must stay inside the TestFlow project directory.",
+        ) from None
+
+
+def _post_to_delegate(delegate_base: str, endpoint: str, body: dict) -> dict:
+    """Single transport for host-recorder delegation (codegen needs a desktop GUI)."""
     payload = json.dumps(body).encode("utf-8")
-    url = f"{delegate_base.rstrip('/')}/record"
+    url = f"{delegate_base.rstrip('/')}/{endpoint.lstrip('/')}"
     request = urllib.request.Request(
         url,
         data=payload,
@@ -123,7 +128,7 @@ def _record_via_delegate(
     )
     try:
         with urllib.request.urlopen(request, timeout=60 * 60) as response:
-            body = json.loads(response.read().decode("utf-8"))
+            result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
             err_payload = json.loads(exc.read().decode("utf-8"))
@@ -142,8 +147,23 @@ def _record_via_delegate(
             ),
         ) from exc
 
-    if not body.get("ok"):
-        raise HTTPException(status_code=400, detail=body.get("detail") or "Host recording failed.")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("detail") or "Host recording failed.")
+    return result
+
+
+def _record_via_delegate(
+    delegate_base: str,
+    title: str,
+    start_url: str,
+    relative_output: str,
+    load_storage: str | None = None,
+) -> None:
+    body: dict = {"title": title, "url": start_url, "output": relative_output}
+    if load_storage:
+        # Auth Profile session reuse; sent repo-relative so the host can resolve it.
+        body["loadStorage"] = _repo_relative(load_storage)
+    _post_to_delegate(delegate_base, "record", body)
 
 
 def record_test_case(
@@ -185,19 +205,41 @@ def write_test_script(test_file: str, content: str) -> str:
     return test_file.replace("\\", "/")
 
 
-def record_auth_profile_login(login_url: str, save_path: Path) -> None:
+def run_playwright_login_recording(login_url: str, save_path: str | Path) -> None:
+    """Interactive login capture on this machine (host dev recorder or local API)."""
     _ensure_playwright_browser_available()
-    settings = load_framework_config(_REPO_ROOT)
-    recorder = PlaywrightRecorder(_REPO_ROOT, settings)
+    framework_settings = load_framework_config(_REPO_ROOT)
+    recorder = PlaywrightRecorder(_REPO_ROOT, framework_settings)
     exit_code, error_detail = recorder.record_storage_state(
         url=login_url,
         save_path=save_path,
-        browser=settings.get("browser", "chromium"),
+        browser=framework_settings.get("browser", "chromium"),
     )
     if exit_code != 0:
         raise HTTPException(
             status_code=400,
             detail=error_detail or "Login recording did not save a session.",
+        )
+
+
+def record_auth_profile_login(login_url: str, save_path: Path) -> None:
+    """Capture an authenticated Playwright storage state for an Auth Profile.
+
+    Codegen needs a desktop GUI, so this uses the same host-recorder delegation
+    as Record Test when RECORDING_DELEGATE_URL is configured.
+    """
+    relative_save = _repo_relative(save_path)
+    delegate = _recording_delegate_url()
+    if delegate:
+        _post_to_delegate(delegate, "record-login", {"url": login_url, "savePath": relative_save})
+    else:
+        run_playwright_login_recording(login_url, relative_save)
+
+    saved_path = (_REPO_ROOT / relative_save).resolve()
+    if not saved_path.is_file() or saved_path.stat().st_size == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Login recording finished but no session file was saved.",
         )
 
 

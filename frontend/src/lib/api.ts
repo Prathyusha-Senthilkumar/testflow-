@@ -53,6 +53,8 @@ export type ExecutionResultPayload = {
   testFileLocation?: string | null;
   testCaseLocation?: string | null;
   validationErrors?: string[] | null;
+  errorMessage?: string | null;
+  durationMs?: number | null;
 };
 
 export type ExecutionStatus = {

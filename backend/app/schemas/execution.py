@@ -35,6 +35,8 @@ class ExecutionResultPayload(BaseModel):
     test_file_location: Optional[str] = Field(None, alias="testFileLocation")
     test_case_location: Optional[str] = Field(None, alias="testCaseLocation")
     validation_errors: Optional[list[str]] = Field(None, alias="validationErrors")
+    error_message: Optional[str] = Field(None, alias="errorMessage")
+    duration_ms: Optional[int] = Field(None, alias="durationMs")
 
 
 class ExecutionStatusResponse(BaseModel):

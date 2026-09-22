@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { CirclePlay, Code2, History, Mic, Play } from "lucide-react";
 
-import { Link, useNavigate, useParams } from "@/lib/navigation";
+import { Link, useParams } from "@/lib/navigation";
 
 import { Button } from "@/components/ui/button";
 
@@ -58,6 +58,30 @@ function resolveExpectedResult(data: TestCaseSummary): string {
 
 
 
+const RUN_POLL_MS = 2000;
+
+
+
+/** Waits for the queued run to finish, reporting tester-facing progress only. */
+
+async function waitForExecution(jobId: string, onPhase: (phase: string) => void) {
+
+  for (;;) {
+
+    const status = await api.getExecution(jobId);
+
+    if (status.state === "completed" || status.state === "failed") return status;
+
+    onPhase(status.state === "running" ? "Running test..." : "Preparing test...");
+
+    await new Promise((resolve) => setTimeout(resolve, RUN_POLL_MS));
+
+  }
+
+}
+
+
+
 function statusLabel(testCase: TestCaseSummary): string {
 
   if (testCase.isDraft && (testCase.publishedVersion ?? 0) === 0) return "Draft";
@@ -77,7 +101,6 @@ function statusLabel(testCase: TestCaseSummary): string {
 export function TestCaseDetailPage() {
 
   const { id: projectId = "", caseId: testCaseId = "" } = useParams();
-  const navigate = useNavigate();
 
   const [testCase, setTestCase] = useState<TestCaseSummary | null>(null);
 
@@ -112,6 +135,8 @@ export function TestCaseDetailPage() {
   const [error, setError] = useState("");
 
   const [lastResult, setLastResult] = useState<TestRunResult | null>(null);
+
+  const [runPhase, setRunPhase] = useState("");
 
 
 
@@ -415,6 +440,8 @@ export function TestCaseDetailPage() {
 
     setLastResult(null);
 
+    setRunPhase("Preparing test...");
+
     try {
 
       const updated = await api.updateTestCase(projectId, testCaseId, {
@@ -455,7 +482,21 @@ export function TestCaseDetailPage() {
 
       });
 
-      navigate(`/projects/${projectId}/runs/${execution.jobId}/live`);
+      const finished = await waitForExecution(execution.jobId, setRunPhase);
+
+      setRunPhase("Retrieving result...");
+
+      const payload = finished.result;
+
+      setLastResult({
+
+        status: finished.state === "completed" && payload?.success ? "Passed" : "Failed",
+
+        duration: (payload?.durationMs ?? 0) / 1000,
+
+        error: payload?.errorMessage ?? finished.error ?? null,
+
+      });
 
     } catch (err) {
 
@@ -464,6 +505,8 @@ export function TestCaseDetailPage() {
     } finally {
 
       setRunning(false);
+
+      setRunPhase("");
 
     }
 
@@ -727,9 +770,7 @@ export function TestCaseDetailPage() {
 
             <div className="rounded-xl border border-slate-100 p-5">
 
-              <h2 className="font-semibold">ARRANGE</h2>
-
-              <dl className="mt-4 space-y-3 text-sm">
+              <dl className="space-y-3 text-sm">
 
                 <div>
 
@@ -859,9 +900,7 @@ export function TestCaseDetailPage() {
 
             <div className="rounded-xl border border-slate-100 p-5">
 
-              <h2 className="font-semibold">ASSERT</h2>
-
-              <div className="mt-4">
+              <div>
 
                 <Input
 
@@ -899,7 +938,17 @@ export function TestCaseDetailPage() {
 
             </h2>
 
-            {!lastResult ? (
+            {running || runPhase ? (
+
+              <p className="mt-4 flex items-center gap-2 text-sm font-medium text-indigo-700">
+
+                <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-600" />
+
+                {runPhase || "Preparing test..."}
+
+              </p>
+
+            ) : !lastResult ? (
 
               <p className="mt-4 text-sm text-slate-500">Run the test to see pass/fail here.</p>
 

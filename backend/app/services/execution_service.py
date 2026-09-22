@@ -47,6 +47,8 @@ def _result_payload(raw: Any) -> Optional[ExecutionResultPayload]:
         test_file_location=raw.get("test_file_location"),
         test_case_location=raw.get("test_case_location"),
         validation_errors=raw.get("validation_errors"),
+        error_message=raw.get("error_message"),
+        duration_ms=raw.get("duration_ms"),
     )
 
 
@@ -59,7 +61,8 @@ def _job_error_message(job: Job) -> Optional[str]:
         if errors:
             return "; ".join(errors)
         if not payload.get("success"):
-            return f"Test execution failed with pytest return code {payload.get('pytest_return_code')}"
+            # Prefer the real assertion / Playwright message over the exit code.
+            return payload.get("error_message") or "The test did not pass."
     return None
 
 
