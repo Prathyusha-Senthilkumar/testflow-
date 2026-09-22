@@ -30,6 +30,8 @@ import {
 
   type EnvironmentSummary,
 
+  type AuthProfileSummary,
+
   type TestCaseSummary,
 
   type TestCaseVersionDetail,
@@ -81,7 +83,11 @@ export function TestCaseDetailPage() {
 
   const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
 
+  const [authProfiles, setAuthProfiles] = useState<AuthProfileSummary[]>([]);
+
   const [environmentId, setEnvironmentId] = useState<string>("env-default");
+
+  const [authProfileId, setAuthProfileId] = useState<string>("");
 
   const [startPath, setStartPath] = useState("/");
 
@@ -141,15 +147,19 @@ export function TestCaseDetailPage() {
 
     setError("");
 
-    Promise.all([api.testCase(projectId, testCaseId), api.environments(projectId)])
+    Promise.all([api.testCase(projectId, testCaseId), api.environments(projectId), api.authProfiles(projectId)])
 
-      .then(([data, envs]) => {
+      .then(([data, envs, profiles]) => {
 
         setEnvironments(envs);
+
+        setAuthProfiles(profiles);
 
         setTestCase(data);
 
         setEnvironmentId(data.environmentId ?? envs[0]?.id ?? "env-default");
+
+        setAuthProfileId(data.authProfileId ?? "");
 
         setStartPath(data.startPath ?? "/");
 
@@ -207,6 +217,8 @@ export function TestCaseDetailPage() {
 
         environmentId,
 
+        authProfileId: authProfileId || null,
+
         startPath,
 
         expectedResult: expectedResult.trim() || null,
@@ -220,6 +232,8 @@ export function TestCaseDetailPage() {
       setTestCase(updated);
 
       setEnvironmentId(updated.environmentId ?? environmentId);
+
+      setAuthProfileId(updated.authProfileId ?? "");
 
       setStartPath(updated.startPath ?? "/");
 
@@ -347,6 +361,22 @@ export function TestCaseDetailPage() {
 
     try {
 
+      await api.updateTestCase(projectId, testCaseId, {
+
+        environmentId,
+
+        authProfileId: authProfileId || null,
+
+        startPath,
+
+        expectedResult: expectedResult.trim() || null,
+
+        category,
+
+        scenario,
+
+      });
+
       const updated = await api.recordTestCase(projectId, testCaseId);
 
       setTestCase(updated);
@@ -390,6 +420,8 @@ export function TestCaseDetailPage() {
       const updated = await api.updateTestCase(projectId, testCaseId, {
 
         environmentId,
+
+        authProfileId: authProfileId || null,
 
         startPath,
 
@@ -712,6 +744,32 @@ export function TestCaseDetailPage() {
                       onChange={setEnvironmentId}
 
                       options={environments.map((env) => ({ value: env.id, label: env.name }))}
+
+                    />
+
+                  </dd>
+
+                </div>
+
+                <div>
+
+                  <dt className="mb-1 text-slate-500">Auth profile</dt>
+
+                  <dd>
+
+                    <Select
+
+                      value={authProfileId}
+
+                      onChange={setAuthProfileId}
+
+                      options={[
+                        { value: "", label: "None" },
+                        ...authProfiles.map((profile) => ({
+                          value: profile.id,
+                          label: profile.hasStorageState ? profile.name : `${profile.name} (no session)`,
+                        })),
+                      ]}
 
                     />
 

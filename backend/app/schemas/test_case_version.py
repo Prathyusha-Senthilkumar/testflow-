@@ -19,6 +19,7 @@ class TestCaseVersionDetail(TestCaseVersionSummary):
     category: TestCaseCategory
     scenario: TestCaseScenario
     environmentId: Optional[str] = None
+    authProfileId: Optional[str] = None
     startPath: str
     expectedResult: Optional[str] = None
     testFile: Optional[str] = None

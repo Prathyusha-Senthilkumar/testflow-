@@ -132,7 +132,7 @@ export function ProjectOverviewPage() {
           )}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             onClick={() => setEditOpen(true)}
@@ -140,6 +140,18 @@ export function ProjectOverviewPage() {
             <Settings2 size={16} />
             Edit Project
           </Button>
+
+          <Link to={`/projects/${project.id}/environments`}>
+            <Button variant="outline" type="button">
+              Environments
+            </Button>
+          </Link>
+
+          <Link to={`/projects/${project.id}/auth-profiles`}>
+            <Button variant="outline" type="button">
+              Auth Profiles
+            </Button>
+          </Link>
 
           <Button
             disabled={project.cases === 0}

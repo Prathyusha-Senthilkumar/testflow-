@@ -30,6 +30,10 @@ function Breadcrumbs(){
       crumbs.push({label:'Test Suites',to:`/projects/${parts[1]}/suites`});
       if(parts[3]==='review') crumbs.push({label:'Review Suggestions'});
       else if(parts[3]) crumbs.push({label:suites.find(s=>s.id===parts[3])?.name || parts[3]});
+    } else if(parts[2]==='environments'){
+      crumbs.push({label:'Environments'});
+    } else if(parts[2]==='auth-profiles'){
+      crumbs.push({label:'Auth Profiles'});
     } else if(parts[2]==='runs'){
       crumbs.push({label:'Live Execution'});
     } else if(parts[2]==='results'){

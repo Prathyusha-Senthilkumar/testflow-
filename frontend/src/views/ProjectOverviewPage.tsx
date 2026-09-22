@@ -88,6 +88,9 @@ export function ProjectOverviewPage() {
             <Link to={`/projects/${project.id}/environments`} className="rounded-lg border bg-white px-4 py-2 text-sm font-medium">
               Environments
             </Link>
+            <Link to={`/projects/${project.id}/auth-profiles`} className="rounded-lg border bg-white px-4 py-2 text-sm font-medium">
+              Auth Profiles
+            </Link>
             <Link to={`/projects/${project.id}/test-cases`} className="rounded-lg border bg-white px-4 py-2 text-sm font-medium">
               View Test Cases
             </Link>

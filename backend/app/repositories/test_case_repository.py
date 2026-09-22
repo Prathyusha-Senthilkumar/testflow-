@@ -114,6 +114,7 @@ class TestCaseRepository:
                 testFile=None,
                 startPath="/",
                 environmentId=DEFAULT_ENVIRONMENT_ID,
+                authProfileId=None,
                 expectedResult=None,
                 isDraft=True,
                 publishedVersion=0,
@@ -200,6 +201,9 @@ class TestCaseRepository:
                         updates["scenario"] = input_dto.scenario
                     if input_dto.environmentId is not None:
                         updates["environmentId"] = input_dto.environmentId
+                    if "authProfileId" in input_dto.model_fields_set:
+                        profile_id = (input_dto.authProfileId or "").strip() or None
+                        updates["authProfileId"] = profile_id
                     updated = case.model_copy(update=updates)
                     cases[index] = updated
                     return updated
@@ -225,6 +229,14 @@ class TestCaseRepository:
             self.find_by_id(project_id, test_case_id)
             self.db.from_("test_cases").update(changes).eq("id", test_case_id).execute()
         return self.find_by_id(project_id, test_case_id)
+
+    def clear_auth_profile_refs(self, project_id: str, profile_id: str) -> None:
+        if not self.db:
+            cases = self.demo_cases.get(project_id, [])
+            for index, case in enumerate(cases):
+                if case.authProfileId == profile_id:
+                    cases[index] = case.model_copy(update={"authProfileId": None})
+            return
 
     def apply_publish_state(self, project_id: str, test_case_id: str, version_number: int) -> TestCaseSummary:
         if not self.db:
@@ -295,6 +307,7 @@ class TestCaseRepository:
             testFile=test_file,
             startPath=str(row.get("start_path") or "/"),
             environmentId=row.get("environment_id") or DEFAULT_ENVIRONMENT_ID,
+            authProfileId=row.get("auth_profile_id") or row.get("authProfileId"),
             expectedResult=expected_result,
             isDraft=bool(row.get("is_draft", True)),
             publishedVersion=int(row.get("published_version") or 0),

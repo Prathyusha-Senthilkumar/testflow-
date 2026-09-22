@@ -10,7 +10,14 @@ class PlaywrightRecorder:
         self.project_root = Path(project_root).resolve()
         self.settings = settings
 
-    def record(self, title: str, url: str, output: str, browser: str | None = None) -> tuple[int, str | None]:
+    def record(
+        self,
+        title: str,
+        url: str,
+        output: str,
+        browser: str | None = None,
+        load_storage: str | Path | None = None,
+    ) -> tuple[int, str | None]:
         output_path = (self.project_root / output).resolve()
         try:
             output_path.relative_to(self.project_root)
@@ -26,20 +33,15 @@ class PlaywrightRecorder:
 
         # Playwright CLI (Node) accepts forward slashes reliably on Windows.
         output_arg = output_path.as_posix()
+        load_storage_arg = self._storage_arg(load_storage)
 
-        command = [
-            sys.executable,
-            "-m",
-            "playwright",
-            "codegen",
-            "--browser",
-            browser,
-            "--target",
-            target,
-            "--output",
-            output_arg,
-            url,
-        ]
+        command = build_codegen_command(
+            browser=browser,
+            url=url,
+            target=target,
+            output=output_arg,
+            load_storage=load_storage_arg,
+        )
 
         log_path = output_path.parent / "_codegen_last_run.log"
         log_path.write_text(
@@ -56,21 +58,13 @@ class PlaywrightRecorder:
         print(f"  Target      : {target}")
         print(f"  Command     : {' '.join(command)}")
         print(f"  Output      : {output_arg}")
+        if load_storage_arg:
+            print(f"  Load storage: {load_storage_arg}")
         print(f"  CWD         : {self.project_root}")
         print("\nPlaywright Codegen will open a browser and Inspector.")
         print("Perform the actions you want to record, then close the Codegen window when finished.\n")
 
-        run_kwargs: dict = {
-            "cwd": self.project_root,
-            "stdin": subprocess.DEVNULL,
-            "shell": False,
-        }
-        if sys.platform == "win32":
-            # Visible Codegen UI on Windows when the API is started from a desktop session.
-            run_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
-
-        # Do not capture stdout/stderr — that can prevent the headed Codegen UI from opening.
-        result = subprocess.run(command, **run_kwargs)
+        result = subprocess.run(command, **self._codegen_run_kwargs())
 
         if output_path.is_file() and output_path.stat().st_size > 0:
             self._write_sidecar_files(title, url, output_path)
@@ -123,3 +117,102 @@ The detailed browser actions are stored in the generated Playwright test script 
         print(f"  - {relative_test}")
         print(f"  - {relative_md}")
         print(f"  - {data_path.relative_to(self.project_root).as_posix()}")
+
+    def record_storage_state(
+        self,
+        url: str,
+        save_path: str | Path,
+        browser: str | None = None,
+    ) -> tuple[int, str | None]:
+        save_file = Path(save_path)
+        if not save_file.is_absolute():
+            save_file = (self.project_root / save_file).resolve()
+        try:
+            save_file.relative_to(self.project_root)
+        except ValueError:
+            return 2, "Auth profile storage must stay inside the project directory."
+
+        save_file.parent.mkdir(parents=True, exist_ok=True)
+        browser = browser or self.settings.get("browser", "chromium")
+        save_arg = save_file.as_posix()
+        command = build_codegen_command(
+            browser=browser,
+            url=url,
+            save_storage=save_arg,
+        )
+
+        log_path = save_file.parent / "_codegen_login_last_run.log"
+        log_path.write_text(
+            "Playwright login capture\n"
+            f"command: {' '.join(command)}\n"
+            f"cwd: {self.project_root}\n"
+            f"save: {save_arg}\n",
+            encoding="utf-8",
+        )
+        print("\nAuth profile login recording:")
+        print(f"  Start URL   : {url}")
+        print(f"  Browser     : {browser}")
+        print(f"  Save storage: {save_arg}")
+        print("\nLog in using the Playwright window, then close the Inspector to save the session.\n")
+
+        result = subprocess.run(command, **self._codegen_run_kwargs())
+
+        if save_file.is_file() and save_file.stat().st_size > 0:
+            return 0, None
+
+        log_text = (
+            f"Playwright codegen exited with code {result.returncode}. "
+            f"No storage state was written to {save_arg}. "
+            "Close the Playwright Inspector window after logging in. "
+            f"Launch details: {log_path.as_posix()}"
+        )
+        print("\nLogin recording did not save a session.")
+        print(log_text)
+        return result.returncode or 1, log_text
+
+    def _codegen_run_kwargs(self) -> dict:
+        run_kwargs: dict = {
+            "cwd": self.project_root,
+            "stdin": subprocess.DEVNULL,
+            "shell": False,
+        }
+        if sys.platform == "win32":
+            run_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+        return run_kwargs
+
+    def _storage_arg(self, storage_path: str | Path | None) -> str | None:
+        if not storage_path:
+            return None
+        path = Path(storage_path)
+        if not path.is_absolute():
+            path = (self.project_root / path).resolve()
+        return path.as_posix()
+
+
+def build_codegen_command(
+    *,
+    browser: str,
+    url: str,
+    target: str | None = None,
+    output: str | None = None,
+    load_storage: str | None = None,
+    save_storage: str | None = None,
+) -> list[str]:
+    command = [
+        sys.executable,
+        "-m",
+        "playwright",
+        "codegen",
+        "--browser",
+        browser,
+    ]
+    if target:
+        command.extend(["--target", target])
+    if output:
+        command.extend(["--output", output])
+    if load_storage:
+        command.extend(["--load-storage", load_storage])
+    if save_storage:
+        command.extend(["--save-storage", save_storage])
+    command.append(url)
+    return command

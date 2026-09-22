@@ -23,6 +23,7 @@ class TestCaseSummary(BaseModel):
     automationStatus: str = Field(..., alias="automationStatus")
     testFile: Optional[str] = Field(None, alias="testFile")
     environmentId: Optional[str] = Field(default=None, alias="environmentId")
+    authProfileId: Optional[str] = Field(default=None, alias="authProfileId")
     startPath: str = Field(default="/", alias="startPath")
     resolvedStartUrl: Optional[str] = Field(default=None, alias="resolvedStartUrl")
     expectedResult: Optional[str] = Field(default=None, alias="expectedResult")
@@ -44,6 +45,7 @@ class UpdateTestCaseDto(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
     environmentId: Optional[str] = Field(None, alias="environmentId")
+    authProfileId: Optional[str] = Field(None, alias="authProfileId")
     startPath: Optional[str] = Field(None, alias="startPath")
     expectedResult: Optional[str] = Field(None, alias="expectedResult")
     category: Optional[TestCaseCategory] = None
