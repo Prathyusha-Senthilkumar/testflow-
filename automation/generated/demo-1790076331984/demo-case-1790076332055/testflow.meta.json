@@ -1,0 +1,10 @@
+{
+  "startPath": "/",
+  "environmentId": "env-default",
+  "authProfileId": "auth-1790076332042",
+  "resolvedStartUrl": "https://example.com/",
+  "assertions": [],
+  "expectedResult": null,
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}
