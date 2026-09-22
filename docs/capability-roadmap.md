@@ -31,6 +31,8 @@ scope and should be built as its reference implementation.
 
 ### 1. Storage / Cookies — S
 
+Designed in [ADR-014](adr/ADR-014-storage-and-cookies-capability.md).
+
 Seed and assert `localStorage`, `sessionStorage` and cookies. Steps: set cookie, clear cookies,
 set storage item, clear storage. Assertions: cookie equals, storage key present, storage value.
 All of it is Playwright `BrowserContext` API. No new infrastructure.
@@ -39,12 +41,16 @@ Watch: storage seeding overlaps auth profiles. Decide which owns session state b
 
 ### 2. Accessibility — S–M
 
+Designed in [ADR-016](adr/ADR-016-accessibility-capability.md).
+
 `@axe-core/playwright`, one assertion type (`a11y.noViolations` with a rule and impact filter),
 and a violations report artifact. The engineering is small. The **product** work is the report
 UI: a raw axe dump is unusable, so violations need grouping by rule with element highlighting.
 Watch: scoping by selector and a per-project rule baseline, or every legacy page fails forever.
 
 ### 3. Network resilience — M
+
+Designed in [ADR-015](adr/ADR-015-network-capability.md).
 
 Route interception, request mocking, abort and failure injection, offline mode, and throttling.
 Steps: mock route, abort route, delay route, go offline, set throttle profile. Assertions:
@@ -54,6 +60,8 @@ mocks are steps in the Act phase or run configuration applied in Arrange. Arrang
 better fit for the AAA model.
 
 ### 4. CI/CD — M
+
+Designed in [ADR-012](adr/ADR-012-cicd-and-run-api.md) and [ADR-017](adr/ADR-017-webhook-architecture.md), sequenced in [cicd-implementation-plan.md](cicd-implementation-plan.md).
 
 Fully designed in [ADR-012](adr/ADR-012-cicd-and-run-api.md). Public Run API, project tokens,
 CLI with meaningful exit codes, JUnit output, base-URL override for preview deployments.
