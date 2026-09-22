@@ -34,6 +34,50 @@ class TestRunRepository:
             return str(res.data[0]["id"])
         return None
 
+    def list_recent(self, limit: int = 50) -> list[dict]:
+        """Recent runs enriched with their test-case name/code (no new tables)."""
+        if not self.db:
+            return []
+        runs = (
+            self.db.from_("test_runs")
+            .select("*")
+            .order("started_at", desc=True)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        case_ids = list({str(run["test_case_id"]) for run in runs if run.get("test_case_id")})
+        cases: dict[str, dict] = {}
+        if case_ids:
+            rows = (
+                self.db.from_("test_cases")
+                .select("id,name,test_case_code")
+                .in_("id", case_ids)
+                .execute()
+                .data
+                or []
+            )
+            cases = {str(row["id"]): row for row in rows}
+
+        enriched: list[dict] = []
+        for run in runs:
+            case = cases.get(str(run.get("test_case_id"))) or {}
+            enriched.append(
+                {
+                    "id": str(run.get("id")),
+                    "testCaseId": run.get("test_case_id"),
+                    "testCaseCode": case.get("test_case_code"),
+                    "testName": case.get("name"),
+                    "status": str(run.get("status") or "Not Run"),
+                    "startedAt": run.get("started_at"),
+                    "completedAt": run.get("completed_at"),
+                    "durationMs": run.get("duration_ms"),
+                    "errorMessage": run.get("error_message"),
+                }
+            )
+        return enriched
+
     def mark_running(self, job_id: str) -> None:
         if not self.db:
             return

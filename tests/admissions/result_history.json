@@ -1,0 +1,10 @@
+[
+    {
+        "timestamp_utc": "2026-09-22T11:49:14.648681+00:00",
+        "title": "Example Domain smoke test",
+        "test_file_location": "tests/admissions/test_open_admissions.py",
+        "test_case_location": "tests/admissions/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    }
+]

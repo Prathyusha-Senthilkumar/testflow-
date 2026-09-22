@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import HTTPException
 
@@ -9,7 +9,12 @@ from app.repositories.test_case_repository import TestCaseRepository
 from app.repositories.test_case_version_repository import test_case_version_repository
 from app.repositories.environment_repository import environment_repository
 from app.repositories.auth_profile_repository import auth_profile_repository
-from app.schemas.test_case import TestCaseSummary, CreateTestCaseDto, UpdateTestCaseDto
+from app.schemas.test_case import (
+    CreateTestCaseDto,
+    StorageEntry,
+    TestCaseSummary,
+    UpdateTestCaseDto,
+)
 from app.schemas.test_case_version import TestCaseVersionDetail, TestCaseVersionSummary
 from app.schemas.test_run import TestRunResult
 from app.schemas.test_script import TestScriptDto, TestScriptResponse
@@ -27,7 +32,7 @@ from app.services.auth_profiles_service import AuthProfilesService
 if str(_REPO_ROOT) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(_REPO_ROOT))
 
-from automation.framework.testflow_meta import write_meta
+from automation.framework.testflow_meta import read_meta, write_meta
 from automation.framework.url_resolve import normalize_start_path
 
 
@@ -54,7 +59,8 @@ class TestCasesService:
         self._ensure_project_exists(project_id)
         test_case = self.test_cases.find_by_id(project_id, test_case_id)
         test_case = self._ensure_recorded_script_linked(project_id, test_case_id, test_case)
-        return self._attach_resolved_url(project_id, test_case)
+        test_case = self._attach_resolved_url(project_id, test_case)
+        return self._with_meta_config(project_id, test_case_id, test_case)
 
     def create(self, project_id: str, input_dto: CreateTestCaseDto) -> TestCaseSummary:
         self._ensure_project_exists(project_id)
@@ -78,6 +84,22 @@ class TestCasesService:
         if existing.publishedVersion > 0:
             updated = self.test_cases.mark_draft(project_id, test_case_id)
         updated = self._attach_resolved_url(project_id, updated)
+        fields_set = input_dto.model_fields_set
+        updated = self._with_meta_config(
+            project_id,
+            test_case_id,
+            updated,
+            seeds=input_dto.storageSeeds if "storageSeeds" in fields_set else None,
+            assertions=(
+                input_dto.storageAssertions if "storageAssertions" in fields_set else None
+            ),
+            accessibility_enabled=(
+                input_dto.accessibilityEnabled if "accessibilityEnabled" in fields_set else None
+            ),
+            network_check_enabled=(
+                input_dto.networkCheckEnabled if "networkCheckEnabled" in fields_set else None
+            ),
+        )
         self._sync_testflow_meta(project_id, test_case_id, updated)
         return updated
 
@@ -104,6 +126,7 @@ class TestCasesService:
         if updated.publishedVersion > 0:
             updated = self.test_cases.mark_draft(project_id, test_case_id)
         updated = self._attach_resolved_url(project_id, updated)
+        updated = self._with_meta_config(project_id, test_case_id, updated)
         self._sync_testflow_meta(project_id, test_case_id, updated)
         return updated
 
@@ -171,6 +194,7 @@ class TestCasesService:
         if updated.publishedVersion > 0:
             updated = self.test_cases.mark_draft(project_id, test_case_id)
         updated = self._attach_resolved_url(project_id, updated)
+        updated = self._with_meta_config(project_id, test_case_id, updated)
         self._sync_testflow_meta(project_id, test_case_id, updated)
         return updated
 
@@ -185,6 +209,7 @@ class TestCasesService:
             )
 
         test_case = self._attach_resolved_url(project_id, test_case)
+        test_case = self._with_meta_config(project_id, test_case_id, test_case)
         self._sync_testflow_meta(project_id, test_case_id, test_case)
 
         storage_state_path = None
@@ -242,6 +267,55 @@ class TestCasesService:
                 )
         return test_case
 
+    # ---- Storage / cookie configuration (persisted in testflow.meta.json) ----
+    @staticmethod
+    def _parse_storage_entries(raw) -> List[StorageEntry]:
+        entries: List[StorageEntry] = []
+        for item in raw or []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                entries.append(StorageEntry(**item))
+            except Exception:
+                continue
+        return entries
+
+    def _with_meta_config(
+        self,
+        project_id: str,
+        test_case_id: str,
+        test_case: TestCaseSummary,
+        seeds: Optional[List[StorageEntry]] = None,
+        assertions: Optional[List[StorageEntry]] = None,
+        accessibility_enabled: Optional[bool] = None,
+        network_check_enabled: Optional[bool] = None,
+    ) -> TestCaseSummary:
+        """Use explicitly supplied values, otherwise keep what is already stored."""
+        if (
+            seeds is None
+            or assertions is None
+            or accessibility_enabled is None
+            or network_check_enabled is None
+        ):
+            relative = test_case.testFile or relative_script_path(project_id, test_case_id)
+            meta = read_meta(_REPO_ROOT, relative)
+            if seeds is None:
+                seeds = self._parse_storage_entries(meta.get("storageSeeds"))
+            if assertions is None:
+                assertions = self._parse_storage_entries(meta.get("storageAssertions"))
+            if accessibility_enabled is None:
+                accessibility_enabled = bool(meta.get("accessibilityEnabled"))
+            if network_check_enabled is None:
+                network_check_enabled = bool(meta.get("networkCheckEnabled"))
+        return test_case.model_copy(
+            update={
+                "storageSeeds": seeds,
+                "storageAssertions": assertions,
+                "accessibilityEnabled": bool(accessibility_enabled),
+                "networkCheckEnabled": bool(network_check_enabled),
+            }
+        )
+
     def _attach_resolved_url(self, project_id: str, test_case: TestCaseSummary) -> TestCaseSummary:
         try:
             resolved = self.environments.resolve_start_url(
@@ -267,6 +341,10 @@ class TestCasesService:
             test_case.environmentId,
             test_case.expectedResult,
             test_case.authProfileId,
+            [entry.model_dump() for entry in test_case.storageSeeds],
+            [entry.model_dump() for entry in test_case.storageAssertions],
+            test_case.accessibilityEnabled,
+            test_case.networkCheckEnabled,
         )
 
     def _ensure_project_exists(self, project_id: str):

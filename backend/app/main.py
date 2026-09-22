@@ -12,6 +12,7 @@ from app.routers.test_cases import router as test_cases_router
 from app.routers.environments import router as environments_router
 from app.routers.test_suites import router as test_suites_router
 from app.routers.executions import router as executions_router
+from app.routers.test_runs import router as test_runs_router
 from app.routers.auth_profiles import router as auth_profiles_router
 
 app = FastAPI(
@@ -77,6 +78,7 @@ api_router.include_router(test_cases_router)
 api_router.include_router(environments_router)
 api_router.include_router(test_suites_router)
 api_router.include_router(executions_router)
+api_router.include_router(test_runs_router)
 api_router.include_router(auth_profiles_router)
 
 app.include_router(api_router)

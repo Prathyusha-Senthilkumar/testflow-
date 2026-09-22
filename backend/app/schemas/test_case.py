@@ -1,6 +1,18 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator
+
+StorageKind = Literal["localStorage", "sessionStorage", "cookie"]
+
+
+class StorageEntry(BaseModel):
+    """One localStorage/sessionStorage/cookie value to seed or assert."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    kind: StorageKind
+    key: str
+    value: str = ""
 
 from app.schemas.test_assertion import AssertionConfig
 from app.schemas.test_classification import (
@@ -27,6 +39,12 @@ class TestCaseSummary(BaseModel):
     startPath: str = Field(default="/", alias="startPath")
     resolvedStartUrl: Optional[str] = Field(default=None, alias="resolvedStartUrl")
     expectedResult: Optional[str] = Field(default=None, alias="expectedResult")
+    storageSeeds: List[StorageEntry] = Field(default_factory=list, alias="storageSeeds")
+    storageAssertions: List[StorageEntry] = Field(
+        default_factory=list, alias="storageAssertions"
+    )
+    accessibilityEnabled: bool = Field(default=False, alias="accessibilityEnabled")
+    networkCheckEnabled: bool = Field(default=False, alias="networkCheckEnabled")
     isDraft: bool = Field(default=True, alias="isDraft")
     publishedVersion: int = Field(default=0, alias="publishedVersion")
     assertions: List[AssertionConfig] = Field(default_factory=list)
@@ -51,6 +69,10 @@ class UpdateTestCaseDto(BaseModel):
     category: Optional[TestCaseCategory] = None
     scenario: Optional[TestCaseScenario] = None
     assertions: Optional[List[AssertionConfig]] = None
+    storageSeeds: Optional[List[StorageEntry]] = Field(None, alias="storageSeeds")
+    storageAssertions: Optional[List[StorageEntry]] = Field(None, alias="storageAssertions")
+    accessibilityEnabled: Optional[bool] = Field(None, alias="accessibilityEnabled")
+    networkCheckEnabled: Optional[bool] = Field(None, alias="networkCheckEnabled")
 
     @field_validator("assertions", mode="before")
     @classmethod

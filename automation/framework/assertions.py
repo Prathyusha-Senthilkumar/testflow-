@@ -3,6 +3,20 @@ import time
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 
+from automation.framework.browser_storage import (
+    COOKIE,
+    LOCAL_STORAGE,
+    SESSION_STORAGE,
+    assert_storage_entries,
+)
+
+# Storage assertion types usable from the meta `assertions` list.
+_STORAGE_ASSERTION_KINDS = {
+    "local_storage_equals": LOCAL_STORAGE,
+    "session_storage_equals": SESSION_STORAGE,
+    "cookie_equals": COOKIE,
+}
+
 _TEXT_TIMEOUT_MS = 10_000
 _MAX_MATCHES_CHECKED = 20
 
@@ -71,5 +85,16 @@ def run_assertions(page: Page, assertions: list[dict]) -> None:
                 )
         elif assertion_type == "text_visible":
             assert_text_present(page, value, index)
+        elif assertion_type in _STORAGE_ASSERTION_KINDS:
+            assert_storage_entries(
+                page,
+                [
+                    {
+                        "kind": _STORAGE_ASSERTION_KINDS[assertion_type],
+                        "key": assertion.get("key") or assertion.get("name") or "",
+                        "value": value,
+                    }
+                ],
+            )
         else:
             raise AssertionError(f"ASSERT [{index}]: unsupported assertion type '{assertion_type}'")

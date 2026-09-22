@@ -28,6 +28,14 @@ import {
 
   type TestCaseScenario,
 
+  STORAGE_KINDS,
+
+  type ScheduledExecution,
+
+  type StorageEntry,
+
+  type StorageKind,
+
   type EnvironmentSummary,
 
   type AuthProfileSummary,
@@ -152,6 +160,28 @@ export function TestCaseDetailPage() {
 
   const [runPhase, setRunPhase] = useState("");
 
+  const [storageSeeds, setStorageSeeds] = useState<StorageEntry[]>([]);
+
+  const [storageAssertions, setStorageAssertions] = useState<StorageEntry[]>([]);
+
+  const [storageMode, setStorageMode] = useState<"seed" | "assert">("seed");
+
+  const [storageKind, setStorageKind] = useState<StorageKind>("localStorage");
+
+  const [storageKey, setStorageKey] = useState("");
+
+  const [storageValue, setStorageValue] = useState("");
+
+  const [accessibilityEnabled, setAccessibilityEnabled] = useState(false);
+
+  const [networkCheckEnabled, setNetworkCheckEnabled] = useState(false);
+
+  const [scheduleAt, setScheduleAt] = useState("");
+
+  const [scheduling, setScheduling] = useState(false);
+
+  const [scheduled, setScheduled] = useState<ScheduledExecution[]>([]);
+
 
 
   const [scriptOpen, setScriptOpen] = useState(false);
@@ -212,6 +242,14 @@ export function TestCaseDetailPage() {
 
         setExpectedResult(resolveExpectedResult(data));
 
+        setStorageSeeds(data.storageSeeds ?? []);
+
+        setStorageAssertions(data.storageAssertions ?? []);
+
+        setAccessibilityEnabled(Boolean(data.accessibilityEnabled));
+
+        setNetworkCheckEnabled(Boolean(data.networkCheckEnabled));
+
       })
 
       .catch((err: Error) => setError(err.message))
@@ -219,6 +257,38 @@ export function TestCaseDetailPage() {
       .finally(() => setLoading(false));
 
   }, [projectId, testCaseId]);
+
+
+
+  useEffect(() => {
+
+    if (!testCaseId) return;
+
+    let cancelled = false;
+
+    api
+
+      .scheduledExecutions(testCaseId)
+
+      .then((items) => {
+
+        if (!cancelled) setScheduled(items);
+
+      })
+
+      .catch(() => {
+
+        if (!cancelled) setScheduled([]);
+
+      });
+
+    return () => {
+
+      cancelled = true;
+
+    };
+
+  }, [testCaseId]);
 
 
 
@@ -268,6 +338,14 @@ export function TestCaseDetailPage() {
 
         scenario,
 
+        storageSeeds,
+
+        storageAssertions,
+
+        accessibilityEnabled,
+
+        networkCheckEnabled,
+
       });
 
       setTestCase(updated);
@@ -285,6 +363,14 @@ export function TestCaseDetailPage() {
       setScenario(updated.scenario ?? "Happy Path");
 
       setExpectedResult(resolveExpectedResult(updated));
+
+      setStorageSeeds(updated.storageSeeds ?? []);
+
+      setStorageAssertions(updated.storageAssertions ?? []);
+
+      setAccessibilityEnabled(Boolean(updated.accessibilityEnabled));
+
+      setNetworkCheckEnabled(Boolean(updated.networkCheckEnabled));
 
     } catch (err) {
 
@@ -416,6 +502,14 @@ export function TestCaseDetailPage() {
 
         scenario,
 
+        storageSeeds,
+
+        storageAssertions,
+
+        accessibilityEnabled,
+
+        networkCheckEnabled,
+
       });
 
       const updated = await api.recordTestCase(projectId, testCaseId);
@@ -474,6 +568,14 @@ export function TestCaseDetailPage() {
 
         scenario,
 
+        storageSeeds,
+
+        storageAssertions,
+
+        accessibilityEnabled,
+
+        networkCheckEnabled,
+
       });
 
       setTestCase(updated);
@@ -525,6 +627,170 @@ export function TestCaseDetailPage() {
       setRunPhase("");
 
     }
+
+  }
+
+
+
+  async function refreshScheduled() {
+
+    if (!testCaseId) return;
+
+    try {
+
+      setScheduled(await api.scheduledExecutions(testCaseId));
+
+    } catch {
+
+      setScheduled([]);
+
+    }
+
+  }
+
+
+
+  async function handleSchedule() {
+
+    if (!projectId || !testCaseId || !hasScript) return;
+
+    if (!scheduleAt) {
+
+      setError("Pick a date and time to run this test later.");
+
+      return;
+
+    }
+
+    setScheduling(true);
+
+    setError("");
+
+    try {
+
+      const updated = await api.updateTestCase(projectId, testCaseId, {
+
+        environmentId,
+
+        authProfileId: authProfileId || null,
+
+        startPath,
+
+        expectedResult: expectedResult.trim() || null,
+
+        category,
+
+        scenario,
+
+        storageSeeds,
+
+        storageAssertions,
+
+        accessibilityEnabled,
+
+        networkCheckEnabled,
+
+      });
+
+      setTestCase(updated);
+
+      const scriptPath = updated.testFile ?? testCase?.testFile;
+
+      if (!scriptPath) {
+
+        throw new Error("No Playwright script path is configured for this test case.");
+
+      }
+
+      await api.startExecution({
+
+        projectId,
+
+        testCaseId: updated.id,
+
+        testCaseCode: updated.code,
+
+        scriptPath,
+
+        runAt: new Date(scheduleAt).toISOString(),
+
+      });
+
+      setScheduleAt("");
+
+      await refreshScheduled();
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Could not schedule this test");
+
+    } finally {
+
+      setScheduling(false);
+
+    }
+
+  }
+
+
+
+  async function cancelSchedule(jobId: string) {
+
+    try {
+
+      await api.cancelScheduledExecution(jobId);
+
+      await refreshScheduled();
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Could not cancel the scheduled run");
+
+    }
+
+  }
+
+
+
+  function addStorageEntry() {
+
+    const key = storageKey.trim();
+
+    if (!key) {
+
+      setError(storageKind === "cookie" ? "Cookie name is required" : "Storage key is required");
+
+      return;
+
+    }
+
+    setError("");
+
+    const entry: StorageEntry = { kind: storageKind, key, value: storageValue };
+
+    if (storageMode === "seed") {
+
+      setStorageSeeds((current) => [...current, entry]);
+
+    } else {
+
+      setStorageAssertions((current) => [...current, entry]);
+
+    }
+
+    setStorageKey("");
+
+    setStorageValue("");
+
+  }
+
+
+
+  function removeStorageEntry(mode: "seed" | "assert", index: number) {
+
+    const setter = mode === "seed" ? setStorageSeeds : setStorageAssertions;
+
+    setter((current) => current.filter((_, position) => position !== index));
 
   }
 
@@ -947,6 +1213,354 @@ export function TestCaseDetailPage() {
                 </p>
 
               </div>
+
+            </div>
+
+
+
+            <div className="rounded-xl border border-slate-100 p-5">
+
+              <h3 className="text-sm font-semibold">Checks</h3>
+
+              <p className="mt-1 text-xs text-slate-500">
+
+                Optional extra checks that run with this test.
+
+              </p>
+
+              <div className="mt-3 space-y-2 text-sm">
+
+                <label className="flex items-start gap-2">
+
+                  <input
+
+                    type="checkbox"
+
+                    className="mt-1"
+
+                    checked={accessibilityEnabled}
+
+                    onChange={(event) => setAccessibilityEnabled(event.target.checked)}
+
+                  />
+
+                  <span>
+
+                    Accessibility
+
+                    <span className="block text-xs text-slate-500">
+
+                      Checks the final page for missing labels, image alt text and similar issues.
+
+                    </span>
+
+                  </span>
+
+                </label>
+
+                <label className="flex items-start gap-2">
+
+                  <input
+
+                    type="checkbox"
+
+                    className="mt-1"
+
+                    checked={networkCheckEnabled}
+
+                    onChange={(event) => setNetworkCheckEnabled(event.target.checked)}
+
+                  />
+
+                  <span>
+
+                    Network errors
+
+                    <span className="block text-xs text-slate-500">
+
+                      Fails the test if any request returns a 4xx or 5xx response.
+
+                    </span>
+
+                  </span>
+
+                </label>
+
+              </div>
+
+            </div>
+
+
+
+            <div className="rounded-xl border border-slate-100 p-5">
+
+              <h3 className="text-sm font-semibold">Schedule</h3>
+
+              <p className="mt-1 text-xs text-slate-500">
+
+                Run this test once at a future date and time.
+
+              </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+
+                <input
+
+                  type="datetime-local"
+
+                  className="rounded-lg border px-3 py-2 text-sm"
+
+                  value={scheduleAt}
+
+                  onChange={(event) => setScheduleAt(event.target.value)}
+
+                />
+
+                <Button
+
+                  type="button"
+
+                  variant="secondary"
+
+                  size="sm"
+
+                  onClick={handleSchedule}
+
+                  disabled={!hasScript || scheduling || running}
+
+                >
+
+                  {scheduling ? "Scheduling..." : "Run later"}
+
+                </Button>
+
+              </div>
+
+              {scheduled.length > 0 && (
+
+                <ul className="mt-3 space-y-2">
+
+                  {scheduled.map((item) => (
+
+                    <li
+
+                      key={item.jobId}
+
+                      className="flex items-center gap-2 rounded-lg border border-slate-100 px-3 py-2 text-xs"
+
+                    >
+
+                      <span className="rounded bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">
+
+                        Scheduled
+
+                      </span>
+
+                      <span>
+
+                        {item.scheduledFor
+
+                          ? new Date(item.scheduledFor).toLocaleString()
+
+                          : "Pending"}
+
+                      </span>
+
+                      <button
+
+                        type="button"
+
+                        onClick={() => cancelSchedule(item.jobId)}
+
+                        className="ml-auto text-slate-400 hover:text-red-600"
+
+                      >
+
+                        Cancel
+
+                      </button>
+
+                    </li>
+
+                  ))}
+
+                </ul>
+
+              )}
+
+            </div>
+
+
+
+            <div className="rounded-xl border border-slate-100 p-5">
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+
+                <h3 className="text-sm font-semibold">Storage / cookies</h3>
+
+                <div className="flex overflow-hidden rounded-lg border text-xs">
+
+                  {(["seed", "assert"] as const).map((mode) => (
+
+                    <button
+
+                      key={mode}
+
+                      type="button"
+
+                      onClick={() => setStorageMode(mode)}
+
+                      className={`px-3 py-1.5 font-medium ${
+
+                        storageMode === mode ? "bg-indigo-600 text-white" : "bg-white text-slate-600"
+
+                      }`}
+
+                    >
+
+                      {mode === "seed" ? "Seed" : "Assert"}
+
+                    </button>
+
+                  ))}
+
+                </div>
+
+              </div>
+
+              <p className="mt-1 text-xs text-slate-500">
+
+                {storageMode === "seed"
+
+                  ? "Seeded values are applied before the test actions run."
+
+                  : "Asserted values are checked after the test actions finish."}
+
+              </p>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+
+                <Select
+
+                  value={storageKind}
+
+                  onChange={(value) => setStorageKind(value as StorageKind)}
+
+                  options={STORAGE_KINDS.map((kind) => ({
+
+                    value: kind,
+
+                    label: kind === "cookie" ? "Cookie" : kind === "localStorage" ? "Local Storage" : "Session Storage",
+
+                  }))}
+
+                />
+
+                <input
+
+                  className="w-full rounded-lg border px-3 py-2 font-mono text-sm"
+
+                  value={storageKey}
+
+                  onChange={(event) => setStorageKey(event.target.value)}
+
+                  placeholder={storageKind === "cookie" ? "cookie name" : "key"}
+
+                />
+
+                <input
+
+                  className="w-full rounded-lg border px-3 py-2 font-mono text-sm"
+
+                  value={storageValue}
+
+                  onChange={(event) => setStorageValue(event.target.value)}
+
+                  placeholder="value"
+
+                />
+
+                <Button type="button" variant="secondary" size="sm" onClick={addStorageEntry}>
+
+                  + Add
+
+                </Button>
+
+              </div>
+
+              {storageSeeds.length === 0 && storageAssertions.length === 0 ? (
+
+                <p className="mt-3 text-xs text-slate-400">No storage or cookie values configured.</p>
+
+              ) : (
+
+                <ul className="mt-3 space-y-2">
+
+                  {[
+
+                    ...storageSeeds.map((entry, index) => ({ entry, index, mode: "seed" as const })),
+
+                    ...storageAssertions.map((entry, index) => ({ entry, index, mode: "assert" as const })),
+
+                  ].map(({ entry, index, mode }) => (
+
+                    <li
+
+                      key={`${mode}-${entry.kind}-${entry.key}-${index}`}
+
+                      className="flex items-center gap-2 rounded-lg border border-slate-100 px-3 py-2 text-xs"
+
+                    >
+
+                      <span
+
+                        className={`rounded px-2 py-0.5 font-semibold ${
+
+                          mode === "seed" ? "bg-indigo-50 text-indigo-700" : "bg-teal-50 text-teal-700"
+
+                        }`}
+
+                      >
+
+                        {mode === "seed" ? "Seed" : "Assert"}
+
+                      </span>
+
+                      <span className="text-slate-500">
+
+                        {entry.kind === "cookie" ? "Cookie" : entry.kind === "localStorage" ? "Local Storage" : "Session Storage"}
+
+                      </span>
+
+                      <span className="truncate font-mono">{entry.key}</span>
+
+                      <span className="text-slate-400">=</span>
+
+                      <span className="truncate font-mono">{entry.value || '""'}</span>
+
+                      <button
+
+                        type="button"
+
+                        onClick={() => removeStorageEntry(mode, index)}
+
+                        className="ml-auto text-slate-400 hover:text-red-600"
+
+                        aria-label="Remove entry"
+
+                      >
+
+                        ×
+
+                      </button>
+
+                    </li>
+
+                  ))}
+
+                </ul>
+
+              )}
 
             </div>
 

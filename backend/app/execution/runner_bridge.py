@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Optional
@@ -21,6 +22,24 @@ def _resolve_config_path(config_path: str) -> Path:
     return candidate
 
 
+_SOURCE_LOCATION_RE = re.compile(r"^[\w./\\-]+\.py:\d+:\s+\w+")
+
+
+def _clean_report_line(line: str) -> str:
+    """Drop pytest source-context noise so testers see only the reason."""
+    stripped = line.strip()
+    if stripped.startswith(">"):
+        return ""
+    if _SOURCE_LOCATION_RE.match(stripped):
+        return ""
+    without_marker = line.lstrip("E ").strip()
+    for prefix in ("AssertionError: ", "assert "):
+        if without_marker.startswith(prefix):
+            without_marker = without_marker[len(prefix) :]
+            break
+    return without_marker
+
+
 def _extract_failure_message(output: str) -> Optional[str]:
     """Pull the assertion / Playwright error out of pytest output for the UI."""
     if not output:
@@ -30,19 +49,22 @@ def _extract_failure_message(output: str) -> Optional[str]:
     for marker in ("AssertionError", "Error:", "error:"):
         for position, line in enumerate(lines):
             if marker in line:
+                # Wide enough to keep multi-line reports (accessibility, network) intact.
                 block: list[str] = []
-                for candidate in lines[position : position + 6]:
+                for candidate in lines[position : position + 40]:
                     stripped = candidate.strip()
                     if not stripped:
                         continue
                     if stripped.startswith("===") or stripped.startswith("---"):
                         break
-                    block.append(candidate.lstrip("E ").strip())
+                    cleaned = _clean_report_line(candidate)
+                    if cleaned:
+                        block.append(cleaned)
                 message = "\n".join(block).strip()
                 if message:
-                    return message[:1500]
+                    return message[:3000]
 
-    tail = "\n".join(line for line in lines if line.strip())[-1500:]
+    tail = "\n".join(line for line in lines if line.strip())[-3000:]
     return tail or None
 
 

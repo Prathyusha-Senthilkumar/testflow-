@@ -5,7 +5,10 @@ from pathlib import Path
 
 from playwright.sync_api import Page
 
+from automation.framework.accessibility import assert_accessibility
 from automation.framework.assertions import run_assertions
+from automation.framework.browser_storage import apply_storage_seeds, assert_storage_entries
+from automation.framework.network_monitor import NetworkMonitor, assert_no_network_failures
 
 
 def _load_recorded_test(case_dir: Path, module_name: str, test_name: str):
@@ -44,7 +47,20 @@ def test_testflow(page: Page) -> None:
     test_name = meta.get("recordedTestName") or "test_example"
 
     recorded_test = _load_recorded_test(case_dir, module_name, test_name)
-    recorded_test(page)
+
+    # Seed storage/cookies on the start-URL origin before the recorded actions run.
+    apply_storage_seeds(page, meta.get("storageSeeds"), meta.get("resolvedStartUrl") or "")
+
+    network_monitor = None
+    if bool(meta.get("networkCheckEnabled")):
+        network_monitor = NetworkMonitor(page)
+        network_monitor.start()
+
+    try:
+        recorded_test(page)
+    finally:
+        if network_monitor is not None:
+            network_monitor.stop()
 
     expected_result = (meta.get("expectedResult") or "").strip()
     if expected_result:
@@ -54,3 +70,12 @@ def test_testflow(page: Page) -> None:
         assertions = meta.get("assertions") or []
         if assertions:
             run_assertions(page, assertions)
+
+    # Every configured storage/cookie expectation must also hold.
+    assert_storage_entries(page, meta.get("storageAssertions"))
+
+    if bool(meta.get("accessibilityEnabled")):
+        assert_accessibility(page)
+
+    if network_monitor is not None:
+        assert_no_network_failures(network_monitor.failures)

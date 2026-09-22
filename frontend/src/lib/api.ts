@@ -42,7 +42,27 @@ export type ProjectInput = {
   description?: string;
 };
 
-export type ExecutionState = "queued" | "running" | "completed" | "failed";
+export type ExecutionState = "queued" | "running" | "completed" | "failed" | "scheduled";
+
+export type ScheduledExecution = {
+  jobId: string;
+  scheduledFor?: string | null;
+  projectId?: string | null;
+  testCaseId?: string | null;
+  testCaseCode?: string | null;
+};
+
+export type TestRunHistoryItem = {
+  id: string;
+  testCaseId?: string | null;
+  testCaseCode?: string | null;
+  testName?: string | null;
+  status: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  durationMs?: number | null;
+  errorMessage?: string | null;
+};
 
 export type ExecutionResultPayload = {
   success: boolean;
@@ -65,6 +85,7 @@ export type ExecutionStatus = {
   testCaseCode?: string | null;
   result?: ExecutionResultPayload | null;
   error?: string | null;
+  scheduledFor?: string | null;
 };
 
 export type StartExecutionInput = {
@@ -74,6 +95,7 @@ export type StartExecutionInput = {
   testCaseCode?: string;
   testCaseId?: string;
   headed?: boolean | null;
+  runAt?: string;
 };
 
 export const api = {
@@ -192,6 +214,11 @@ export const api = {
       body: JSON.stringify(input),
     }),
   getExecution: (jobId: string) => request<ExecutionStatus>(`/executions/${jobId}`),
+  scheduledExecutions: (testCaseId: string) =>
+    request<ScheduledExecution[]>(`/executions/scheduled?testCaseId=${encodeURIComponent(testCaseId)}`),
+  cancelScheduledExecution: (jobId: string) =>
+    request<void>(`/executions/scheduled/${jobId}`, { method: "DELETE" }),
+  testRuns: (limit = 50) => request<TestRunHistoryItem[]>(`/test-runs?limit=${limit}`),
 };
 
 export type TestSuiteInput = {
@@ -265,6 +292,15 @@ export type AuthProfileSummary = {
   createdAt: string;
 };
 
+export const STORAGE_KINDS = ["localStorage", "sessionStorage", "cookie"] as const;
+export type StorageKind = (typeof STORAGE_KINDS)[number];
+
+export type StorageEntry = {
+  kind: StorageKind;
+  key: string;
+  value: string;
+};
+
 export type UpdateTestCaseInput = {
   environmentId?: string | null;
   authProfileId?: string | null;
@@ -272,6 +308,10 @@ export type UpdateTestCaseInput = {
   expectedResult?: string | null;
   category?: TestCaseCategory;
   scenario?: TestCaseScenario;
+  storageSeeds?: StorageEntry[];
+  storageAssertions?: StorageEntry[];
+  accessibilityEnabled?: boolean;
+  networkCheckEnabled?: boolean;
 };
 
 export type TestCaseSummary = {
@@ -288,6 +328,10 @@ export type TestCaseSummary = {
   startPath?: string;
   resolvedStartUrl?: string | null;
   expectedResult?: string | null;
+  storageSeeds?: StorageEntry[];
+  storageAssertions?: StorageEntry[];
+  accessibilityEnabled?: boolean;
+  networkCheckEnabled?: boolean;
   isDraft?: boolean;
   publishedVersion?: number;
   assertions?: AssertionConfig[];

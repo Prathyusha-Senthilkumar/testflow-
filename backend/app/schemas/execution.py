@@ -1,8 +1,9 @@
+from datetime import datetime
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ExecutionState = Literal["queued", "running", "completed", "failed"]
+ExecutionState = Literal["queued", "running", "completed", "failed", "scheduled"]
 
 
 class StartExecutionRequest(BaseModel):
@@ -14,6 +15,9 @@ class StartExecutionRequest(BaseModel):
     test_case_code: Optional[str] = Field(None, alias="testCaseCode")
     test_case_id: Optional[str] = Field(None, alias="testCaseId")
     headed: Optional[bool] = None
+    run_at: Optional[datetime] = Field(
+        None, alias="runAt", description="Schedule the run for this future time (UTC)."
+    )
 
     @model_validator(mode="after")
     def require_path(self) -> "StartExecutionRequest":
@@ -49,3 +53,14 @@ class ExecutionStatusResponse(BaseModel):
     test_case_code: Optional[str] = Field(None, alias="testCaseCode")
     result: Optional[ExecutionResultPayload] = None
     error: Optional[str] = None
+    scheduled_for: Optional[datetime] = Field(None, alias="scheduledFor")
+
+
+class ScheduledExecution(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    job_id: str = Field(..., alias="jobId")
+    scheduled_for: Optional[datetime] = Field(None, alias="scheduledFor")
+    project_id: Optional[str] = Field(None, alias="projectId")
+    test_case_id: Optional[str] = Field(None, alias="testCaseId")
+    test_case_code: Optional[str] = Field(None, alias="testCaseCode")

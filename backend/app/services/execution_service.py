@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -12,6 +13,7 @@ from app.schemas.execution import (
     ExecutionResultPayload,
     ExecutionState,
     ExecutionStatusResponse,
+    ScheduledExecution,
     StartExecutionRequest,
 )
 from app.repositories.test_run_repository import test_run_repository
@@ -21,6 +23,8 @@ from app.services.queue_service import get_queue_service
 def _map_rq_state(job: Job) -> ExecutionState:
     rq_status = job.get_status(refresh=True)
 
+    if rq_status == "scheduled":
+        return "scheduled"
     if rq_status == "queued":
         return "queued"
     if rq_status in ("started", "deferred"):
@@ -87,6 +91,7 @@ def _to_response(job: Job) -> ExecutionStatusResponse:
         test_case_code=meta.get("test_case_code"),
         result=result,
         error=error,
+        scheduled_for=get_queue_service().scheduled_time(job) if state == "scheduled" else None,
     )
 
 
@@ -104,17 +109,29 @@ class ExecutionService:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        job = get_queue_service().enqueue(
-            run_test_case_job,
-            config_path,
-            headed=request.headed,
-            meta={
-                "config_path": config_path,
-                "project_id": request.project_id,
-                "test_case_code": request.test_case_code,
-                "test_case_id": request.test_case_id,
-            },
-        )
+        job_meta = {
+            "config_path": config_path,
+            "project_id": request.project_id,
+            "test_case_code": request.test_case_code,
+            "test_case_id": request.test_case_id,
+        }
+        queue_service = get_queue_service()
+        run_at = self._validate_run_at(request.run_at)
+        if run_at is not None:
+            job = queue_service.enqueue_at(
+                run_at,
+                run_test_case_job,
+                config_path,
+                headed=request.headed,
+                meta=job_meta,
+            )
+        else:
+            job = queue_service.enqueue(
+                run_test_case_job,
+                config_path,
+                headed=request.headed,
+                meta=job_meta,
+            )
 
         # Persist run history in Supabase when a real test-case id is provided.
         if request.test_case_id:
@@ -133,11 +150,45 @@ class ExecutionService:
 
         return ExecutionStatusResponse(
             job_id=job.id,
-            state="queued",
+            state="scheduled" if run_at is not None else "queued",
             config_path=config_path,
             project_id=request.project_id,
             test_case_code=request.test_case_code,
+            scheduled_for=run_at,
         )
+
+    @staticmethod
+    def _validate_run_at(run_at: Optional[datetime]) -> Optional[datetime]:
+        if run_at is None:
+            return None
+        scheduled = run_at if run_at.tzinfo else run_at.replace(tzinfo=timezone.utc)
+        if scheduled <= datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=400, detail="Choose a date and time in the future."
+            )
+        return scheduled
+
+    def list_scheduled(self, test_case_id: Optional[str] = None) -> list[ScheduledExecution]:
+        queue_service = get_queue_service()
+        items: list[ScheduledExecution] = []
+        for job in queue_service.scheduled_jobs():
+            meta = job.meta or {}
+            if test_case_id and meta.get("test_case_id") != test_case_id:
+                continue
+            items.append(
+                ScheduledExecution(
+                    job_id=job.id,
+                    scheduled_for=queue_service.scheduled_time(job),
+                    project_id=meta.get("project_id"),
+                    test_case_id=meta.get("test_case_id"),
+                    test_case_code=meta.get("test_case_code"),
+                )
+            )
+        return items
+
+    def cancel_scheduled(self, job_id: str) -> None:
+        if not get_queue_service().cancel_scheduled(job_id):
+            raise HTTPException(status_code=404, detail="Scheduled run not found")
 
     def get_status(self, job_id: str) -> ExecutionStatusResponse:
         try:
