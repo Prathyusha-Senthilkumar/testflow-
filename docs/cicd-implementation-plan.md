@@ -54,6 +54,8 @@ is the expensive path.
   0 days, and **pause as a reversible soft-disable** before the irreversible delete. This follows
   the best model in the survey; the common alternative is an instant hard cutover.
 - `overrides.base_url` restricted to a per-project allowlist pattern.
+- Published rate limits and a `429` with `Retry-After`. One surveyed product documents 10 requests
+  per second and 3,500 per hour; publishing a number lets a pipeline back off rather than guess.
 
 **Why the allowlist is not optional.** Four surveyed products let a token holder point a run at
 any URL with no domain check. For us that is a credential-exfiltration primitive: the runner
@@ -75,6 +77,14 @@ testflow run --suite <id> --base-url <url> --wait --timeout 20m --junit results.
 - Exit codes: `0` passed, `1` test failures, `2` infrastructure error or timeout.
 - `--wait` drives the bounded long-poll. Without it, print the run id and exit 0.
 - JUnit XML output. A Markdown summary for PR comments.
+- **Secret and non-secret inputs are different flags.** Values passed for interpolation land in
+  run metadata and are not secret; credentials go through a separate flag that scopes them to the
+  single run and never reaches metadata or logs. One surveyed CLI makes exactly this split and it
+  is the right shape.
+- **Ship the binary signed**, with a detached signature and published public key so a pipeline can
+  verify what it just downloaded. One surveyed vendor does this and it costs almost nothing.
+- Detect CI from the environment and suppress verbose logging by default. One vendor documents
+  their own output overwhelming CI systems.
 
 **The exit-code split is a genuine differentiator.** Eight of nine surveyed products collapse
 infrastructure failure into test failure as exit `1`, and one requires grepping stderr to tell
@@ -84,6 +94,26 @@ team auto-retry infrastructure flakes without ignoring real failures, and it cos
 
 **Acceptance.** A pipeline fails on test failure, retries on infrastructure error, and the CI
 provider renders the JUnit results natively.
+
+**A CLI flag that skips the wait must not exit 0 on unknown results.** One surveyed CLI's async
+mode collects jobs that are still running, treats not-yet-failed as passed, exits 0, and silently
+disables its own report writers. Our `--wait`-less mode prints the run id and exits 0 only because
+it explicitly makes no claim about the outcome, and the documentation says so.
+
+## Preview environments — consider DNS remapping, not just base URL
+
+The obvious mechanism is `overrides.base_url`, and it is in phase 1. But one surveyed product
+offers something better for the per-pull-request case: a host override applied at the execution
+VM's resolver, so tests keep production hostnames and the pipeline repoints those names at the
+preview deployment with no change to any test definition.
+
+That fits our Environment model better than threading a base URL through every test, and it solves
+cases a base URL cannot, such as an app that calls a second hostname for its API. It also narrows
+the exfiltration surface from phase 1: a resolver override maps a named host to an address, rather
+than letting a caller substitute an arbitrary URL.
+
+Not committed for v1. Worth a spike before phase 3, because if we want it, the Environment model
+should carry host mappings from the start rather than gaining them later.
 
 ## Phase 3 — GitHub
 

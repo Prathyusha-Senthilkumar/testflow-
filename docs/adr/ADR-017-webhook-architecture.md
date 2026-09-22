@@ -75,6 +75,10 @@ unmodified.
 - **At-least-once.** Receivers must be idempotent, keyed on `X-TestFlow-Event-Id`.
 - **No ordering guarantee.** A `run.completed` may arrive before its `run.started`. Receivers
   order by the timestamps in the payload, not by arrival.
+- **More than one delivery per run is normal**, because status transitions fire events. One
+  surveyed product posts on every status change and gives no explicit terminal marker, so
+  consumers can only infer the final post from the presence of a duration field. We instead put a
+  `terminal` boolean on every payload, so a receiver never has to guess whether more is coming.
 - **Retries:** 10 attempts total, exponential backoff with jitter, spread over roughly 24 hours.
 - **Retry on:** transport errors, `408`, `429`, and `5xx`. Honour `Retry-After`.
 - **Do not retry:** `3xx` and other `4xx`. A `410 Gone` disables the endpoint and notifies the
