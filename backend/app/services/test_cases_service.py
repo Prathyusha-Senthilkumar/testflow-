@@ -243,7 +243,10 @@ class TestCasesService:
                 return self.test_cases.update_automation(
                     project_id, test_case_id, rel.replace("\\", "/"), "Automated"
                 )
-            return test_case
+            # The stored script is gone from disk. Keep the path (so it can be
+            # restored via Record Test or Save Script) but stop reporting the
+            # case as Automated, which would wrongly enable Run Test.
+            return test_case.model_copy(update={"automationStatus": "Not Configured"})
 
         if canonical_ready:
             return self.test_cases.update_automation(

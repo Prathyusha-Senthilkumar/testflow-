@@ -1,0 +1,20 @@
+{
+  "startPath": "/admissions/",
+  "environmentId": "659cc721-2847-4950-b6de-bb35422b8df0",
+  "authProfileId": null,
+  "resolvedStartUrl": "https://www.srmist.edu.in/admissions/",
+  "assertions": [
+    {
+      "id": "expected-result",
+      "type": "text_visible",
+      "value": "admissions"
+    }
+  ],
+  "storageSeeds": [],
+  "storageAssertions": [],
+  "accessibilityEnabled": false,
+  "networkCheckEnabled": false,
+  "expectedResult": "admissions",
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}

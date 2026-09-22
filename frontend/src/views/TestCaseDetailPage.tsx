@@ -204,7 +204,11 @@ export function TestCaseDetailPage() {
 
 
 
-  const hasScript = Boolean(testCase?.testFile);
+  const hasScript =
+    Boolean(testCase?.testFile) && testCase?.automationStatus === "Automated";
+
+  const scriptMissing =
+    Boolean(testCase?.testFile) && testCase?.automationStatus !== "Automated";
 
   const selectedAuthProfile = authProfiles.find((profile) => profile.id === authProfileId);
 
@@ -1185,6 +1189,20 @@ export function TestCaseDetailPage() {
                 </div>
 
               </dl>
+
+              {scriptMissing && (
+
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+
+                  The recorded script for this test case is no longer on disk, so it cannot run.
+
+                  Use <strong>Record Test</strong> to record it again, or open{" "}
+
+                  <strong>View Script</strong> and paste the script to restore it.
+
+                </div>
+
+              )}
 
             </div>
 
