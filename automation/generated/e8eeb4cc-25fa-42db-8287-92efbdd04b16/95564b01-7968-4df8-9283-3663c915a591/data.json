@@ -2,5 +2,5 @@
     "title": "Open events page",
     "test_file_location": "automation/generated/e8eeb4cc-25fa-42db-8287-92efbdd04b16/95564b01-7968-4df8-9283-3663c915a591/test_recorded.py",
     "test_case_location": "automation/generated/e8eeb4cc-25fa-42db-8287-92efbdd04b16/95564b01-7968-4df8-9283-3663c915a591/test_case.md",
-    "test_result": "Not Run"
+    "test_result": "Fail"
 }

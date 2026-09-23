@@ -50,6 +50,7 @@ export type ScheduledExecution = {
   projectId?: string | null;
   testCaseId?: string | null;
   testCaseCode?: string | null;
+  timeZone?: string | null;
 };
 
 export type TestRunHistoryItem = {
@@ -62,6 +63,9 @@ export type TestRunHistoryItem = {
   completedAt?: string | null;
   durationMs?: number | null;
   errorMessage?: string | null;
+  jobId?: string | null;
+  scheduledFor?: string | null;
+  timeZone?: string | null;
 };
 
 export type ExecutionResultPayload = {
@@ -86,6 +90,33 @@ export type ExecutionStatus = {
   result?: ExecutionResultPayload | null;
   error?: string | null;
   scheduledFor?: string | null;
+  timeZone?: string | null;
+};
+
+export type BatchCaseOutcome = "skipped" | "queued" | "running" | "passed" | "failed";
+
+export type BatchCaseResult = {
+  testCaseId: string;
+  testCaseCode: string;
+  name: string;
+  outcome: BatchCaseOutcome;
+  reason?: string | null;
+};
+
+export type BatchExecutionStatus = {
+  batchId: string;
+  batchType: "suite" | "project";
+  projectId: string;
+  suiteId?: string | null;
+  total: number;
+  passed: number;
+  failed: number;
+  queued: number;
+  running: number;
+  completed: number;
+  skipped: number;
+  finished: boolean;
+  cases: BatchCaseResult[];
 };
 
 export type StartExecutionInput = {
@@ -96,6 +127,7 @@ export type StartExecutionInput = {
   testCaseId?: string;
   headed?: boolean | null;
   runAt?: string;
+  timeZone?: string;
 };
 
 export const api = {
@@ -231,12 +263,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  startSuiteRun: (projectId: string, suiteId: string) =>
+    request<BatchExecutionStatus>("/executions/suites", {
+      method: "POST",
+      body: JSON.stringify({ projectId, suiteId }),
+    }),
+  startProjectRun: (projectId: string) =>
+    request<BatchExecutionStatus>("/executions/projects", {
+      method: "POST",
+      body: JSON.stringify({ projectId }),
+    }),
+  getBatchRun: (batchId: string) =>
+    request<BatchExecutionStatus>(`/executions/batches/${batchId}`),
   getExecution: (jobId: string) => request<ExecutionStatus>(`/executions/${jobId}`),
   scheduledExecutions: (testCaseId: string) =>
     request<ScheduledExecution[]>(`/executions/scheduled?testCaseId=${encodeURIComponent(testCaseId)}`),
   cancelScheduledExecution: (jobId: string) =>
     request<void>(`/executions/scheduled/${jobId}`, { method: "DELETE" }),
-  testRuns: (limit = 50) => request<TestRunHistoryItem[]>(`/test-runs?limit=${limit}`),
+  testRuns: (limit = 50, testCaseId?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (testCaseId) params.set("testCaseId", testCaseId);
+    return request<TestRunHistoryItem[]>(`/test-runs?${params.toString()}`);
+  },
 };
 
 export type TestSuiteInput = {
@@ -268,6 +316,7 @@ export type TestCaseInput = {
   description?: string;
   category?: TestCaseCategory;
   scenario?: TestCaseScenario;
+  suiteId?: string;
 };
 
 export type AssertionType = "url_contains" | "text_visible" | "page_title_contains";

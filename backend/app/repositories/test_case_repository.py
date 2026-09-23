@@ -1,3 +1,4 @@
+import json
 import re
 import time
 from typing import Dict, List
@@ -45,6 +46,15 @@ class TestCaseRepository:
             .execute()
         )
         return [str(row["id"]) for row in (res.data or [])]
+
+    def _suite_id_for_create(self, project_id: str, suite_id: str | None) -> str:
+        requested = (suite_id or "").strip()
+        if not requested:
+            return self._default_suite_id(project_id)
+        from app.repositories.test_suite_repository import test_suite_repository
+
+        test_suite_repository.find_by_id(project_id, requested)
+        return requested
 
     def _default_suite_id(self, project_id: str) -> str:
         """suite_id is NOT NULL, so new cases need a suite. Reuse the first one."""
@@ -100,6 +110,7 @@ class TestCaseRepository:
             else None
         )
         code = self._next_code(project_id)
+        suite_id = self._suite_id_for_create(project_id, input_dto.suiteId)
 
         if not self.db:
             new_id = f"demo-case-{int(time.time() * 1000)}"
@@ -129,7 +140,7 @@ class TestCaseRepository:
             self.db.from_("test_cases")
             .insert(
                 {
-                    "suite_id": self._default_suite_id(project_id),
+                    "suite_id": suite_id,
                     "test_case_code": code,
                     "name": input_dto.name,
                     "description": desc,
@@ -236,7 +247,20 @@ class TestCaseRepository:
             for index, case in enumerate(cases):
                 if case.authProfileId == profile_id:
                     cases[index] = case.model_copy(update={"authProfileId": None})
+        # Auth Profile selection is stored in each case's testflow.meta.json
+        # because the deployed test_cases table has no auth_profile_id column.
+        generated = _REPO_ROOT / "automation" / "generated" / project_id
+        if not generated.is_dir():
             return
+        for meta_path in generated.glob("*/testflow.meta.json"):
+            try:
+                payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(payload, dict) or payload.get("authProfileId") != profile_id:
+                continue
+            payload["authProfileId"] = None
+            meta_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def apply_publish_state(self, project_id: str, test_case_id: str, version_number: int) -> TestCaseSummary:
         if not self.db:

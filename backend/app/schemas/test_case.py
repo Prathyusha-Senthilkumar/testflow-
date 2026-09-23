@@ -57,6 +57,7 @@ class CreateTestCaseDto(BaseModel):
     description: Optional[str] = None
     category: TestCaseCategory = DEFAULT_TEST_CASE_CATEGORY
     scenario: TestCaseScenario = DEFAULT_TEST_CASE_SCENARIO
+    suiteId: Optional[str] = Field(default=None, alias="suiteId")
 
 
 class UpdateTestCaseDto(BaseModel):

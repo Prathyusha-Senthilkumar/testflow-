@@ -12,6 +12,10 @@ import { Input } from "@/components/ui/input";
 
 import { Modal } from "@/components/ui/modal";
 
+import { RunProgressModal } from "@/components/runs/RunProgressModal";
+
+import { browserTimeZone, formatInTimeZone, supportedTimeZones, zonedWallTimeToUtc } from "@/lib/scheduleTime";
+
 import { Select } from "@/components/ui/select";
 
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +35,8 @@ import {
   STORAGE_KINDS,
 
   type ScheduledExecution,
+
+  type TestRunHistoryItem,
 
   type StorageEntry,
 
@@ -152,6 +158,8 @@ export function TestCaseDetailPage() {
 
   const [running, setRunning] = useState(false);
 
+  const [runOpen, setRunOpen] = useState(false);
+
   const [publishing, setPublishing] = useState(false);
 
   const [error, setError] = useState("");
@@ -172,15 +180,20 @@ export function TestCaseDetailPage() {
 
   const [storageValue, setStorageValue] = useState("");
 
-  const [accessibilityEnabled, setAccessibilityEnabled] = useState(false);
 
-  const [networkCheckEnabled, setNetworkCheckEnabled] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState("");
 
-  const [scheduleAt, setScheduleAt] = useState("");
+  const [scheduleTime, setScheduleTime] = useState("");
+
+  const [scheduleZone, setScheduleZone] = useState("UTC");
+
+  const timeZones = supportedTimeZones();
 
   const [scheduling, setScheduling] = useState(false);
 
   const [scheduled, setScheduled] = useState<ScheduledExecution[]>([]);
+
+  const [caseRuns, setCaseRuns] = useState<TestRunHistoryItem[]>([]);
 
 
 
@@ -211,6 +224,10 @@ export function TestCaseDetailPage() {
     Boolean(testCase?.testFile) && testCase?.automationStatus !== "Automated";
 
   const selectedAuthProfile = authProfiles.find((profile) => profile.id === authProfileId);
+
+  useEffect(() => {
+    setScheduleZone(browserTimeZone());
+  }, []);
 
 
 
@@ -250,10 +267,6 @@ export function TestCaseDetailPage() {
 
         setStorageAssertions(data.storageAssertions ?? []);
 
-        setAccessibilityEnabled(Boolean(data.accessibilityEnabled));
-
-        setNetworkCheckEnabled(Boolean(data.networkCheckEnabled));
-
       })
 
       .catch((err: Error) => setError(err.message))
@@ -270,25 +283,37 @@ export function TestCaseDetailPage() {
 
     let cancelled = false;
 
-    api
+    const load = () => {
 
-      .scheduledExecutions(testCaseId)
+      Promise.all([api.scheduledExecutions(testCaseId), api.testRuns(20, testCaseId)])
 
-      .then((items) => {
+        .then(([upcoming, runs]) => {
 
-        if (!cancelled) setScheduled(items);
+          if (cancelled) return;
 
-      })
+          setScheduled(upcoming);
 
-      .catch(() => {
+          setCaseRuns(runs);
 
-        if (!cancelled) setScheduled([]);
+        })
 
-      });
+        .catch(() => {
+
+          if (!cancelled) setScheduled([]);
+
+        });
+
+    };
+
+    load();
+
+    const timer = window.setInterval(load, 4000);
 
     return () => {
 
       cancelled = true;
+
+      window.clearInterval(timer);
 
     };
 
@@ -346,10 +371,6 @@ export function TestCaseDetailPage() {
 
         storageAssertions,
 
-        accessibilityEnabled,
-
-        networkCheckEnabled,
-
       });
 
       setTestCase(updated);
@@ -371,10 +392,6 @@ export function TestCaseDetailPage() {
       setStorageSeeds(updated.storageSeeds ?? []);
 
       setStorageAssertions(updated.storageAssertions ?? []);
-
-      setAccessibilityEnabled(Boolean(updated.accessibilityEnabled));
-
-      setNetworkCheckEnabled(Boolean(updated.networkCheckEnabled));
 
     } catch (err) {
 
@@ -510,10 +527,6 @@ export function TestCaseDetailPage() {
 
         storageAssertions,
 
-        accessibilityEnabled,
-
-        networkCheckEnabled,
-
       });
 
       const updated = await api.recordTestCase(projectId, testCaseId);
@@ -550,6 +563,8 @@ export function TestCaseDetailPage() {
 
     setRunning(true);
 
+    setRunOpen(true);
+
     setError("");
 
     setLastResult(null);
@@ -575,10 +590,6 @@ export function TestCaseDetailPage() {
         storageSeeds,
 
         storageAssertions,
-
-        accessibilityEnabled,
-
-        networkCheckEnabled,
 
       });
 
@@ -642,7 +653,17 @@ export function TestCaseDetailPage() {
 
     try {
 
-      setScheduled(await api.scheduledExecutions(testCaseId));
+      const [upcoming, runs] = await Promise.all([
+
+        api.scheduledExecutions(testCaseId),
+
+        api.testRuns(20, testCaseId),
+
+      ]);
+
+      setScheduled(upcoming);
+
+      setCaseRuns(runs);
 
     } catch {
 
@@ -658,9 +679,23 @@ export function TestCaseDetailPage() {
 
     if (!projectId || !testCaseId || !hasScript) return;
 
-    if (!scheduleAt) {
+    if (!scheduleDate || !scheduleTime || !scheduleZone) {
 
-      setError("Pick a date and time to run this test later.");
+      setError("Pick a date, time, and timezone.");
+
+      return;
+
+    }
+
+    let runAtIso = "";
+
+    try {
+
+      runAtIso = zonedWallTimeToUtc(scheduleDate, scheduleTime, scheduleZone).toISOString();
+
+    } catch (err) {
+
+      setError(err instanceof Error ? err.message : "Choose a valid date and time.");
 
       return;
 
@@ -690,10 +725,6 @@ export function TestCaseDetailPage() {
 
         storageAssertions,
 
-        accessibilityEnabled,
-
-        networkCheckEnabled,
-
       });
 
       setTestCase(updated);
@@ -716,11 +747,15 @@ export function TestCaseDetailPage() {
 
         scriptPath,
 
-        runAt: new Date(scheduleAt).toISOString(),
+        runAt: runAtIso,
+
+        timeZone: scheduleZone,
 
       });
 
-      setScheduleAt("");
+      setScheduleDate("");
+
+      setScheduleTime("");
 
       await refreshScheduled();
 
@@ -845,6 +880,24 @@ export function TestCaseDetailPage() {
   }
 
 
+
+  const upcomingJobIds = new Set(scheduled.map((item) => item.jobId));
+
+  const scheduledResults = caseRuns.filter(
+
+    (run) =>
+
+      Boolean(run.scheduledFor) &&
+
+      Boolean(run.jobId) &&
+
+      !upcomingJobIds.has(run.jobId || "") &&
+
+      (run.status === "Passed" || run.status === "Failed" || run.status === "Running")
+
+  );
+
+  const latestFinished = caseRuns.find((run) => run.status === "Passed" || run.status === "Failed");
 
   if (loading) {
 
@@ -1238,85 +1291,11 @@ export function TestCaseDetailPage() {
 
             <div className="rounded-xl border border-slate-100 p-5">
 
-              <h3 className="text-sm font-semibold">Checks</h3>
-
-              <p className="mt-1 text-xs text-slate-500">
-
-                Optional extra checks that run with this test.
-
-              </p>
-
-              <div className="mt-3 space-y-2 text-sm">
-
-                <label className="flex items-start gap-2">
-
-                  <input
-
-                    type="checkbox"
-
-                    className="mt-1"
-
-                    checked={accessibilityEnabled}
-
-                    onChange={(event) => setAccessibilityEnabled(event.target.checked)}
-
-                  />
-
-                  <span>
-
-                    Accessibility
-
-                    <span className="block text-xs text-slate-500">
-
-                      Checks the final page for missing labels, image alt text and similar issues.
-
-                    </span>
-
-                  </span>
-
-                </label>
-
-                <label className="flex items-start gap-2">
-
-                  <input
-
-                    type="checkbox"
-
-                    className="mt-1"
-
-                    checked={networkCheckEnabled}
-
-                    onChange={(event) => setNetworkCheckEnabled(event.target.checked)}
-
-                  />
-
-                  <span>
-
-                    Network errors
-
-                    <span className="block text-xs text-slate-500">
-
-                      Fails the test if any request returns a 4xx or 5xx response.
-
-                    </span>
-
-                  </span>
-
-                </label>
-
-              </div>
-
-            </div>
-
-
-
-            <div className="rounded-xl border border-slate-100 p-5">
-
               <h3 className="text-sm font-semibold">Schedule</h3>
 
               <p className="mt-1 text-xs text-slate-500">
 
-                Run this test once at a future date and time.
+                Run this test once at a future date and time in the timezone you select.
 
               </p>
 
@@ -1324,15 +1303,55 @@ export function TestCaseDetailPage() {
 
                 <input
 
-                  type="datetime-local"
+                  type="date"
+
+                  aria-label="Schedule date"
 
                   className="rounded-lg border px-3 py-2 text-sm"
 
-                  value={scheduleAt}
+                  value={scheduleDate}
 
-                  onChange={(event) => setScheduleAt(event.target.value)}
+                  onChange={(event) => setScheduleDate(event.target.value)}
 
                 />
+
+                <input
+
+                  type="time"
+
+                  aria-label="Schedule time"
+
+                  className="rounded-lg border px-3 py-2 text-sm"
+
+                  value={scheduleTime}
+
+                  onChange={(event) => setScheduleTime(event.target.value)}
+
+                />
+
+                <select
+
+                  aria-label="Schedule timezone"
+
+                  className="max-w-xs rounded-lg border px-3 py-2 text-sm"
+
+                  value={scheduleZone}
+
+                  onChange={(event) => setScheduleZone(event.target.value)}
+
+                >
+
+                  {timeZones.map((zone) => (
+
+                    <option key={zone} value={zone}>
+
+                      {zone}
+
+                    </option>
+
+                  ))}
+
+                </select>
 
                 <Button
 
@@ -1378,7 +1397,7 @@ export function TestCaseDetailPage() {
 
                         {item.scheduledFor
 
-                          ? new Date(item.scheduledFor).toLocaleString()
+                          ? formatInTimeZone(item.scheduledFor, item.timeZone || scheduleZone)
 
                           : "Pending"}
 
@@ -1397,6 +1416,72 @@ export function TestCaseDetailPage() {
                         Cancel
 
                       </button>
+
+                    </li>
+
+                  ))}
+
+                </ul>
+
+              )}
+
+              {scheduledResults.length > 0 && (
+
+                <ul className="mt-3 space-y-2">
+
+                  {scheduledResults.map((run) => (
+
+                    <li key={run.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs">
+
+                      <div className="flex flex-wrap items-center gap-2">
+
+                        <span
+
+                          className={`rounded px-2 py-0.5 font-semibold ${
+
+                            run.status === "Passed"
+
+                              ? "bg-teal-50 text-teal-700"
+
+                              : run.status === "Failed"
+
+                                ? "bg-red-50 text-red-700"
+
+                                : "bg-indigo-50 text-indigo-700"
+
+                          }`}
+
+                        >
+
+                          {run.status === "Running" ? "Running" : run.status}
+
+                        </span>
+
+                        <span>
+
+                          Scheduled for{" "}
+
+                          {formatInTimeZone(run.scheduledFor || "", run.timeZone || scheduleZone)}
+
+                        </span>
+
+                        {run.durationMs != null && run.status !== "Running" && (
+
+                          <span className="text-slate-500">{(run.durationMs / 1000).toFixed(1)}s</span>
+
+                        )}
+
+                      </div>
+
+                      {run.errorMessage && (
+
+                        <p className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-red-700">
+
+                          {run.errorMessage}
+
+                        </p>
+
+                      )}
 
                     </li>
 
@@ -1606,11 +1691,83 @@ export function TestCaseDetailPage() {
 
               </p>
 
-            ) : !lastResult ? (
+            ) : !lastResult && !latestFinished ? (
 
               <p className="mt-4 text-sm text-slate-500">Run the test to see pass/fail here.</p>
 
-            ) : (
+            ) : !lastResult && latestFinished ? (
+
+              <dl className="mt-4 space-y-3 text-sm">
+
+                <div className="flex justify-between gap-3">
+
+                  <dt className="text-slate-500">Outcome</dt>
+
+                  <dd
+
+                    className={`font-semibold ${latestFinished.status === "Passed" ? "text-teal-700" : "text-red-600"}`}
+
+                  >
+
+                    {latestFinished.status === "Passed" ? "PASS" : "FAIL"}
+
+                  </dd>
+
+                </div>
+
+                <div className="flex justify-between gap-3">
+
+                  <dt className="text-slate-500">
+
+                    {latestFinished.scheduledFor ? "Scheduled for" : "Finished"}
+
+                  </dt>
+
+                  <dd className="text-right font-medium">
+
+                    {formatInTimeZone(
+
+                      latestFinished.scheduledFor || latestFinished.completedAt || latestFinished.startedAt || "",
+
+                      latestFinished.timeZone || scheduleZone
+
+                    )}
+
+                  </dd>
+
+                </div>
+
+                {latestFinished.durationMs != null && (
+
+                  <div className="flex justify-between gap-3">
+
+                    <dt className="text-slate-500">Duration</dt>
+
+                    <dd className="font-medium">{(latestFinished.durationMs / 1000).toFixed(2)}s</dd>
+
+                  </div>
+
+                )}
+
+                {latestFinished.errorMessage && (
+
+                  <div>
+
+                    <dt className="text-slate-500">Error</dt>
+
+                    <dd className="mt-1 max-h-40 overflow-auto rounded-lg bg-slate-950 p-3 font-mono text-xs text-red-200">
+
+                      {latestFinished.errorMessage}
+
+                    </dd>
+
+                  </div>
+
+                )}
+
+              </dl>
+
+            ) : lastResult ? (
 
               <dl className="mt-4 space-y-3 text-sm">
 
@@ -1656,7 +1813,7 @@ export function TestCaseDetailPage() {
 
               </dl>
 
-            )}
+            ) : null}
 
           </div>
 
@@ -1845,6 +2002,41 @@ export function TestCaseDetailPage() {
         )}
 
       </Modal>
+
+      <RunProgressModal
+        open={runOpen}
+        title={running ? "Running test" : "Test run"}
+        description={testCase ? `${testCase.code} · ${testCase.name}` : undefined}
+        running={running}
+        statusLabel={
+          running
+            ? runPhase || "Running test..."
+            : lastResult
+              ? lastResult.status === "Passed"
+                ? "Passed"
+                : "Failed"
+              : error || "Could not finish the run"
+        }
+        facts={[
+          { label: "Category", value: category },
+          { label: "Scenario", value: scenario },
+          {
+            label: "Environment",
+            value: environments.find((env) => env.id === environmentId)?.name ?? "Default",
+          },
+          {
+            label: "Auth profile",
+            value: selectedAuthProfile ? authProfileLabel(selectedAuthProfile) : "None",
+          },
+          { label: "Start path", value: startPath || "/" },
+          ...(expectedResult.trim()
+            ? [{ label: "Expected result", value: expectedResult.trim() }]
+            : []),
+          ...(lastResult ? [{ label: "Duration", value: `${lastResult.duration.toFixed(2)}s` }] : []),
+        ]}
+        error={running ? undefined : lastResult?.error || error || undefined}
+        onClose={() => setRunOpen(false)}
+      />
 
     </div>
 

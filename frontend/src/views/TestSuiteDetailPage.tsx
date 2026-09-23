@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
-import { api, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
+import { api, type TestCaseInput, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { AddTestCasesModal } from "@/components/suites/AddTestCasesModal";
 import { EditSuiteModal } from "@/components/suites/EditSuiteModal";
+import { TestCaseFormModal } from "@/components/test-cases/TestCaseFormModal";
 
 export function TestSuiteDetailPage() {
   const navigate = useNavigate();
@@ -16,8 +17,10 @@ export function TestSuiteDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const inSuite = useMemo(
     () => new Set((suite?.testCases ?? []).map((testCase) => testCase.id)),
@@ -35,6 +38,23 @@ export function TestSuiteDetailPage() {
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [projectId, suiteId]);
+
+  async function handleCreate(input: TestCaseInput) {
+    if (!projectId || !suiteId) return;
+    setCreating(true);
+    setError("");
+    try {
+      const created = await api.createTestCase(projectId, { ...input, suiteId });
+      const updated = await api.testSuite(projectId, suiteId);
+      setSuite(updated);
+      setProjectCases((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+      setCreateOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create test case");
+    } finally {
+      setCreating(false);
+    }
+  }
 
   async function handleAdd(testCaseIds: string[]) {
     if (!projectId || !suiteId) return;
@@ -131,10 +151,16 @@ export function TestSuiteDetailPage() {
 
       <div className="mt-8 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Test Cases</h2>
-        <Button type="button" onClick={() => setAddOpen(true)}>
-          <Plus size={15} className="mr-1 inline" />
-          Add Test Cases
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" onClick={() => setAddOpen(true)}>
+            <Plus size={15} className="mr-1 inline" />
+            Add Test Cases
+          </Button>
+          <Button type="button" onClick={() => setCreateOpen(true)}>
+            <Plus size={15} className="mr-1 inline" />
+            Create Test Case
+          </Button>
+        </div>
       </div>
 
       <div className="mt-4 overflow-hidden rounded-lg bg-white shadow-sm">
@@ -158,20 +184,29 @@ export function TestSuiteDetailPage() {
               </tr>
             ) : (
               suite.testCases.map((testCase) => (
-                <tr key={testCase.id} className="border-t">
+                <tr
+                  key={testCase.id}
+                  className="cursor-pointer border-t hover:bg-slate-50"
+                  tabIndex={0}
+                  aria-label={`Open ${testCase.code} ${testCase.name}`}
+                  onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(`/projects/${projectId}/test-cases/${testCase.id}`);
+                    }
+                  }}
+                >
                   <td className="px-5 py-4 font-mono text-xs">{testCase.code}</td>
-                  <td className="px-5 py-4">
-                    <Link
-                      to={`/projects/${projectId}/test-cases/${testCase.id}`}
-                      className="font-medium text-indigo-600 hover:underline"
-                    >
-                      {testCase.name}
-                    </Link>
-                  </td>
+                  <td className="px-5 py-4 font-medium text-indigo-600">{testCase.name}</td>
                   <td className="px-5 py-4 text-slate-600">{testCase.category ?? "Functional"}</td>
                   <td className="px-5 py-4 text-slate-600">{testCase.scenario ?? "Happy Path"}</td>
                   <td className="px-5 py-4 text-slate-600">{testCase.automationStatus}</td>
-                  <td className="px-5 py-4 text-right">
+                  <td
+                    className="px-5 py-4 text-right"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
                     <button
                       type="button"
                       onClick={() => handleRemove(testCase.id)}
@@ -186,6 +221,13 @@ export function TestSuiteDetailPage() {
           </tbody>
         </table>
       </div>
+
+      <TestCaseFormModal
+        open={createOpen}
+        loading={creating}
+        onClose={() => setCreateOpen(false)}
+        onSubmit={handleCreate}
+      />
 
       <AddTestCasesModal
         open={addOpen}

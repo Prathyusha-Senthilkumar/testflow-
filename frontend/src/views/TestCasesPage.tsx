@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Play, Plus, Search, Sparkles, Trash2, Upload } from "lucide-react";
-import { Link, useParams } from "@/lib/navigation";
+import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { TestCaseFormModal } from "@/components/test-cases/TestCaseFormModal";
@@ -10,6 +10,7 @@ import { api, type TestCaseInput, type TestCaseSummary } from "@/lib/api";
 
 export function TestCasesPage() {
   const { id: projectId = "" } = useParams();
+  const navigate = useNavigate();
   const [projectName, setProjectName] = useState("Project");
   const [cases, setCases] = useState<TestCaseSummary[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -69,10 +70,6 @@ export function TestCasesPage() {
         description="Manage, organize into suites, and execute all automated test cases"
         actions={
           <>
-            <button type="button" className="rounded-lg border bg-white px-4 py-2 text-sm font-medium">
-              <Play size={15} className="mr-1 inline" />
-              Run Suite
-            </button>
             <button type="button" className="rounded-lg border bg-white px-4 py-2 text-sm font-medium">
               <Upload size={15} className="mr-1 inline" />
               Import Test Cases
@@ -169,16 +166,32 @@ export function TestCasesPage() {
                 <th className="px-3 py-3 text-left">Status</th>
                 <th className="px-3 py-3 text-left">Last Run</th>
                 <th className="px-3 py-3 text-left">Run By</th>
-                <th className="px-3 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((t) => (
-                <tr key={t.id} className="border-t">
-                  <td className="px-4 py-4">
+                <tr
+                  key={t.id}
+                  className="cursor-pointer border-t hover:bg-slate-50"
+                  tabIndex={0}
+                  aria-label={`Open ${t.code} ${t.name}`}
+                  onClick={() => navigate(`/projects/${projectId}/test-cases/${t.id}`)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(`/projects/${projectId}/test-cases/${t.id}`);
+                    }
+                  }}
+                >
+                  <td
+                    className="px-4 py-4"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
                     <input
                       type="checkbox"
                       checked={selected.includes(t.id)}
+                      onClick={(event) => event.stopPropagation()}
                       onChange={() =>
                         setSelected((s) =>
                           s.includes(t.id) ? s.filter((x) => x !== t.id) : [...s, t.id]
@@ -205,11 +218,6 @@ export function TestCasesPage() {
                   </td>
                   <td className="px-3 text-slate-500">Not run</td>
                   <td className="px-3">—</td>
-                  <td className="px-3 text-right">
-                    <Link to={`/projects/${projectId}/test-cases/${t.id}`} className="font-medium text-indigo-600">
-                      View
-                    </Link>
-                  </td>
                 </tr>
               ))}
             </tbody>

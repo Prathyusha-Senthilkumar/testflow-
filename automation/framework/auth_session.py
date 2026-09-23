@@ -15,6 +15,7 @@ Runs inside the existing worker/Playwright stack; it starts no new framework.
 import json
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import urlparse
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
@@ -55,6 +56,33 @@ def _looks_like_login_page(page) -> bool:
         return False
 
 
+def _url_is_login(url: str) -> bool:
+    path = urlparse(url or "").path.lower()
+    return path == "/login" or path.startswith("/login/")
+
+
+def _wait_for_client_redirect(page) -> None:
+    """Single-page apps redirect to login after the first HTML arrives."""
+    try:
+        page.wait_for_load_state("networkidle", timeout=8_000)
+    except PlaywrightError:
+        pass
+    try:
+        page.wait_for_timeout(1_500)
+    except PlaywrightError:
+        pass
+
+
+def _landed_on_login(page) -> bool:
+    _wait_for_client_redirect(page)
+    try:
+        if _url_is_login(page.url):
+            return True
+    except PlaywrightError:
+        return False
+    return _looks_like_login_page(page)
+
+
 def _session_grants_access(storage_path: Path, target_url: str, log: Callable[[str], None]) -> Optional[dict]:
     """Return a refreshed storage state when the saved session still works."""
     try:
@@ -64,7 +92,7 @@ def _session_grants_access(storage_path: Path, target_url: str, log: Callable[[s
                 context = browser.new_context(storage_state=str(storage_path))
                 page = context.new_page()
                 page.goto(target_url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
-                if _looks_like_login_page(page):
+                if _landed_on_login(page):
                     log("Saved session no longer grants access (login screen shown).")
                     return None
                 # Capture whatever the server rotated during this request.
@@ -101,7 +129,7 @@ def _refresh_and_revalidate(
                     page = context.new_page()
                     try:
                         page.goto(target_url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
-                        if _looks_like_login_page(page):
+                        if _landed_on_login(page):
                             log("stage=refresh_failed")
                             log("Refresh completed but the protected page still shows a login screen.")
                             return None
@@ -186,7 +214,7 @@ def _login_with_credentials(
 
             # Confirm we actually got in by visiting the page the test needs.
             page.goto(target_url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
-            if _looks_like_login_page(page):
+            if _landed_on_login(page):
                 raise AuthRecoveryError(
                     "Automatic sign-in with the stored credentials did not produce an "
                     "authenticated session. Check the credentials on the Auth Profile."

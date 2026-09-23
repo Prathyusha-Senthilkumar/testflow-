@@ -16,7 +16,14 @@ class StartExecutionRequest(BaseModel):
     test_case_id: Optional[str] = Field(None, alias="testCaseId")
     headed: Optional[bool] = None
     run_at: Optional[datetime] = Field(
-        None, alias="runAt", description="Schedule the run for this future time (UTC)."
+        None,
+        alias="runAt",
+        description="Timezone-aware instant when this run should start.",
+    )
+    time_zone: Optional[str] = Field(
+        None,
+        alias="timeZone",
+        description="IANA timezone the tester selected. The instant is runAt.",
     )
 
     @model_validator(mode="after")
@@ -56,6 +63,52 @@ class ExecutionStatusResponse(BaseModel):
     scheduled_for: Optional[datetime] = Field(None, alias="scheduledFor")
 
 
+class StartSuiteBatchRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    project_id: str = Field(..., alias="projectId")
+    suite_id: str = Field(..., alias="suiteId")
+
+
+class StartProjectBatchRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    project_id: str = Field(..., alias="projectId")
+
+
+BatchCaseOutcome = Literal["skipped", "queued", "running", "passed", "failed"]
+
+
+class BatchCaseResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    test_case_id: str = Field(..., alias="testCaseId")
+    test_case_code: str = Field(..., alias="testCaseCode")
+    name: str
+    outcome: BatchCaseOutcome
+    reason: Optional[str] = None
+
+
+class BatchExecutionStatus(BaseModel):
+    """User-facing suite or project run. Child queue ids stay on the server."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    batch_id: str = Field(..., alias="batchId")
+    batch_type: Literal["suite", "project"] = Field(..., alias="batchType")
+    project_id: str = Field(..., alias="projectId")
+    suite_id: Optional[str] = Field(None, alias="suiteId")
+    total: int
+    passed: int
+    failed: int
+    queued: int
+    running: int
+    completed: int
+    skipped: int
+    finished: bool
+    cases: list[BatchCaseResult]
+
+
 class ScheduledExecution(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -64,3 +117,4 @@ class ScheduledExecution(BaseModel):
     project_id: Optional[str] = Field(None, alias="projectId")
     test_case_id: Optional[str] = Field(None, alias="testCaseId")
     test_case_code: Optional[str] = Field(None, alias="testCaseCode")
+    time_zone: Optional[str] = Field(None, alias="timeZone")

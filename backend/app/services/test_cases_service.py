@@ -2,6 +2,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
+# Sentinel: keep the Auth Profile already stored on the case or in its meta file.
+_KEEP_AUTH_PROFILE = object()
+
 from fastapi import HTTPException
 
 from app.repositories.project_repository import ProjectRepository
@@ -85,6 +88,12 @@ class TestCasesService:
             updated = self.test_cases.mark_draft(project_id, test_case_id)
         updated = self._attach_resolved_url(project_id, updated)
         fields_set = input_dto.model_fields_set
+        # The live test_cases table has no auth_profile_id column, so the
+        # repository cannot store the selection. Keep the value from this
+        # request and persist it in the case meta file below.
+        auth_profile_id = (
+            input_dto.authProfileId if "authProfileId" in fields_set else _KEEP_AUTH_PROFILE
+        )
         updated = self._with_meta_config(
             project_id,
             test_case_id,
@@ -99,6 +108,7 @@ class TestCasesService:
             network_check_enabled=(
                 input_dto.networkCheckEnabled if "networkCheckEnabled" in fields_set else None
             ),
+            auth_profile_id=auth_profile_id,
         )
         self._sync_testflow_meta(project_id, test_case_id, updated)
         return updated
@@ -168,9 +178,9 @@ class TestCasesService:
     def record(self, project_id: str, test_case_id: str) -> TestCaseSummary:
         self._ensure_project_exists(project_id)
         test_case = self.test_cases.find_by_id(project_id, test_case_id)
-        resolved = self.environments.resolve_start_url(
-            project_id, test_case.startPath, test_case.environmentId
-        )
+        test_case = self._attach_resolved_url(project_id, test_case)
+        test_case = self._with_meta_config(project_id, test_case_id, test_case)
+        resolved = test_case.resolvedStartUrl
         if not resolved:
             raise HTTPException(status_code=400, detail="A valid environment base URL is required for recording")
 
@@ -292,14 +302,19 @@ class TestCasesService:
         assertions: Optional[List[StorageEntry]] = None,
         accessibility_enabled: Optional[bool] = None,
         network_check_enabled: Optional[bool] = None,
+        auth_profile_id: object = _KEEP_AUTH_PROFILE,
     ) -> TestCaseSummary:
         """Use explicitly supplied values, otherwise keep what is already stored."""
-        if (
+        stored_auth = (test_case.authProfileId or "").strip() or None
+        needs_meta = (
             seeds is None
             or assertions is None
             or accessibility_enabled is None
             or network_check_enabled is None
-        ):
+            or (auth_profile_id is _KEEP_AUTH_PROFILE and not stored_auth)
+        )
+        meta: dict = {}
+        if needs_meta:
             relative = test_case.testFile or relative_script_path(project_id, test_case_id)
             meta = read_meta(_REPO_ROOT, relative)
             if seeds is None:
@@ -310,8 +325,19 @@ class TestCasesService:
                 accessibility_enabled = bool(meta.get("accessibilityEnabled"))
             if network_check_enabled is None:
                 network_check_enabled = bool(meta.get("networkCheckEnabled"))
+        if auth_profile_id is _KEEP_AUTH_PROFILE:
+            if stored_auth:
+                resolved_auth = stored_auth
+            else:
+                raw = meta.get("authProfileId")
+                resolved_auth = raw.strip() if isinstance(raw, str) and raw.strip() else None
+        elif isinstance(auth_profile_id, str):
+            resolved_auth = auth_profile_id.strip() or None
+        else:
+            resolved_auth = None
         return test_case.model_copy(
             update={
+                "authProfileId": resolved_auth,
                 "storageSeeds": seeds,
                 "storageAssertions": assertions,
                 "accessibilityEnabled": bool(accessibility_enabled),
@@ -363,4 +389,5 @@ class TestCasesService:
             description=desc if desc else None,
             category=input_dto.category,
             scenario=input_dto.scenario,
+            suiteId=(input_dto.suiteId or "").strip() or None,
         )

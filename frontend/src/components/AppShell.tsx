@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BarChart3, ChevronDown, FolderKanban, Gauge, History, LogOut, Menu, Settings, TerminalSquare } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "@/lib/navigation";
+import { api } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
-import { project, suites, testCases } from "@/lib/demoData";
+import { suites, testCases } from "@/lib/demoData";
 
 const nav=[
   ["/dashboard","Dashboard",Gauge],
@@ -17,12 +18,27 @@ type Crumb={label:string;to?:string};
 function Breadcrumbs(){
   const {pathname}=useLocation();
   const parts=pathname.split('/').filter(Boolean);
+  const projectId=parts[0]==='projects'?parts[1]??"":"";
+  const [projectName,setProjectName]=useState("");
+
+  useEffect(()=>{
+    if(!projectId){
+      setProjectName("");
+      return;
+    }
+    let cancelled=false;
+    api.project(projectId)
+      .then((item)=>{ if(!cancelled) setProjectName(item.name); })
+      .catch(()=>{ if(!cancelled) setProjectName(""); });
+    return ()=>{ cancelled=true; };
+  },[projectId]);
+
   let crumbs:Crumb[]=[];
 
   if(parts[0]==='dashboard') crumbs=[{label:'Dashboard'}];
   else if(parts[0]==='projects'){
     crumbs=[{label:'Projects',to:'/projects'}];
-    if(parts[1]) crumbs.push({label:project.name,to:`/projects/${parts[1]}`});
+    if(parts[1]) crumbs.push({label:projectName || "Project",to:`/projects/${parts[1]}`});
     if(parts[2]==='test-cases'){
       crumbs.push({label:'Test Cases',to:`/projects/${parts[1]}/test-cases`});
       if(parts[3]) crumbs.push({label:testCases.find(t=>t.id===parts[3])?.id || parts[3]});

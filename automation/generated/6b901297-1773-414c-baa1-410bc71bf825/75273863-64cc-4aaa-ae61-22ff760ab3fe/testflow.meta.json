@@ -1,0 +1,20 @@
+{
+  "startPath": "/admin/curricula",
+  "environmentId": "env-default",
+  "authProfileId": "auth-1790159757408",
+  "resolvedStartUrl": "https://evolv-dev.revature.io/admin/curricula",
+  "assertions": [
+    {
+      "id": "expected-result",
+      "type": "text_visible",
+      "value": "Curricula/java"
+    }
+  ],
+  "storageSeeds": [],
+  "storageAssertions": [],
+  "accessibilityEnabled": false,
+  "networkCheckEnabled": false,
+  "expectedResult": "Curricula/java",
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}

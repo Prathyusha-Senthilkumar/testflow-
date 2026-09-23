@@ -51,31 +51,25 @@ def test_testflow(page: Page) -> None:
     # Seed storage/cookies on the start-URL origin before the recorded actions run.
     apply_storage_seeds(page, meta.get("storageSeeds"), meta.get("resolvedStartUrl") or "")
 
-    network_monitor = None
-    if bool(meta.get("networkCheckEnabled")):
-        network_monitor = NetworkMonitor(page)
-        network_monitor.start()
-
+    # Accessibility and network checks always run. Saved flags cannot turn them off.
+    network_monitor = NetworkMonitor(page)
+    network_monitor.start()
     try:
         recorded_test(page)
-    finally:
-        if network_monitor is not None:
-            network_monitor.stop()
 
-    expected_result = (meta.get("expectedResult") or "").strip()
-    if expected_result:
-        # The Assert input is a visible-text expectation, regardless of its length.
-        run_assertions(page, [{"type": "text_visible", "value": expected_result}])
-    else:
-        assertions = meta.get("assertions") or []
-        if assertions:
-            run_assertions(page, assertions)
+        expected_result = (meta.get("expectedResult") or "").strip()
+        if expected_result:
+            # The Assert input is a visible-text expectation, regardless of its length.
+            run_assertions(page, [{"type": "text_visible", "value": expected_result}])
+        else:
+            assertions = meta.get("assertions") or []
+            if assertions:
+                run_assertions(page, assertions)
 
-    # Every configured storage/cookie expectation must also hold.
-    assert_storage_entries(page, meta.get("storageAssertions"))
+        # Every configured storage/cookie expectation must also hold.
+        assert_storage_entries(page, meta.get("storageAssertions"))
 
-    if bool(meta.get("accessibilityEnabled")):
         assert_accessibility(page)
-
-    if network_monitor is not None:
         assert_no_network_failures(network_monitor.failures)
+    finally:
+        network_monitor.stop()

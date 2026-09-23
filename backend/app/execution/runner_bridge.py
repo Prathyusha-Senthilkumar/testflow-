@@ -106,10 +106,24 @@ def _resolve_auth_storage_state(root: Path, case_dir: Path, meta: dict) -> Optio
     return ensure_authenticated_session(
         storage_path=storage_path,
         login_url=login_url,
-        target_url=str(meta.get("resolvedStartUrl") or ""),
+        target_url=_page_the_script_opens(case_dir, meta),
         credentials=credentials,
         refresh=refresh,
     )
+
+
+def _page_the_script_opens(case_dir: Path, meta: dict) -> str:
+    """Validate the page the recorded script opens, not only the start-path field."""
+    module_name = str(meta.get("recordedModule") or "test_recorded.py")
+    script_path = case_dir / module_name
+    if script_path.is_file():
+        match = re.search(
+            r"""page\.goto\(\s*["']([^"']+)["']""",
+            script_path.read_text(encoding="utf-8"),
+        )
+        if match:
+            return match.group(1)
+    return str(meta.get("resolvedStartUrl") or "")
 
 
 def _run_testflow_harness(

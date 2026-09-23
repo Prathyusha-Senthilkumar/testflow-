@@ -3,9 +3,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Response
 
 from app.schemas.execution import (
+    BatchExecutionStatus,
     ExecutionStatusResponse,
     ScheduledExecution,
     StartExecutionRequest,
+    StartProjectBatchRequest,
+    StartSuiteBatchRequest,
 )
 from app.services.execution_service import ExecutionService, get_execution_service
 
@@ -36,6 +39,30 @@ def cancel_scheduled_execution(
 ):
     service.cancel_scheduled(job_id)
     return Response(status_code=204)
+
+
+@router.post("/suites", response_model=BatchExecutionStatus)
+def start_suite_execution(
+    body: StartSuiteBatchRequest,
+    service: ExecutionService = Depends(get_execution_service),
+):
+    return service.start_suite(body.project_id, body.suite_id)
+
+
+@router.post("/projects", response_model=BatchExecutionStatus)
+def start_project_execution(
+    body: StartProjectBatchRequest,
+    service: ExecutionService = Depends(get_execution_service),
+):
+    return service.start_project(body.project_id)
+
+
+@router.get("/batches/{batch_id}", response_model=BatchExecutionStatus)
+def get_batch_execution(
+    batch_id: str,
+    service: ExecutionService = Depends(get_execution_service),
+):
+    return service.get_batch(batch_id)
 
 
 @router.get("/{job_id}", response_model=ExecutionStatusResponse)

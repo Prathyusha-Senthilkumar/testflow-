@@ -22,3 +22,6 @@ class TestRunHistoryItem(BaseModel):
     completedAt: Optional[str] = Field(None, alias="completedAt")
     durationMs: Optional[int] = Field(None, alias="durationMs")
     errorMessage: Optional[str] = Field(None, alias="errorMessage")
+    jobId: Optional[str] = Field(None, alias="jobId")
+    scheduledFor: Optional[str] = Field(None, alias="scheduledFor")
+    timeZone: Optional[str] = Field(None, alias="timeZone")
