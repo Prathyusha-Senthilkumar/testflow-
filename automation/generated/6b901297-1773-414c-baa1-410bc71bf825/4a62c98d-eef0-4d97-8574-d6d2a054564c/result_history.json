@@ -158,5 +158,21 @@
         "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/4a62c98d-eef0-4d97-8574-d6d2a054564c/test_case.md",
         "test_result": "Pass",
         "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-23T15:32:15.479956+00:00",
+        "title": "Check curricula button functionality",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/4a62c98d-eef0-4d97-8574-d6d2a054564c/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/4a62c98d-eef0-4d97-8574-d6d2a054564c/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-23T16:07:49.568024+00:00",
+        "title": "Check curricula button functionality",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/4a62c98d-eef0-4d97-8574-d6d2a054564c/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/4a62c98d-eef0-4d97-8574-d6d2a054564c/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
     }
 ]

@@ -6,5 +6,21 @@
         "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
         "test_result": "Pass",
         "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-23T15:33:26.454571+00:00",
+        "title": "Open an active curriculum",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-23T16:14:18.523847+00:00",
+        "title": "Open an active curriculum",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
     }
 ]

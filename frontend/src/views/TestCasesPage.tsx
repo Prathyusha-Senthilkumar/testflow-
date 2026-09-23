@@ -6,7 +6,14 @@ import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { TestCaseFormModal } from "@/components/test-cases/TestCaseFormModal";
-import { api, type TestCaseInput, type TestCaseSummary } from "@/lib/api";
+import {
+  api,
+  TEST_CASE_CATEGORIES,
+  type ReportRun,
+  type TestCaseInput,
+  type TestCaseSummary,
+  type TestSuiteDetail,
+} from "@/lib/api";
 
 export function TestCasesPage() {
   const { id: projectId = "" } = useParams();
@@ -15,25 +22,65 @@ export function TestCasesPage() {
   const [cases, setCases] = useState<TestCaseSummary[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [suiteFilter, setSuiteFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [suites, setSuites] = useState<TestSuiteDetail[]>([]);
+  const [runs, setRuns] = useState<ReportRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [error, setError] = useState("");
 
-  const rows = useMemo(
-    () => cases.filter((t) => `${t.code} ${t.name}`.toLowerCase().includes(q.toLowerCase())),
-    [cases, q]
-  );
+  const suiteByCase = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const suite of suites) {
+      for (const testCase of suite.testCases) {
+        map.set(testCase.id, { id: suite.id, name: suite.name });
+      }
+    }
+    return map;
+  }, [suites]);
+
+  const latestRunByCase = useMemo(() => {
+    const map = new Map<string, ReportRun>();
+    const ordered = [...runs].sort((a, b) => runTime(b) - runTime(a));
+    for (const run of ordered) {
+      if (!run.testCaseId || map.has(run.testCaseId)) continue;
+      if (projectId && run.projectId && run.projectId !== projectId) continue;
+      map.set(run.testCaseId, run);
+    }
+    return map;
+  }, [projectId, runs]);
+
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return cases.filter((testCase) => {
+      if (needle && !`${testCase.code} ${testCase.name}`.toLowerCase().includes(needle)) return false;
+      const suite = suiteByCase.get(testCase.id);
+      const run = latestRunByCase.get(testCase.id);
+      const status = caseStatus(run);
+      if (statusFilter !== "all" && status !== statusFilter) return false;
+      if (suiteFilter !== "all" && (suite?.id ?? "unassigned") !== suiteFilter) return false;
+      if (typeFilter !== "all" && (testCase.category ?? "Functional") !== typeFilter) return false;
+      return true;
+    });
+  }, [cases, latestRunByCase, q, statusFilter, suiteByCase, suiteFilter, typeFilter]);
   const all = rows.length > 0 && selected.length === rows.length;
 
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
     setError("");
-    Promise.all([api.project(projectId), api.testCases(projectId)])
-      .then(([project, testCases]) => {
+    Promise.all([api.project(projectId), api.testCases(projectId), api.testSuites(projectId), api.reportRuns()])
+      .then(async ([project, testCases, suiteSummaries, reportRuns]) => {
+        const details = await Promise.all(
+          suiteSummaries.map((suite) => api.testSuite(projectId, suite.id))
+        );
         setProjectName(project.name);
         setCases(testCases);
+        setSuites(details);
+        setRuns(reportRuns);
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
@@ -103,12 +150,49 @@ export function TestCasesPage() {
               placeholder="Search test cases..."
             />
           </div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            {["All Statuses", "All Suites", "All Types", "All Runs"].map((x) => (
-              <select key={x} className="rounded-lg border bg-indigo-50 px-3 py-2 text-sm">
-                <option>{x}</option>
-              </select>
-            ))}
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+            <select
+              aria-label="Status"
+              className="rounded-lg border bg-indigo-50 px-3 py-2 text-sm"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
+              <option value="all">All Statuses</option>
+              {["Passed", "Failed", "Running", "Queued", "Untested"].map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Suite"
+              className="rounded-lg border bg-indigo-50 px-3 py-2 text-sm"
+              value={suiteFilter}
+              onChange={(event) => setSuiteFilter(event.target.value)}
+            >
+              <option value="all">All Suites</option>
+              {suites.map((suite) => (
+                <option key={suite.id} value={suite.id}>
+                  {suite.name}
+                </option>
+              ))}
+              {cases.some((testCase) => !suiteByCase.has(testCase.id)) && (
+                <option value="unassigned">Unassigned</option>
+              )}
+            </select>
+            <select
+              aria-label="Type"
+              className="rounded-lg border bg-indigo-50 px-3 py-2 text-sm"
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value)}
+            >
+              <option value="all">All Types</option>
+              {TEST_CASE_CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
@@ -144,7 +228,9 @@ export function TestCasesPage() {
           <div className="px-5 py-12 text-center text-sm text-slate-500">Loading test cases...</div>
         ) : rows.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-slate-500">
-            No test cases yet. Create your first test case to get started.
+            {cases.length === 0
+              ? "No test cases yet. Create your first test case to get started."
+              : "No test cases match these filters."}
           </div>
         ) : (
           <table className="w-full min-w-[950px] text-sm">
@@ -169,7 +255,11 @@ export function TestCasesPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((t) => (
+              {rows.map((t) => {
+                const suite = suiteByCase.get(t.id);
+                const run = latestRunByCase.get(t.id);
+                const status = caseStatus(run);
+                return (
                 <tr
                   key={t.id}
                   className="cursor-pointer border-t hover:bg-slate-50"
@@ -211,15 +301,26 @@ export function TestCasesPage() {
                     </span>
                   </td>
                   <td className="px-3">
-                    <span className="text-xs text-slate-400">Unassigned</span>
+                    <span className={suite ? "text-xs text-slate-700" : "text-xs text-slate-400"}>
+                      {suite?.name ?? "Unassigned"}
+                    </span>
                   </td>
                   <td className="px-3">
-                    <StatusBadge status="Untested" />
+                    {status === "Queued" ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                        Queued
+                      </span>
+                    ) : (
+                      <StatusBadge status={status} />
+                    )}
                   </td>
-                  <td className="px-3 text-slate-500">Not run</td>
-                  <td className="px-3">—</td>
+                  <td className="px-3 text-slate-500">
+                    {run ? formatWhen(run.completedAt || run.startedAt) : "Not run"}
+                  </td>
+                  <td className="px-3">{run?.runBy || "—"}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -238,6 +339,25 @@ export function TestCasesPage() {
       />
     </div>
   );
+}
+
+function caseStatus(run: ReportRun | undefined): "Passed" | "Failed" | "Running" | "Untested" | "Queued" {
+  if (!run) return "Untested";
+  if (run.status === "Passed" || run.status === "Failed" || run.status === "Running" || run.status === "Queued") {
+    return run.status;
+  }
+  return "Untested";
+}
+
+function runTime(run: ReportRun): number {
+  const value = new Date(run.completedAt || run.startedAt || "").getTime();
+  return Number.isNaN(value) ? 0 : value;
+}
+
+function formatWhen(value?: string | null): string {
+  if (!value) return "Not run";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Not run" : parsed.toLocaleString();
 }
 
 export default TestCasesPage;

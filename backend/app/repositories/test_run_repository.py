@@ -118,6 +118,116 @@ class TestRunRepository:
             )
         return items
 
+    def list_report(self, limit: int = 500) -> list[dict]:
+        """Persisted runs with project and suite names. Does not return job ids."""
+        if not self.db:
+            return []
+        runs = (
+            self.db.from_("test_runs")
+            .select(
+                "id,test_case_id,status,started_at,completed_at,duration_ms,error_message,run_by"
+            )
+            .order("started_at", desc=True)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        cases, suites, projects = self._report_lookups(runs)
+        return [self._report_row(run, cases, suites, projects) for run in runs]
+
+    def get_report(self, run_id: str) -> Optional[dict]:
+        if not self.db:
+            return None
+        rows = (
+            self.db.from_("test_runs")
+            .select(
+                "id,test_case_id,status,started_at,completed_at,duration_ms,error_message,run_by"
+            )
+            .eq("id", run_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not rows:
+            return None
+        return self._report_row(rows[0], *self._report_lookups(rows))
+
+    def _report_lookups(self, runs: list[dict]) -> tuple[dict, dict, dict]:
+        case_ids = list({str(run["test_case_id"]) for run in runs if run.get("test_case_id")})
+        cases: dict[str, dict] = {}
+        if case_ids:
+            cases = {
+                str(row["id"]): row
+                for row in (
+                    self.db.from_("test_cases")
+                    .select("id,name,test_case_code,suite_id")
+                    .in_("id", case_ids)
+                    .execute()
+                    .data
+                    or []
+                )
+            }
+        suite_ids = list({str(case["suite_id"]) for case in cases.values() if case.get("suite_id")})
+        suites: dict[str, dict] = {}
+        if suite_ids:
+            suites = {
+                str(row["id"]): row
+                for row in (
+                    self.db.from_("test_suites")
+                    .select("id,name,project_id")
+                    .in_("id", suite_ids)
+                    .execute()
+                    .data
+                    or []
+                )
+            }
+        project_ids = list(
+            {str(suite["project_id"]) for suite in suites.values() if suite.get("project_id")}
+        )
+        projects: dict[str, dict] = {}
+        if project_ids:
+            projects = {
+                str(row["id"]): row
+                for row in (
+                    self.db.from_("projects")
+                    .select("id,name")
+                    .in_("id", project_ids)
+                    .execute()
+                    .data
+                    or []
+                )
+            }
+        return cases, suites, projects
+
+    @staticmethod
+    def _report_row(
+        run: dict,
+        cases: dict,
+        suites: dict,
+        projects: dict,
+    ) -> dict:
+        case = cases.get(str(run.get("test_case_id") or "")) or {}
+        suite = suites.get(str(case.get("suite_id") or "")) or {}
+        project = projects.get(str(suite.get("project_id") or "")) or {}
+        return {
+            "id": str(run.get("id")),
+            "projectId": suite.get("project_id"),
+            "projectName": project.get("name"),
+            "suiteId": case.get("suite_id"),
+            "suiteName": suite.get("name"),
+            "testCaseId": run.get("test_case_id"),
+            "testCaseCode": case.get("test_case_code"),
+            "testName": case.get("name"),
+            "status": str(run.get("status") or "Not Run"),
+            "startedAt": run.get("started_at"),
+            "completedAt": run.get("completed_at"),
+            "durationMs": run.get("duration_ms"),
+            "errorMessage": run.get("error_message"),
+            "runBy": run.get("run_by"),
+        }
+
     def mark_running(self, job_id: str) -> None:
         if not self.db:
             return

@@ -53,6 +53,23 @@ export type ScheduledExecution = {
   timeZone?: string | null;
 };
 
+export type ReportRun = {
+  id: string;
+  projectId?: string | null;
+  projectName?: string | null;
+  suiteId?: string | null;
+  suiteName?: string | null;
+  testCaseId?: string | null;
+  testCaseCode?: string | null;
+  testName?: string | null;
+  status: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  durationMs?: number | null;
+  errorMessage?: string | null;
+  runBy?: string | null;
+};
+
 export type TestRunHistoryItem = {
   id: string;
   testCaseId?: string | null;
@@ -285,6 +302,8 @@ export const api = {
     if (testCaseId) params.set("testCaseId", testCaseId);
     return request<TestRunHistoryItem[]>(`/test-runs?${params.toString()}`);
   },
+  reportRuns: () => request<ReportRun[]>("/test-runs/report?limit=1000"),
+  reportRun: (runId: string) => request<ReportRun>(`/test-runs/${runId}`),
 };
 
 export type TestSuiteInput = {
