@@ -70,5 +70,61 @@
         "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_case.md",
         "test_result": "Pass",
         "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T09:03:12.876809+00:00",
+        "title": "Unknown search shows no curricula",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T09:24:39.547796+00:00",
+        "title": "Unknown search shows no curricula",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T10:17:08.546259+00:00",
+        "title": "Unknown search shows no curricula",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T10:18:55.074944+00:00",
+        "title": "Unknown search shows no curricula",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T10:49:41.884230+00:00",
+        "title": "Unknown search shows no curricula",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T11:05:31.706231+00:00",
+        "title": "Unknown search shows no curricula",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T14:15:52.888781+00:00",
+        "title": "Unknown search shows no curricula",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/2ce1c951-de1c-4235-9d0a-14e8558f3340/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
     }
 ]

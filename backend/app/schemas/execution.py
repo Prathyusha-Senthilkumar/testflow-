@@ -3,7 +3,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ExecutionState = Literal["queued", "running", "completed", "failed", "scheduled"]
+ExecutionState = Literal["queued", "running", "completed", "failed", "scheduled", "cancelled"]
 
 
 class StartExecutionRequest(BaseModel):
@@ -61,6 +61,7 @@ class ExecutionStatusResponse(BaseModel):
     result: Optional[ExecutionResultPayload] = None
     error: Optional[str] = None
     scheduled_for: Optional[datetime] = Field(None, alias="scheduledFor")
+    test_run_id: Optional[str] = Field(None, alias="testRunId")
 
 
 class StartSuiteBatchRequest(BaseModel):
@@ -68,15 +69,18 @@ class StartSuiteBatchRequest(BaseModel):
 
     project_id: str = Field(..., alias="projectId")
     suite_id: str = Field(..., alias="suiteId")
+    environment_id: str = Field(..., alias="environmentId")
 
 
 class StartProjectBatchRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     project_id: str = Field(..., alias="projectId")
+    suite_category: Optional[str] = Field(None, alias="suiteCategory")
+    environment_id: str = Field(..., alias="environmentId")
 
 
-BatchCaseOutcome = Literal["skipped", "queued", "running", "passed", "failed"]
+BatchCaseOutcome = Literal["skipped", "queued", "running", "passed", "failed", "cancelled"]
 
 
 class BatchCaseResult(BaseModel):
@@ -87,6 +91,10 @@ class BatchCaseResult(BaseModel):
     name: str
     outcome: BatchCaseOutcome
     reason: Optional[str] = None
+    duration_ms: Optional[int] = Field(None, alias="durationMs")
+    test_run_id: Optional[str] = Field(None, alias="testRunId")
+    suite_id: Optional[str] = Field(None, alias="suiteId")
+    suite_name: Optional[str] = Field(None, alias="suiteName")
 
 
 class BatchExecutionStatus(BaseModel):
@@ -105,7 +113,16 @@ class BatchExecutionStatus(BaseModel):
     running: int
     completed: int
     skipped: int
+    cancelled: int = 0
+    cancel_requested: bool = Field(False, alias="cancelRequested")
     finished: bool
+    created_at: Optional[datetime] = Field(None, alias="createdAt")
+    project_name: Optional[str] = Field(None, alias="projectName")
+    suite_name: Optional[str] = Field(None, alias="suiteName")
+    suite_category: Optional[str] = Field(None, alias="suiteCategory")
+    environment_id: Optional[str] = Field(None, alias="environmentId")
+    environment_name: Optional[str] = Field(None, alias="environmentName")
+    duration_ms: Optional[int] = Field(None, alias="durationMs")
     cases: list[BatchCaseResult]
 
 

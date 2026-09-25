@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import type { TestSuiteInput } from "@/lib/api";
+import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS, type SuiteCategory } from "@/lib/suiteCategory";
 
 type Props = {
   open: boolean;
@@ -11,7 +12,7 @@ type Props = {
   onSubmit: (value: TestSuiteInput) => Promise<void> | void;
 };
 
-const emptyForm: TestSuiteInput = { name: "", description: "" };
+const emptyForm: TestSuiteInput = { name: "", description: "", category: "" };
 
 export function CreateSuiteModal({ open, loading = false, onClose, onSubmit }: Props) {
   const [form, setForm] = useState<TestSuiteInput>(emptyForm);
@@ -31,9 +32,14 @@ export function CreateSuiteModal({ open, loading = false, onClose, onSubmit }: P
       setError("Suite name is required.");
       return;
     }
+    if (!form.category) {
+      setError("Choose a category.");
+      return;
+    }
     await onSubmit({
       name: form.name.trim(),
       description: form.description?.trim() || undefined,
+      category: form.category,
     });
   }
 
@@ -62,6 +68,24 @@ export function CreateSuiteModal({ open, loading = false, onClose, onSubmit }: P
           onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
           placeholder="Admissions Regression"
         />
+        <label className="block text-sm font-medium text-slate-700">
+          Category
+          <select
+            required
+            className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
+            value={form.category ?? ""}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, category: event.target.value as SuiteCategory | "" }))
+            }
+          >
+            <option value="">Select Category</option>
+            {SUITE_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {SUITE_CATEGORY_LABELS[category]}
+              </option>
+            ))}
+          </select>
+        </label>
         <Input
           label="Description"
           value={form.description ?? ""}

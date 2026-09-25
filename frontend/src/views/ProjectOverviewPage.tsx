@@ -2,107 +2,62 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Eye, Play, Plus, Settings2, Sparkles } from "lucide-react";
-import { Link, useParams } from "@/lib/navigation";
-import { api, type BatchExecutionStatus, type ProjectDetail, type ProjectInput } from "@/lib/api";
+import { Link, useNavigate, useParams } from "@/lib/navigation";
+import { api, type EnvironmentSummary, type ProjectDetail, type ProjectInput } from "@/lib/api";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
 import { ProjectFormModal } from "@/components/projects/ProjectFormModal";
-import { RunProgressModal, type RunFact } from "@/components/runs/RunProgressModal";
-
-function batchProgress(run: BatchExecutionStatus): string {
-  const done = run.passed + run.failed + run.skipped;
-  if (!run.finished) {
-    return `Running... ${done} / ${run.total} completed`;
-  }
-  return `${run.total} total · ${run.passed} passed · ${run.failed} failed · ${run.skipped} skipped`;
-}
+import { SuiteCategoryBadge } from "@/components/suites/SuiteCategoryBadge";
+import { Modal } from "@/components/ui/modal";
+import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS, type SuiteCategory } from "@/lib/suiteCategory";
 
 export function ProjectOverviewPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const projectId = id ?? "";
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [error, setError] = useState("");
-  const [projectRun, setProjectRun] = useState<BatchExecutionStatus | null>(null);
-  const [suiteRuns, setSuiteRuns] = useState<Record<string, BatchExecutionStatus>>({});
   const [startingProject, setStartingProject] = useState(false);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [suiteCategory, setSuiteCategory] = useState<SuiteCategory>("smoke");
+  const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
+  const [environmentId, setEnvironmentId] = useState("");
+  const [suiteDialogId, setSuiteDialogId] = useState<string | null>(null);
   const [startingSuiteId, setStartingSuiteId] = useState<string | null>(null);
-  const [runDialog, setRunDialog] = useState<{ kind: "project" } | { kind: "suite"; suiteId: string } | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
     api.project(projectId).then(setProject).catch((err: Error) => setError(err.message)).finally(() => setLoading(false));
+    api.environments(projectId).then(setEnvironments).catch(() => setEnvironments([]));
   }, [projectId]);
 
-  const projectActive = Boolean(projectRun && !projectRun.finished);
-  const activeSuiteIds = Object.values(suiteRuns)
-    .filter((run) => !run.finished)
-    .map((run) => run.batchId)
-    .join(",");
-
-  useEffect(() => {
-    if (!projectActive && !activeSuiteIds) return;
-    let cancelled = false;
-    const timer = window.setInterval(() => {
-      if (projectRun && !projectRun.finished) {
-        api.getBatchRun(projectRun.batchId).then((next) => {
-          if (cancelled) return;
-          setProjectRun(next);
-          if (next.finished && projectId) {
-            api.project(projectId).then(setProject).catch(() => undefined);
-          }
-        }).catch((err: Error) => {
-          if (!cancelled) setError(err.message);
-        });
-      }
-      for (const run of Object.values(suiteRuns)) {
-        if (run.finished) continue;
-        api.getBatchRun(run.batchId).then((next) => {
-          if (cancelled || !next.suiteId) return;
-          setSuiteRuns((current) => ({ ...current, [next.suiteId as string]: next }));
-          if (next.finished && projectId) {
-            api.project(projectId).then(setProject).catch(() => undefined);
-          }
-        }).catch((err: Error) => {
-          if (!cancelled) setError(err.message);
-        });
-      }
-    }, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [projectActive, activeSuiteIds, projectRun, suiteRuns, projectId]);
-
   async function runProject() {
-    if (!projectId || projectActive || startingProject) return;
+    if (!projectId || startingProject || !environmentId) return;
     setStartingProject(true);
-    setRunDialog({ kind: "project" });
     setError("");
     try {
-      setProjectRun(await api.startProjectRun(projectId));
+      const started = await api.startProjectRun(projectId, suiteCategory, environmentId);
+      setProjectDialogOpen(false);
+      navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the project run");
-    } finally {
       setStartingProject(false);
     }
   }
 
-  async function runSuite(suiteId: string) {
-    if (!projectId || startingSuiteId) return;
-    const current = suiteRuns[suiteId];
-    if (current && !current.finished) return;
-    setStartingSuiteId(suiteId);
-    setRunDialog({ kind: "suite", suiteId });
+  async function runSuite() {
+    if (!projectId || !suiteDialogId || startingSuiteId || !environmentId) return;
+    setStartingSuiteId(suiteDialogId);
     setError("");
     try {
-      const started = await api.startSuiteRun(projectId, suiteId);
-      setSuiteRuns((existing) => ({ ...existing, [suiteId]: started }));
+      const started = await api.startSuiteRun(projectId, suiteDialogId, environmentId);
+      setSuiteDialogId(null);
+      navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the suite run");
-    } finally {
       setStartingSuiteId(null);
     }
   }
@@ -152,46 +107,6 @@ export function ProjectOverviewPage() {
     );
   }
 
-  const dialogRun =
-    runDialog?.kind === "project"
-      ? projectRun
-      : runDialog?.kind === "suite"
-        ? suiteRuns[runDialog.suiteId] ?? null
-        : null;
-  const dialogSuite =
-    runDialog?.kind === "suite"
-      ? project.suitesList.find((suite) => suite.id === runDialog.suiteId)
-      : undefined;
-  const dialogRunning = Boolean(
-    runDialog &&
-      (dialogRun ? !dialogRun.finished : runDialog.kind === "project" ? startingProject : startingSuiteId === runDialog.suiteId)
-  );
-  const dialogStatus = dialogRun
-    ? batchProgress(dialogRun)
-    : dialogRunning
-      ? "Starting the run..."
-      : "Could not start the run";
-  const dialogFacts: RunFact[] = dialogRun
-    ? [
-        { label: "Total", value: String(dialogRun.total) },
-        { label: "Passed", value: String(dialogRun.passed) },
-        { label: "Failed", value: String(dialogRun.failed) },
-        { label: "Skipped", value: String(dialogRun.skipped) },
-      ]
-    : [
-        {
-          label: "Test cases",
-          value: String(runDialog?.kind === "project" ? project.cases : dialogSuite?.cases ?? 0),
-        },
-      ];
-  const dialogCases = (dialogRun?.cases ?? []).map((item) => ({
-    id: item.testCaseId,
-    code: item.testCaseCode,
-    name: item.name,
-    outcome: item.outcome,
-    reason: item.reason,
-  }));
-
   return (
     <div className="p-6 lg:p-8">
       <PageHeader
@@ -224,12 +139,16 @@ export function ProjectOverviewPage() {
             </Link>
             <button
               type="button"
-              onClick={runProject}
-              disabled={projectActive || startingProject || project.cases === 0}
+              onClick={() => {
+                setError("");
+                setSuiteCategory("smoke");
+                setProjectDialogOpen(true);
+              }}
+              disabled={startingProject || project.cases === 0}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Play size={15} className="mr-1 inline" />
-              {projectActive || startingProject ? "Running project..." : "Run Project"}
+              {startingProject ? "Starting project..." : "Run Project"}
             </button>
           </>
         }
@@ -241,12 +160,6 @@ export function ProjectOverviewPage() {
         </a>
       </p>
       {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-      {projectRun && (
-        <p className={`mt-3 text-sm ${projectRun.finished ? "text-slate-700" : "text-indigo-700"}`}>
-          {projectRun.finished ? "Project run finished. " : "Running project. "}
-          {batchProgress(projectRun)}
-        </p>
-      )}
 
       <div className="mt-6 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-4 text-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -285,7 +198,10 @@ export function ProjectOverviewPage() {
           <div key={suite.id} className="rounded-lg bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="font-semibold">{suite.name}</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold">{suite.name}</h3>
+                  <SuiteCategoryBadge category={suite.category} />
+                </div>
                 <p className="mt-1 font-mono text-xs text-slate-500">{suite.cases} Test Cases</p>
               </div>
               <div className="text-right">
@@ -307,23 +223,18 @@ export function ProjectOverviewPage() {
               </span>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-              {suiteRuns[suite.id] && (
-                <p className={`mr-auto text-xs ${suiteRuns[suite.id].finished ? "text-slate-600" : "text-indigo-700"}`}>
-                  {batchProgress(suiteRuns[suite.id])}
-                </p>
-              )}
               <Link to={`/projects/${project.id}/suites/${suite.id}`} className="rounded-lg border px-3 py-1.5 text-sm">Open Suite</Link>
               <button
                 type="button"
-                onClick={() => runSuite(suite.id)}
-                disabled={
-                  startingSuiteId === suite.id ||
-                  Boolean(suiteRuns[suite.id] && !suiteRuns[suite.id].finished)
-                }
+                onClick={() => {
+                  setError("");
+                  setSuiteDialogId(suite.id);
+                }}
+                disabled={startingSuiteId === suite.id}
                 className="rounded-lg bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Play size={13} className="mr-1 inline" />
-                {suiteRuns[suite.id] && !suiteRuns[suite.id].finished ? "Running..." : "Run Suite"}
+                {startingSuiteId === suite.id ? "Starting..." : "Run Suite"}
               </button>
             </div>
           </div>
@@ -335,25 +246,91 @@ export function ProjectOverviewPage() {
         </div>
       )}
 
-      <RunProgressModal
-        open={runDialog !== null}
-        title={
-          runDialog?.kind === "project"
-            ? "Project run"
-            : "Suite run"
+      <Modal
+        open={projectDialogOpen}
+        onClose={() => {
+          if (!startingProject) setProjectDialogOpen(false);
+        }}
+        title="Run Project"
+        description={project.name}
+        footer={
+          <>
+            <button
+              type="button"
+              className="rounded-lg border px-4 py-2 text-sm"
+              disabled={startingProject}
+              onClick={() => setProjectDialogOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              disabled={startingProject || !environmentId}
+              onClick={runProject}
+            >
+              {startingProject ? "Starting..." : "Run Project"}
+            </button>
+          </>
         }
-        description={
-          runDialog?.kind === "suite"
-            ? project.suitesList.find((suite) => suite.id === runDialog.suiteId)?.name
-            : project.name
+      >
+        <label className="block text-sm font-medium text-slate-700">
+          Suite Category
+          <select
+            className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
+            value={suiteCategory}
+            onChange={(event) => setSuiteCategory(event.target.value as SuiteCategory)}
+          >
+            {SUITE_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {SUITE_CATEGORY_LABELS[category]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <EnvironmentField
+          environments={environments}
+          value={environmentId}
+          onChange={setEnvironmentId}
+        />
+        {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+      </Modal>
+
+      <Modal
+        open={suiteDialogId !== null}
+        onClose={() => {
+          if (!startingSuiteId) setSuiteDialogId(null);
+        }}
+        title="Run Test Suite"
+        description={project.suitesList.find((suite) => suite.id === suiteDialogId)?.name}
+        footer={
+          <>
+            <button
+              type="button"
+              className="rounded-lg border px-4 py-2 text-sm"
+              disabled={startingSuiteId !== null}
+              onClick={() => setSuiteDialogId(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              disabled={startingSuiteId !== null || !environmentId}
+              onClick={runSuite}
+            >
+              {startingSuiteId ? "Starting..." : "Run Suite"}
+            </button>
+          </>
         }
-        running={dialogRunning}
-        statusLabel={dialogStatus}
-        facts={dialogFacts}
-        cases={dialogCases}
-        error={runDialog && error ? error : undefined}
-        onClose={() => setRunDialog(null)}
-      />
+      >
+        <EnvironmentField
+          environments={environments}
+          value={environmentId}
+          onChange={setEnvironmentId}
+        />
+        {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+      </Modal>
 
       <ProjectFormModal
         open={editOpen}
@@ -365,6 +342,41 @@ export function ProjectOverviewPage() {
         onSubmit={updateProject}
       />
     </div>
+  );
+}
+
+function EnvironmentField({
+  environments,
+  value,
+  onChange,
+}: {
+  environments: EnvironmentSummary[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  if (environments.length === 0) {
+    return (
+      <p className="mt-3 text-sm text-amber-700">
+        No environments are configured for this project. Add an environment before running tests.
+      </p>
+    );
+  }
+  return (
+    <label className="mt-3 block text-sm font-medium text-slate-700">
+      Environment
+      <select
+        className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">Select Environment</option>
+        {environments.map((environment) => (
+          <option key={environment.id} value={environment.id}>
+            {environment.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 

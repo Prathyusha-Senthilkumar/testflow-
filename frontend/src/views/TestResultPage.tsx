@@ -39,7 +39,6 @@ export function TestResultPage() {
           >
             {failed ? "● FAILED" : "✓ PASSED"}
           </span>
-          <span className="font-mono text-xs text-slate-500">Job {execution.jobId}</span>
           <span className="text-xs text-slate-500">State: {execution.state}</span>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-4">

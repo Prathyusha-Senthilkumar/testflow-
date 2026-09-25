@@ -68,6 +68,7 @@ class TestSuiteRepository:
             projectId=str(row.get("project_id")),
             name=str(row.get("name")),
             description=row.get("description"),
+            category=row.get("category") or "regression",
             caseCount=self._count_cases(str(row.get("id"))),
             createdAt=row.get("created_at"),
         )
@@ -113,6 +114,7 @@ class TestSuiteRepository:
                 projectId=project_id,
                 name=input_dto.name.strip(),
                 description=input_dto.description,
+                category=input_dto.category,
                 caseCount=0,
                 createdAt=datetime.now(timezone.utc).isoformat(),
             )
@@ -127,6 +129,7 @@ class TestSuiteRepository:
                     "project_id": project_id,
                     "name": input_dto.name.strip(),
                     "description": input_dto.description,
+                    "category": input_dto.category,
                 }
             )
             .execute()
@@ -143,6 +146,8 @@ class TestSuiteRepository:
                 updates["name"] = input_dto.name.strip()
             if input_dto.description is not None:
                 updates["description"] = input_dto.description.strip() or None
+            if input_dto.category is not None:
+                updates["category"] = input_dto.category
             updated = suite.model_copy(update=updates)
             self._replace(project_id, suite_id, updated)
             return self._with_count(project_id, updated)
@@ -152,6 +157,8 @@ class TestSuiteRepository:
             changes["name"] = input_dto.name.strip()
         if input_dto.description is not None:
             changes["description"] = input_dto.description.strip() or None
+        if input_dto.category is not None:
+            changes["category"] = input_dto.category
         if changes:
             self.db.from_("test_suites").update(changes).eq("project_id", project_id).eq(
                 "id", suite_id

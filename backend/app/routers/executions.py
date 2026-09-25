@@ -46,7 +46,7 @@ def start_suite_execution(
     body: StartSuiteBatchRequest,
     service: ExecutionService = Depends(get_execution_service),
 ):
-    return service.start_suite(body.project_id, body.suite_id)
+    return service.start_suite(body.project_id, body.suite_id, body.environment_id)
 
 
 @router.post("/projects", response_model=BatchExecutionStatus)
@@ -54,7 +54,23 @@ def start_project_execution(
     body: StartProjectBatchRequest,
     service: ExecutionService = Depends(get_execution_service),
 ):
-    return service.start_project(body.project_id)
+    return service.start_project(body.project_id, body.suite_category, body.environment_id)
+
+
+@router.post("/batches/{batch_id}/cancel", response_model=BatchExecutionStatus)
+def cancel_batch_execution(
+    batch_id: str,
+    service: ExecutionService = Depends(get_execution_service),
+):
+    return service.cancel_batch(batch_id)
+
+
+@router.post("/batches/{batch_id}/rerun", response_model=BatchExecutionStatus)
+def rerun_batch_execution(
+    batch_id: str,
+    service: ExecutionService = Depends(get_execution_service),
+):
+    return service.rerun_batch(batch_id)
 
 
 @router.get("/batches/{batch_id}", response_model=BatchExecutionStatus)

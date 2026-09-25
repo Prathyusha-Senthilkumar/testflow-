@@ -34,6 +34,7 @@ const outcomeClass: Record<RunCaseRow["outcome"], string> = {
   passed: "text-teal-700",
   failed: "text-red-600",
   skipped: "text-amber-700",
+  cancelled: "text-orange-700",
 };
 
 export function RunProgressModal({

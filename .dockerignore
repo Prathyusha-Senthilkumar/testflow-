@@ -12,7 +12,11 @@
 frontend/node_modules
 frontend/.next
 backend/node_modules
+worker/node_modules
 backend/src
+results
+**/test-results
+**/playwright-report
 **/*.md
 .cursor
 terminals

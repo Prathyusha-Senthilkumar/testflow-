@@ -6,6 +6,7 @@ class SuiteSummary(BaseModel):
 
     id: str
     name: str
+    category: str = "regression"
     cases: int = 0
     passed: int = 0
     failed: int = 0

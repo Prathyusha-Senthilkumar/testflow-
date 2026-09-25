@@ -1,67 +1,43 @@
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Optional
 
-from rq.job import Job
-from rq.registry import ScheduledJobRegistry
-
-from app.queue.connection import get_test_execution_queue
+from app.queue.job_store import TestJob, cancel_scheduled, scheduled_jobs, scheduled_time, submit_job
 
 
 class QueueService:
-    """Enqueue work onto the TestFlow test-execution RQ queue."""
+    """Put test runs on the Redis list the Node worker reads."""
 
-    def enqueue(
+    def submit(
         self,
-        func: Callable[..., Any],
-        *args: Any,
-        **kwargs: Any,
-    ) -> Job:
-        queue = get_test_execution_queue()
-        return queue.enqueue(func, *args, **kwargs)
+        *,
+        config_path: str,
+        project_id: Optional[str],
+        test_case_code: Optional[str],
+        test_case_id: Optional[str],
+        headed: Optional[bool],
+        time_zone: Optional[str],
+        run_at: Optional[datetime],
+        environment_base_url: Optional[str] = None,
+    ) -> TestJob:
+        return submit_job(
+            config_path=config_path,
+            project_id=project_id,
+            test_case_code=test_case_code,
+            test_case_id=test_case_id,
+            headed=headed,
+            time_zone=time_zone,
+            run_at=run_at,
+            environment_base_url=environment_base_url,
+        )
 
-    def enqueue_at(
-        self,
-        run_at: datetime,
-        func: Callable[..., Any],
-        *args: Any,
-        **kwargs: Any,
-    ) -> Job:
-        """Schedule the same job for later on the same queue (RQ scheduler)."""
-        queue = get_test_execution_queue()
-        return queue.enqueue_at(run_at, func, *args, **kwargs)
+    def scheduled_jobs(self) -> list[TestJob]:
+        return scheduled_jobs()
 
-    def scheduled_jobs(self) -> list[Job]:
-        """Pending scheduled jobs, soonest first."""
-        queue = get_test_execution_queue()
-        registry = ScheduledJobRegistry(queue=queue)
-        jobs: list[tuple[datetime, Job]] = []
-        for job_id in registry.get_job_ids():
-            try:
-                job = Job.fetch(job_id, connection=queue.connection)
-                jobs.append((registry.get_scheduled_time(job), job))
-            except Exception:
-                continue
-        jobs.sort(key=lambda item: item[0])
-        return [job for _, job in jobs]
-
-    def scheduled_time(self, job: Job) -> Optional[datetime]:
-        queue = get_test_execution_queue()
-        try:
-            return ScheduledJobRegistry(queue=queue).get_scheduled_time(job)
-        except Exception:
-            return None
+    def scheduled_time(self, job: TestJob) -> Optional[datetime]:
+        return scheduled_time(job)
 
     def cancel_scheduled(self, job_id: str) -> bool:
-        queue = get_test_execution_queue()
-        registry = ScheduledJobRegistry(queue=queue)
-        try:
-            job = Job.fetch(job_id, connection=queue.connection)
-        except Exception:
-            return False
-        if job_id not in registry.get_job_ids():
-            return False
-        registry.remove(job, delete_job=True)
-        return True
+        return cancel_scheduled(job_id)
 
 
 _queue_service: Optional[QueueService] = None

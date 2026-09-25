@@ -62,5 +62,61 @@
         "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_case.md",
         "test_result": "Pass",
         "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T09:22:27.760962+00:00",
+        "title": "Draft filter shows resume in builder",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T09:24:57.129499+00:00",
+        "title": "Draft filter shows resume in builder",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T10:17:26.199305+00:00",
+        "title": "Draft filter shows resume in builder",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T10:19:08.732792+00:00",
+        "title": "Draft filter shows resume in builder",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T10:49:59.750409+00:00",
+        "title": "Draft filter shows resume in builder",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T11:05:50.527008+00:00",
+        "title": "Draft filter shows resume in builder",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T14:16:08.851508+00:00",
+        "title": "Draft filter shows resume in builder",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/25f105a1-6943-44df-8330-76914fba37c9/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
     }
 ]

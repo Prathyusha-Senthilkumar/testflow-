@@ -24,6 +24,8 @@ create table if not exists public.test_suites (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   name text not null,
+  category text not null default 'regression'
+    check (category in ('smoke', 'sanity', 'regression', 'full_regression')),
   source text not null default 'Manual' check (source in ('Manual','Suggested')),
   created_at timestamptz default now()
 );

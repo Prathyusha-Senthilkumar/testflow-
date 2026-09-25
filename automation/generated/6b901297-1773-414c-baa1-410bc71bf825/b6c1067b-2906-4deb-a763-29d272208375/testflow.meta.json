@@ -1,0 +1,20 @@
+{
+  "startPath": "/admin/tenants/",
+  "environmentId": "6e315a16-9a75-4ba8-a988-141b79d4c52c",
+  "authProfileId": "auth-1790159757408",
+  "resolvedStartUrl": "https://evolv-dev.revature.io/admin/tenants/",
+  "assertions": [
+    {
+      "id": "expected-result",
+      "type": "text_visible",
+      "value": "\"Summer bootcamp\" created"
+    }
+  ],
+  "storageSeeds": [],
+  "storageAssertions": [],
+  "accessibilityEnabled": false,
+  "networkCheckEnabled": false,
+  "expectedResult": "\"Summer bootcamp\" created",
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}

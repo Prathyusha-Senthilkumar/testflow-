@@ -46,7 +46,7 @@ def write_meta(
         "accessibilityEnabled": bool(accessibility_enabled),
         "networkCheckEnabled": bool(network_check_enabled),
         "expectedResult": (expected_result or "").strip() or None,
-        "recordedModule": script_path.name if script_path.name else "test_recorded.py",
+        "recordedModule": script_path.name if script_path.name else "test_recorded.ts",
         "recordedTestName": detect_recorded_test_name(script_path),
     }
     meta_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -65,7 +65,7 @@ def read_meta(repo_root: Path, relative_test_file: str) -> dict:
             "accessibilityEnabled": False,
             "networkCheckEnabled": False,
             "expectedResult": None,
-            "recordedModule": "test_recorded.py",
+            "recordedModule": "test_recorded.ts",
             "recordedTestName": "test_recorded",
         }
     return json.loads(meta_path.read_text(encoding="utf-8"))

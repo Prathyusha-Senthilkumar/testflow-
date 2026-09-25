@@ -44,8 +44,7 @@ services:
   worker:
     build:
       context: .
-      dockerfile: backend/Dockerfile
-      target: worker
+      dockerfile: worker/Dockerfile
     environment:
       REDIS_URL: redis://redis:6379/0
       USE_DEMO_DATA: ${USE_DEMO_DATA:-true}

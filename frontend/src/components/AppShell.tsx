@@ -55,7 +55,10 @@ function Breadcrumbs(){
     } else if(parts[2]==='results'){
       crumbs.push({label:'Test Result'});
     }
-  } else if(parts[0]==='runs') crumbs=[{label:'Test Runs'}];
+  } else if(parts[0]==='runs'){
+    crumbs=[{label:'Test Runs', to: parts[1] ? '/runs' : undefined}];
+    if(parts[1]==='batches' && parts[2]) crumbs.push({label:'Run details'});
+  }
   else if(parts[0]==='reports') crumbs=[{label:'Reports'}];
   else if(parts[0]==='settings') crumbs=[{label:'Settings'}];
 

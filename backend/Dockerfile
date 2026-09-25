@@ -1,5 +1,6 @@
 # Shared TestFlow Python image (backend + worker targets).
-FROM python:3.12-bookworm AS python-base
+# Slim keeps Python 3.12 on Debian Bookworm and drops the full image's compilers.
+FROM python:3.12-slim-bookworm AS python-base
 
 WORKDIR /app/backend
 
@@ -24,7 +25,9 @@ COPY automation /app/automation
 COPY tests /app/tests
 
 # Record Test (backend) and Run Test (worker) both use Playwright from the same pip version.
-RUN playwright install chromium --with-deps
+# --with-deps installs the Chromium libraries that slim does not include. Chromium only.
+RUN playwright install chromium --with-deps \
+    && rm -rf /var/lib/apt/lists/*
 
 FROM python-base AS backend
 

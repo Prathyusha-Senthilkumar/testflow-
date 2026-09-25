@@ -42,7 +42,7 @@ export type ProjectInput = {
   description?: string;
 };
 
-export type ExecutionState = "queued" | "running" | "completed" | "failed" | "scheduled";
+export type ExecutionState = "queued" | "running" | "completed" | "failed" | "scheduled" | "cancelled";
 
 export type ScheduledExecution = {
   jobId: string;
@@ -108,9 +108,10 @@ export type ExecutionStatus = {
   error?: string | null;
   scheduledFor?: string | null;
   timeZone?: string | null;
+  testRunId?: string | null;
 };
 
-export type BatchCaseOutcome = "skipped" | "queued" | "running" | "passed" | "failed";
+export type BatchCaseOutcome = "skipped" | "queued" | "running" | "passed" | "failed" | "cancelled";
 
 export type BatchCaseResult = {
   testCaseId: string;
@@ -118,6 +119,10 @@ export type BatchCaseResult = {
   name: string;
   outcome: BatchCaseOutcome;
   reason?: string | null;
+  durationMs?: number | null;
+  testRunId?: string | null;
+  suiteId?: string | null;
+  suiteName?: string | null;
 };
 
 export type BatchExecutionStatus = {
@@ -132,8 +137,39 @@ export type BatchExecutionStatus = {
   running: number;
   completed: number;
   skipped: number;
+  cancelled?: number;
+  cancelRequested?: boolean;
   finished: boolean;
+  createdAt?: string | null;
+  projectName?: string | null;
+  suiteName?: string | null;
+  suiteCategory?: string | null;
+  environmentId?: string | null;
+  environmentName?: string | null;
+  durationMs?: number | null;
   cases: BatchCaseResult[];
+};
+
+export type GroupedRun = {
+  id: string;
+  runType: "individual" | "suite" | "project";
+  title: string;
+  code?: string | null;
+  suiteCategory?: string | null;
+  environmentName?: string | null;
+  status: string;
+  startedAt?: string | null;
+  durationMs?: number | null;
+  projectId?: string | null;
+  total?: number | null;
+  completed?: number | null;
+  passed?: number | null;
+  failed?: number | null;
+  skipped?: number | null;
+  queued?: number | null;
+  running?: number | null;
+  cancelled?: number | null;
+  errorMessage?: string | null;
 };
 
 export type StartExecutionInput = {
@@ -280,23 +316,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
-  startSuiteRun: (projectId: string, suiteId: string) =>
+  startSuiteRun: (projectId: string, suiteId: string, environmentId: string) =>
     request<BatchExecutionStatus>("/executions/suites", {
       method: "POST",
-      body: JSON.stringify({ projectId, suiteId }),
+      body: JSON.stringify({ projectId, suiteId, environmentId }),
     }),
-  startProjectRun: (projectId: string) =>
+  startProjectRun: (projectId: string, suiteCategory: string | undefined, environmentId: string) =>
     request<BatchExecutionStatus>("/executions/projects", {
       method: "POST",
-      body: JSON.stringify({ projectId }),
+      body: JSON.stringify({ projectId, suiteCategory, environmentId }),
     }),
   getBatchRun: (batchId: string) =>
     request<BatchExecutionStatus>(`/executions/batches/${batchId}`),
+  cancelBatchRun: (batchId: string) =>
+    request<BatchExecutionStatus>(`/executions/batches/${batchId}/cancel`, { method: "POST" }),
+  rerunBatch: (batchId: string) =>
+    request<BatchExecutionStatus>(`/executions/batches/${batchId}/rerun`, { method: "POST" }),
+  cancelTestRun: (runId: string) =>
+    request<void>(`/test-runs/${runId}/cancel`, { method: "POST" }),
+  rerunTestRun: (runId: string) =>
+    request<ExecutionStatus>(`/test-runs/${runId}/rerun`, { method: "POST" }),
   getExecution: (jobId: string) => request<ExecutionStatus>(`/executions/${jobId}`),
   scheduledExecutions: (testCaseId: string) =>
     request<ScheduledExecution[]>(`/executions/scheduled?testCaseId=${encodeURIComponent(testCaseId)}`),
   cancelScheduledExecution: (jobId: string) =>
     request<void>(`/executions/scheduled/${jobId}`, { method: "DELETE" }),
+  groupedRuns: () => request<GroupedRun[]>("/test-runs/grouped"),
   testRuns: (limit = 50, testCaseId?: string) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (testCaseId) params.set("testCaseId", testCaseId);
@@ -309,6 +354,7 @@ export const api = {
 export type TestSuiteInput = {
   name: string;
   description?: string;
+  category?: string;
 };
 
 export type TestSuiteSummary = {
@@ -316,6 +362,7 @@ export type TestSuiteSummary = {
   projectId: string;
   name: string;
   description?: string | null;
+  category?: string | null;
   caseCount: number;
   createdAt?: string | null;
 };
@@ -501,6 +548,7 @@ export type ProjectSummary = {
 export type SuiteSummary = {
   id: string;
   name: string;
+  category?: string | null;
   cases: number;
   passed: number;
   failed: number;

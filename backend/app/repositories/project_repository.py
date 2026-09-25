@@ -251,6 +251,7 @@ class ProjectRepository:
         return SuiteSummary(
             id=suite_id,
             name=str(suite_row.get("name")),
+            category=str(suite_row.get("category") or "regression"),
             cases=agg["cases"],
             passed=agg["passed"],
             failed=agg["failed"],

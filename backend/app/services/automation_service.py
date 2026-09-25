@@ -40,7 +40,7 @@ def _validate_segment(value: str, label: str) -> str:
 def relative_script_path(project_id: str, test_case_id: str) -> str:
     project_id = _validate_segment(project_id, "project id")
     test_case_id = _validate_segment(test_case_id, "test case id")
-    return f"automation/generated/{project_id}/{test_case_id}/test_recorded.py"
+    return f"automation/generated/{project_id}/{test_case_id}/test_recorded.ts"
 
 
 def _script_path_from_test_file(test_file: str) -> Path:

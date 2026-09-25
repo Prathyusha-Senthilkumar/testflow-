@@ -41,6 +41,7 @@ class TestSuitesService:
             projectId=suite.projectId,
             name=suite.name,
             description=suite.description,
+            category=suite.category,
             caseCount=suite.caseCount,
             createdAt=suite.createdAt,
             testCases=test_cases,
@@ -52,7 +53,10 @@ class TestSuitesService:
         if not name:
             raise HTTPException(status_code=400, detail="Suite name is required")
         desc = input_dto.description.strip() if input_dto.description and input_dto.description.strip() else None
-        return self.suites.create(project_id, CreateTestSuiteDto(name=name, description=desc))
+        return self.suites.create(
+            project_id,
+            CreateTestSuiteDto(name=name, description=desc, category=input_dto.category),
+        )
 
     def update(self, project_id: str, suite_id: str, input_dto: UpdateTestSuiteDto) -> TestSuiteSummary:
         self.projects.find_by_id(project_id)

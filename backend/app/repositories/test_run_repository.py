@@ -82,6 +82,53 @@ class TestRunRepository:
             )
         return enriched
 
+    def list_recent_for_activity(self, limit: int = 200) -> list[dict]:
+        """Recent case runs with project id and job id, for grouping on Test Runs."""
+        if not self.db:
+            return []
+        runs = (
+            self.db.from_("test_runs")
+            .select("id,test_case_id,status,started_at,completed_at,duration_ms,error_message,job_id")
+            .order("started_at", desc=True)
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        cases, suites, projects = self._report_lookups(runs)
+        items: list[dict] = []
+        for run in runs:
+            row = self._report_row(run, cases, suites, projects)
+            row["jobId"] = run.get("job_id")
+            items.append(row)
+        return items
+
+    def map_by_job_ids(self, job_ids: list[str]) -> dict[str, dict]:
+        """Persisted case runs keyed by the existing job_id column."""
+        if not self.db or not job_ids:
+            return {}
+        rows = (
+            self.db.from_("test_runs")
+            .select("id,job_id,status,duration_ms,error_message,completed_at")
+            .in_("job_id", job_ids)
+            .execute()
+            .data
+            or []
+        )
+        found: dict[str, dict] = {}
+        for row in rows:
+            job_id = str(row.get("job_id") or "")
+            if not job_id:
+                continue
+            found[job_id] = {
+                "id": str(row.get("id")),
+                "status": str(row.get("status") or ""),
+                "durationMs": row.get("duration_ms"),
+                "errorMessage": row.get("error_message"),
+                "completedAt": row.get("completed_at"),
+            }
+        return found
+
     def list_for_test_case(self, test_case_id: str, limit: int = 20) -> list[dict]:
         """Runs for one case, with the scheduled time attached when this run was scheduled."""
         if not self.db:
@@ -253,6 +300,41 @@ class TestRunRepository:
             }
         ).eq("job_id", job_id).execute()
 
+    def mark_cancelled(self, job_id: str) -> None:
+        """Record a cancel without a new status value. Passed and Failed rows stay as they are."""
+        if not self.db:
+            return
+        from datetime import datetime, timezone
+
+        self.db.from_("test_runs").update(
+            {
+                "status": "Not Run",
+                "error_message": "Cancelled",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ).eq("job_id", job_id).in_("status", ["Queued", "Running"]).execute()
+
+    def find_for_rerun(self, run_id: str) -> Optional[dict]:
+        if not self.db:
+            return None
+        rows = (
+            self.db.from_("test_runs")
+            .select("id,test_case_id,status,error_message,job_id,config_path")
+            .eq("id", run_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        report = self._report_row(row, *self._report_lookups([row]))
+        report["jobId"] = row.get("job_id")
+        report["configPath"] = row.get("config_path")
+        report["errorMessage"] = row.get("error_message")
+        return report
+
 
 def remember_schedule(
     job_id: str,
@@ -314,22 +396,20 @@ def _read_schedules(job_ids: list[str]) -> dict[str, dict]:
 
 
 def _schedule_from_finished_job(job_id: str) -> Optional[dict]:
-    """Recover the scheduled instant from an RQ job that has not expired yet."""
+    """Recover the scheduled instant from the JSON job record."""
     try:
-        from rq.job import Job
+        from app.queue.job_store import fetch_job
 
-        from app.queue.connection import get_redis_connection
-
-        job = Job.fetch(job_id, connection=get_redis_connection())
+        job = fetch_job(job_id)
     except Exception:
         return None
-    meta = job.meta or {}
+    if job is None:
+        return None
+    meta = job.meta
     time_zone = meta.get("schedule_time_zone")
     scheduled_for = meta.get("scheduled_for")
     if not time_zone and not scheduled_for:
         return None
-    if not scheduled_for and job.started_at is not None:
-        scheduled_for = job.started_at.isoformat()
     if not scheduled_for:
         return None
     return {

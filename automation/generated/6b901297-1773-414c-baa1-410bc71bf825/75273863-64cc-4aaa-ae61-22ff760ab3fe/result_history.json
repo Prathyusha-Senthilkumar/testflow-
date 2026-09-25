@@ -22,5 +22,53 @@
         "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
         "test_result": "Pass",
         "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T08:59:50.295950+00:00",
+        "title": "Open an active curriculum",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T09:25:12.616818+00:00",
+        "title": "Open an active curriculum",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T10:17:45.997673+00:00",
+        "title": "Open an active curriculum",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T10:19:28.201012+00:00",
+        "title": "Open an active curriculum",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T11:06:06.949862+00:00",
+        "title": "Open an active curriculum",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-24T14:16:27.614123+00:00",
+        "title": "Open an active curriculum",
+        "test_file_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_recorded.py",
+        "test_case_location": "automation/generated/6b901297-1773-414c-baa1-410bc71bf825/75273863-64cc-4aaa-ae61-22ff760ab3fe/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
     }
 ]

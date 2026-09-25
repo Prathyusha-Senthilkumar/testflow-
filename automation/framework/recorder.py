@@ -25,12 +25,14 @@ class PlaywrightRecorder:
         except ValueError:
             return 2, "Recording output must stay inside the project directory."
 
-        if output_path.suffix.lower() != ".py":
-            return 2, "Recording output must be a .py file."
+        if output_path.suffix.lower() not in (".py", ".ts"):
+            return 2, "Recording output must be a .py or .ts file."
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         browser = browser or self.settings.get("browser", "chromium")
-        target = self.settings.get("recording_target", "python-pytest")
+        target = self.settings.get("recording_target")
+        if not target:
+            target = "javascript" if output_path.suffix.lower() == ".ts" else "python-pytest"
 
         # Playwright CLI (Node) accepts forward slashes reliably on Windows.
         output_arg = output_path.as_posix()
