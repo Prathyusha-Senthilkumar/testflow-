@@ -1001,9 +1001,11 @@ export function TestCaseDetailPage() {
 
             <h1 className="text-3xl font-bold">{testCase.name}</h1>
 
-            <div className="mt-2">
-              <SuiteCategoryBadges categories={executionCategories} />
-            </div>
+            {executionCategories.length > 0 ? (
+              <div className="mt-2">
+                <SuiteCategoryBadges categories={executionCategories} />
+              </div>
+            ) : null}
 
             <p className="mt-1.5 max-w-3xl text-sm text-slate-500">
 

@@ -16,7 +16,7 @@ export function SuiteCategoryBadges({
   category?: string | null;
 }) {
   const values = categories?.length ? categories : category ? [category] : [];
-  if (values.length === 0) return <span className="text-xs text-slate-400">—</span>;
+  if (values.length === 0) return null;
   return (
     <span className="inline-flex flex-wrap gap-1">
       {values.map((value) => (

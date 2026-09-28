@@ -295,9 +295,11 @@ export function TestCasesPage() {
                   </td>
                   <td className="px-3 font-medium">
                     <div>{t.name}</div>
-                    <div className="mt-1">
-                      <SuiteCategoryBadges categories={t.categories} />
-                    </div>
+                    {t.categories?.length ? (
+                      <div className="mt-1">
+                        <SuiteCategoryBadges categories={t.categories} />
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-3 text-slate-700">{t.category ?? "Functional"}</td>
                   <td className="px-3 text-slate-700">{t.scenario ?? "Happy Path"}</td>

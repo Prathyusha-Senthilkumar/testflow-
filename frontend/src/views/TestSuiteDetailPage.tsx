@@ -204,9 +204,11 @@ export function TestSuiteDetailPage() {
                   <td className="px-5 py-4 font-mono text-xs">{testCase.code}</td>
                   <td className="px-5 py-4 font-medium text-indigo-600">
                     <div>{testCase.name}</div>
-                    <div className="mt-1">
-                      <SuiteCategoryBadges categories={testCase.categories} />
-                    </div>
+                    {testCase.categories?.length ? (
+                      <div className="mt-1">
+                        <SuiteCategoryBadges categories={testCase.categories} />
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-5 py-4 text-slate-600">{testCase.category ?? "Functional"}</td>
                   <td className="px-5 py-4 text-slate-600">{testCase.scenario ?? "Happy Path"}</td>
