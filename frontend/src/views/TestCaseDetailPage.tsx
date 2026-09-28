@@ -197,6 +197,10 @@ export function TestCaseDetailPage() {
 
   const [scheduleZone, setScheduleZone] = useState("UTC");
 
+  const [detectedZone, setDetectedZone] = useState("UTC");
+
+  const [zoneOverridden, setZoneOverridden] = useState(false);
+
   const timeZones = supportedTimeZones();
 
   const [scheduling, setScheduling] = useState(false);
@@ -236,8 +240,10 @@ export function TestCaseDetailPage() {
   const selectedAuthProfile = authProfiles.find((profile) => profile.id === authProfileId);
 
   useEffect(() => {
-    setScheduleZone(browserTimeZone());
-  }, []);
+    const detected = browserTimeZone();
+    setDetectedZone(detected);
+    if (!zoneOverridden) setScheduleZone(detected);
+  }, [zoneOverridden]);
 
 
 
@@ -1347,7 +1353,7 @@ export function TestCaseDetailPage() {
 
               <p className="mt-1 text-xs text-slate-500">
 
-                Run this test once at a future date and time in the timezone you select.
+                Run this test once at a future date and time. The timezone is detected from this device.
 
               </p>
 
@@ -1389,7 +1395,10 @@ export function TestCaseDetailPage() {
 
                   value={scheduleZone}
 
-                  onChange={(event) => setScheduleZone(event.target.value)}
+                  onChange={(event) => {
+                    setZoneOverridden(true);
+                    setScheduleZone(event.target.value);
+                  }}
 
                 >
 
@@ -1404,6 +1413,12 @@ export function TestCaseDetailPage() {
                   ))}
 
                 </select>
+
+                {!zoneOverridden && scheduleZone === detectedZone ? (
+
+                  <span className="text-xs text-slate-500">Detected from your device</span>
+
+                ) : null}
 
                 <Button
 
