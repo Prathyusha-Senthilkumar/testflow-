@@ -14,6 +14,7 @@ from app.routers.test_suites import router as test_suites_router
 from app.routers.executions import router as executions_router
 from app.routers.test_runs import router as test_runs_router
 from app.routers.auth_profiles import router as auth_profiles_router
+from app.routers.account import router as account_router
 
 app = FastAPI(
     title="TestFlow API",
@@ -80,6 +81,7 @@ api_router.include_router(test_suites_router)
 api_router.include_router(executions_router)
 api_router.include_router(test_runs_router)
 api_router.include_router(auth_profiles_router)
+api_router.include_router(account_router)
 
 app.include_router(api_router)
 

@@ -1,3 +1,4 @@
+import { readAccount } from "./account";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api").replace(/\/$/, "");
@@ -5,7 +6,10 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api")
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
-  if (isSupabaseConfigured) {
+  const account = readAccount();
+  if (account?.accessToken) {
+    headers.set("Authorization", `Bearer ${account.accessToken}`);
+  } else if (isSupabaseConfigured) {
     const { data } = await supabase.auth.getSession();
     if (data.session?.access_token) {
       headers.set("Authorization", `Bearer ${data.session.access_token}`);
@@ -35,6 +39,36 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   return response.json();
 }
+
+export type AccountResponse = {
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  userId?: string | null;
+  email: string;
+  name: string;
+  confirmationRequired?: boolean;
+};
+
+export const accountApi = {
+  login: (email: string, password: string) =>
+    request<AccountResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  signup: (name: string, email: string, password: string) =>
+    request<AccountResponse>("/auth/signup", { method: "POST", body: JSON.stringify({ name, email, password }) }),
+  refresh: (refreshToken: string) =>
+    request<AccountResponse>("/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken }) }),
+  me: () => request<AccountResponse>("/auth/me"),
+  updateProfile: (name: string) =>
+    request<AccountResponse>("/auth/profile", { method: "PATCH", body: JSON.stringify({ name }) }),
+  updatePassword: (password: string) =>
+    request<AccountResponse>("/auth/password", { method: "POST", body: JSON.stringify({ password }) }),
+  forgotPassword: (email: string) =>
+    request<{ message: string }>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
+  resetPassword: (accessToken: string, password: string) =>
+    request<{ message: string }>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ accessToken, password }),
+    }),
+};
 
 export type ProjectInput = {
   name: string;
