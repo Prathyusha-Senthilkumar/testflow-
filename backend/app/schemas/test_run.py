@@ -21,6 +21,7 @@ class ReportRun(BaseModel):
     testCaseId: Optional[str] = Field(None, alias="testCaseId")
     testCaseCode: Optional[str] = Field(None, alias="testCaseCode")
     testName: Optional[str] = Field(None, alias="testName")
+    category: Optional[str] = None
     status: str
     startedAt: Optional[str] = Field(None, alias="startedAt")
     completedAt: Optional[str] = Field(None, alias="completedAt")

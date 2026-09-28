@@ -4,13 +4,18 @@ import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import {
+  api,
   TEST_CASE_CATEGORIES,
   TEST_CASE_SCENARIOS,
+  type EnvironmentSummary,
   type TestCaseInput,
 } from "@/lib/api";
+import { CategoryMultiSelect, EnvironmentMultiSelect } from "@/components/suites/CategoryMultiSelect";
+import type { SuiteCategory } from "@/lib/suiteCategory";
 
 type Props = {
   open: boolean;
+  projectId?: string;
   loading?: boolean;
   onClose: () => void;
   onSubmit: (value: TestCaseInput) => Promise<void> | void;
@@ -20,16 +25,20 @@ const emptyForm: TestCaseInput = {
   name: "",
   description: "",
   category: "Functional",
+  categories: [],
+  environmentIds: [],
   scenario: "Happy Path",
 };
 
 export function TestCaseFormModal({
   open,
+  projectId,
   loading = false,
   onClose,
   onSubmit,
 }: Props) {
   const [form, setForm] = useState<TestCaseInput>(emptyForm);
+  const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -39,6 +48,11 @@ export function TestCaseFormModal({
     }
   }, [open]);
 
+  useEffect(() => {
+    if (!open || !projectId) return;
+    api.environments(projectId).then(setEnvironments).catch(() => setEnvironments([]));
+  }, [open, projectId]);
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
@@ -47,6 +61,8 @@ export function TestCaseFormModal({
       name: form.name.trim(),
       description: form.description?.trim(),
       category: form.category ?? "Functional",
+      categories: form.categories ?? [],
+      environmentIds: form.environmentIds ?? [],
       scenario: form.scenario ?? "Happy Path",
     });
   }
@@ -76,7 +92,7 @@ export function TestCaseFormModal({
         />
         <div className="grid gap-4 sm:grid-cols-2">
           <Select
-            label="Category"
+            label="Type"
             value={form.category ?? "Functional"}
             onChange={(value) =>
               setForm((current) => ({
@@ -98,6 +114,15 @@ export function TestCaseFormModal({
             options={TEST_CASE_SCENARIOS.map((option) => ({ value: option, label: option }))}
           />
         </div>
+        <CategoryMultiSelect
+          value={(form.categories ?? []) as SuiteCategory[]}
+          onChange={(categories) => setForm((current) => ({ ...current, categories }))}
+        />
+        <EnvironmentMultiSelect
+          environments={environments}
+          value={form.environmentIds ?? []}
+          onChange={(environmentIds) => setForm((current) => ({ ...current, environmentIds }))}
+        />
         <div>
           <label className="mb-1.5 block text-sm font-medium">
             Description <span className="font-normal text-slate-400">(optional)</span>

@@ -42,6 +42,7 @@ class TestSuitesService:
             name=suite.name,
             description=suite.description,
             category=suite.category,
+            categories=suite.categories,
             caseCount=suite.caseCount,
             createdAt=suite.createdAt,
             testCases=test_cases,
@@ -53,9 +54,14 @@ class TestSuitesService:
         if not name:
             raise HTTPException(status_code=400, detail="Suite name is required")
         desc = input_dto.description.strip() if input_dto.description and input_dto.description.strip() else None
+        from app.schemas.test_suite import normalize_suite_categories
+
+        chosen = normalize_suite_categories(input_dto.categories, input_dto.category)
+        if not chosen:
+            raise HTTPException(status_code=400, detail="Choose at least one category.")
         return self.suites.create(
             project_id,
-            CreateTestSuiteDto(name=name, description=desc, category=input_dto.category),
+            CreateTestSuiteDto(name=name, description=desc, category=chosen[0], categories=chosen),
         )
 
     def update(self, project_id: str, suite_id: str, input_dto: UpdateTestSuiteDto) -> TestSuiteSummary:

@@ -68,6 +68,7 @@ class TestCasesService:
     def create(self, project_id: str, input_dto: CreateTestCaseDto) -> TestCaseSummary:
         self._ensure_project_exists(project_id)
         normalized = self._validate_and_normalize(input_dto)
+        self._validate_environment_ids(project_id, normalized.environmentIds)
         created = self.test_cases.create(project_id, normalized)
         return self._attach_resolved_url(project_id, created)
 
@@ -78,6 +79,8 @@ class TestCasesService:
             input_dto = input_dto.model_copy(
                 update={"startPath": normalize_start_path(input_dto.startPath)}
             )
+        if "environmentIds" in input_dto.model_fields_set:
+            self._validate_environment_ids(project_id, input_dto.environmentIds)
         if "authProfileId" in input_dto.model_fields_set:
             profile_id = (input_dto.authProfileId or "").strip() or None
             if profile_id:
@@ -375,6 +378,10 @@ class TestCasesService:
             test_case.accessibilityEnabled,
             test_case.networkCheckEnabled,
         )
+
+    def _validate_environment_ids(self, project_id: str, environment_ids: Optional[List[str]]) -> None:
+        for environment_id in environment_ids or []:
+            environment_repository.find_by_id(project_id, environment_id)
 
     def _ensure_project_exists(self, project_id: str):
         return self.projects.find_by_id(project_id)

@@ -44,6 +44,21 @@ def _result_payload(raw: Any) -> Optional[ExecutionResultPayload]:
     )
 
 
+def _case_environment_base_url(project_id: str, test_case_id: str) -> Optional[str]:
+    """Use the environment saved on the test case for an individual run."""
+    from app.repositories.environment_repository import environment_repository
+    from app.repositories.test_case_repository import test_case_repository
+
+    try:
+        case = test_case_repository.find_by_id(project_id, test_case_id)
+        if not case.environmentId:
+            return None
+        environment = environment_repository.find_by_id(project_id, case.environmentId)
+    except HTTPException:
+        return None
+    return environment.baseUrl or None
+
+
 def _require_project_environment(project_id: str, environment_id: Optional[str]):
     """Reuse the environment table. Reject missing, deleted, and cross-project ids."""
     from app.repositories.environment_repository import environment_repository
@@ -80,6 +95,8 @@ class ExecutionService:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         time_zone = self._validate_time_zone(request.time_zone)
+        if not environment_base_url and request.project_id and request.test_case_id:
+            environment_base_url = _case_environment_base_url(request.project_id, request.test_case_id)
         queue_service = get_queue_service()
         run_at = self._validate_run_at(request.run_at)
         job = queue_service.submit(
@@ -231,7 +248,7 @@ class ExecutionService:
             matching = [
                 suite
                 for suite in test_suite_repository.list_by_project(project_id)
-                if suite.category == suite_category
+                if suite_category in (suite.categories or [suite.category])
             ]
             if not matching:
                 label = SUITE_CATEGORY_LABELS[suite_category]

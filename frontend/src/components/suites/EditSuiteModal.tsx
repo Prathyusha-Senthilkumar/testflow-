@@ -3,31 +3,30 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import type { TestSuiteSummary } from "@/lib/api";
-import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS, type SuiteCategory } from "@/lib/suiteCategory";
+import { CategoryMultiSelect } from "@/components/suites/CategoryMultiSelect";
+import { SUITE_CATEGORIES, type SuiteCategory } from "@/lib/suiteCategory";
 
 type Props = {
   open: boolean;
   suite: TestSuiteSummary | null;
   loading?: boolean;
   onClose: () => void;
-  onSubmit: (value: { name: string; description?: string; category: SuiteCategory }) => Promise<void> | void;
+  onSubmit: (value: { name: string; description?: string; category: SuiteCategory; categories: SuiteCategory[] }) => Promise<void> | void;
 };
 
 export function EditSuiteModal({ open, suite, loading = false, onClose, onSubmit }: Props) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState<SuiteCategory>("regression");
+  const [categories, setCategories] = useState<SuiteCategory[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (open && suite) {
       setName(suite.name);
       setDescription(suite.description ?? "");
-      setCategory(
-        SUITE_CATEGORIES.includes(suite.category as SuiteCategory)
-          ? (suite.category as SuiteCategory)
-          : "regression"
-      );
+      const loaded = (suite.categories?.length ? suite.categories : suite.category ? [suite.category] : [])
+        .filter((item): item is SuiteCategory => SUITE_CATEGORIES.includes(item as SuiteCategory));
+      setCategories(loaded);
       setError("");
     }
   }, [open, suite]);
@@ -38,10 +37,15 @@ export function EditSuiteModal({ open, suite, loading = false, onClose, onSubmit
       setError("Suite name is required.");
       return;
     }
+    if (categories.length === 0) {
+      setError("Choose at least one category.");
+      return;
+    }
     await onSubmit({
       name: name.trim(),
       description: description.trim() || undefined,
-      category,
+      category: categories[0],
+      categories,
     });
   }
 
@@ -63,20 +67,7 @@ export function EditSuiteModal({ open, suite, loading = false, onClose, onSubmit
     >
       <form id="edit-suite-form" onSubmit={submit} className="space-y-4">
         <Input label="Suite name" required value={name} onChange={(event) => setName(event.target.value)} />
-        <label className="block text-sm font-medium text-slate-700">
-          Category
-          <select
-            className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
-            value={category}
-            onChange={(event) => setCategory(event.target.value as SuiteCategory)}
-          >
-            {SUITE_CATEGORIES.map((item) => (
-              <option key={item} value={item}>
-                {SUITE_CATEGORY_LABELS[item]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <CategoryMultiSelect value={categories} onChange={setCategories} />
         <Input
           label="Description"
           value={description}

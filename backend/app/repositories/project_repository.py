@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from fastapi import HTTPException
 from app.database import get_supabase_client
+from app.schemas.test_suite import parse_suite_categories
 from app.schemas.project import (
     ProjectSummary,
     ProjectDetail,
@@ -251,7 +252,8 @@ class ProjectRepository:
         return SuiteSummary(
             id=suite_id,
             name=str(suite_row.get("name")),
-            category=str(suite_row.get("category") or "regression"),
+            category=parse_suite_categories(suite_row)[0],
+            categories=parse_suite_categories(suite_row),
             cases=agg["cases"],
             passed=agg["passed"],
             failed=agg["failed"],

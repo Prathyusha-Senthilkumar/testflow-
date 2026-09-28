@@ -7,6 +7,7 @@ class SuiteSummary(BaseModel):
     id: str
     name: str
     category: str = "regression"
+    categories: List[str] = Field(default_factory=list)
     cases: int = 0
     passed: int = 0
     failed: int = 0

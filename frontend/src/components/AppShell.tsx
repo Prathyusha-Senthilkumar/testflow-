@@ -5,7 +5,6 @@ import { BarChart3, ChevronDown, FolderKanban, Gauge, History, LogOut, Menu, Set
 import { Link, NavLink, useLocation, useNavigate } from "@/lib/navigation";
 import { api } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
-import { suites, testCases } from "@/lib/demoData";
 
 const nav=[
   ["/dashboard","Dashboard",Gauge],
@@ -19,7 +18,11 @@ function Breadcrumbs(){
   const {pathname}=useLocation();
   const parts=pathname.split('/').filter(Boolean);
   const projectId=parts[0]==='projects'?parts[1]??"":"";
+  const suiteId=parts[2]==='suites' && parts[3] && parts[3]!=='review' ? parts[3] : "";
+  const testCaseId=parts[2]==='test-cases' && parts[3] ? parts[3] : "";
   const [projectName,setProjectName]=useState("");
+  const [suiteName,setSuiteName]=useState("");
+  const [testCaseName,setTestCaseName]=useState("");
 
   useEffect(()=>{
     if(!projectId){
@@ -33,6 +36,30 @@ function Breadcrumbs(){
     return ()=>{ cancelled=true; };
   },[projectId]);
 
+  useEffect(()=>{
+    if(!projectId || !suiteId){
+      setSuiteName("");
+      return;
+    }
+    let cancelled=false;
+    api.testSuite(projectId, suiteId)
+      .then((item)=>{ if(!cancelled) setSuiteName(item.name); })
+      .catch(()=>{ if(!cancelled) setSuiteName("Test suite"); });
+    return ()=>{ cancelled=true; };
+  },[projectId, suiteId]);
+
+  useEffect(()=>{
+    if(!projectId || !testCaseId){
+      setTestCaseName("");
+      return;
+    }
+    let cancelled=false;
+    api.testCase(projectId, testCaseId)
+      .then((item)=>{ if(!cancelled) setTestCaseName(item.name); })
+      .catch(()=>{ if(!cancelled) setTestCaseName("Test case"); });
+    return ()=>{ cancelled=true; };
+  },[projectId, testCaseId]);
+
   let crumbs:Crumb[]=[];
 
   if(parts[0]==='dashboard') crumbs=[{label:'Dashboard'}];
@@ -41,11 +68,11 @@ function Breadcrumbs(){
     if(parts[1]) crumbs.push({label:projectName || "Project",to:`/projects/${parts[1]}`});
     if(parts[2]==='test-cases'){
       crumbs.push({label:'Test Cases',to:`/projects/${parts[1]}/test-cases`});
-      if(parts[3]) crumbs.push({label:testCases.find(t=>t.id===parts[3])?.id || parts[3]});
+      if(parts[3]) crumbs.push({label:testCaseName || "Test case"});
     } else if(parts[2]==='suites'){
       crumbs.push({label:'Test Suites',to:`/projects/${parts[1]}/suites`});
       if(parts[3]==='review') crumbs.push({label:'Review Suggestions'});
-      else if(parts[3]) crumbs.push({label:suites.find(s=>s.id===parts[3])?.name || parts[3]});
+      else if(parts[3]) crumbs.push({label:suiteName || "Test suite"});
     } else if(parts[2]==='environments'){
       crumbs.push({label:'Environments'});
     } else if(parts[2]==='auth-profiles'){
@@ -65,7 +92,7 @@ function Breadcrumbs(){
   return <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm text-slate-500">
     {crumbs.map((c,i)=><span key={`${c.label}-${i}`} className="flex items-center gap-1.5">
       {i>0&&<span className="text-slate-300">/</span>}
-      {c.to&&i<crumbs.length-1?<Link to={c.to} className="transition hover:text-indigo-600 hover:underline">{c.label}</Link>:<span className={i===crumbs.length-1?'font-medium text-slate-700':''}>{c.label}</span>}
+      {c.to&&i<crumbs.length-1?<Link to={c.to} className="transition hover:text-indigo-600 hover:underline">{c.label}</Link>:<span className={i===crumbs.length-1?'max-w-xl truncate font-medium text-slate-700':''} title={c.label}>{c.label}</span>}
     </span>)}
   </nav>
 }

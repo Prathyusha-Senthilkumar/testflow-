@@ -26,6 +26,8 @@ create table if not exists public.test_suites (
   name text not null,
   category text not null default 'regression'
     check (category in ('smoke', 'sanity', 'regression', 'full_regression')),
+  categories text[] not null default '{regression}'
+    check (categories <@ array['smoke', 'sanity', 'regression', 'full_regression']::text[]),
   source text not null default 'Manual' check (source in ('Manual','Suggested')),
   created_at timestamptz default now()
 );
@@ -40,6 +42,9 @@ create table if not exists public.test_cases (
   automation_status text not null default 'Not Configured'
     check (automation_status in ('Manual','Automated','Not Configured')),
   suggested_suite_name text,
+  categories text[] not null default '{}'
+    check (categories <@ array['smoke', 'sanity', 'regression', 'full_regression']::text[]),
+  environment_ids uuid[] not null default '{}',
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

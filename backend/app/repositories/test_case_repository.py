@@ -4,7 +4,13 @@ import time
 from typing import Dict, List
 from fastapi import HTTPException
 from app.database import get_supabase_client
-from app.schemas.test_case import TestCaseSummary, CreateTestCaseDto, UpdateTestCaseDto
+from app.schemas.test_suite import MIGRATION_HINT, missing_multi_column
+from app.schemas.test_case import (
+    CreateTestCaseDto,
+    TestCaseSummary,
+    UpdateTestCaseDto,
+    normalize_execution_categories,
+)
 from app.schemas.test_assertion import AssertionConfig
 
 import sys
@@ -120,6 +126,8 @@ class TestCaseRepository:
                 name=input_dto.name,
                 description=desc,
                 category=input_dto.category,
+                categories=normalize_execution_categories(input_dto.categories),
+                environmentIds=list(input_dto.environmentIds or []),
                 scenario=input_dto.scenario,
                 automationStatus="Not Configured",
                 testFile=None,
@@ -136,25 +144,33 @@ class TestCaseRepository:
 
         # Deployed schema: no project_id / automation_status / code columns.
         # suite_id and test_file are NOT NULL.
-        res = (
-            self.db.from_("test_cases")
-            .insert(
-                {
-                    "suite_id": suite_id,
-                    "test_case_code": code,
-                    "name": input_dto.name,
-                    "description": desc,
-                    "category": input_dto.category,
-                    "scenario": input_dto.scenario,
-                    "start_path": "/",
-                    "expected_result": None,
-                    "test_file": "",
-                    "is_draft": True,
-                    "published_version": 0,
-                }
-            )
-            .execute()
-        )
+        categories = normalize_execution_categories(input_dto.categories)
+        environment_ids = list(input_dto.environmentIds or [])
+        payload = {
+            "suite_id": suite_id,
+            "test_case_code": code,
+            "name": input_dto.name,
+            "description": desc,
+            "category": input_dto.category,
+            "categories": categories,
+            "environment_ids": environment_ids,
+            "scenario": input_dto.scenario,
+            "start_path": "/",
+            "expected_result": None,
+            "test_file": "",
+            "is_draft": True,
+            "published_version": 0,
+        }
+        try:
+            res = self.db.from_("test_cases").insert(payload).execute()
+        except Exception as exc:
+            if not missing_multi_column(exc):
+                raise
+            if categories or environment_ids:
+                raise HTTPException(status_code=400, detail=MIGRATION_HINT) from exc
+            payload.pop("categories", None)
+            payload.pop("environment_ids", None)
+            res = self.db.from_("test_cases").insert(payload).execute()
         if not res.data or len(res.data) == 0:
             raise Exception("Could not create test case")
         return self._map_row(res.data[0])
@@ -208,6 +224,10 @@ class TestCaseRepository:
                         updates["assertions"] = []
                     if input_dto.category is not None:
                         updates["category"] = input_dto.category
+                    if "categories" in input_dto.model_fields_set:
+                        updates["categories"] = normalize_execution_categories(input_dto.categories)
+                    if "environmentIds" in input_dto.model_fields_set:
+                        updates["environmentIds"] = list(input_dto.environmentIds or [])
                     if input_dto.scenario is not None:
                         updates["scenario"] = input_dto.scenario
                     if input_dto.environmentId is not None:
@@ -232,13 +252,27 @@ class TestCaseRepository:
             )
         if input_dto.category is not None:
             changes["category"] = input_dto.category
+        if "categories" in input_dto.model_fields_set:
+            changes["categories"] = normalize_execution_categories(input_dto.categories)
+        if "environmentIds" in input_dto.model_fields_set:
+            changes["environment_ids"] = list(input_dto.environmentIds or [])
         if input_dto.scenario is not None:
             changes["scenario"] = input_dto.scenario
         if input_dto.environmentId is not None:
             changes["environment_id"] = self._normalize_environment_id(input_dto.environmentId)
         if changes:
             self.find_by_id(project_id, test_case_id)
-            self.db.from_("test_cases").update(changes).eq("id", test_case_id).execute()
+            try:
+                self.db.from_("test_cases").update(changes).eq("id", test_case_id).execute()
+            except Exception as exc:
+                if not missing_multi_column(exc):
+                    raise
+                if changes.get("categories") or changes.get("environment_ids"):
+                    raise HTTPException(status_code=400, detail=MIGRATION_HINT) from exc
+                changes.pop("categories", None)
+                changes.pop("environment_ids", None)
+                if changes:
+                    self.db.from_("test_cases").update(changes).eq("id", test_case_id).execute()
         return self.find_by_id(project_id, test_case_id)
 
     def clear_auth_profile_refs(self, project_id: str, profile_id: str) -> None:
@@ -326,6 +360,8 @@ class TestCaseRepository:
             name=str(row.get("name")),
             description=row.get("description"),
             category=_coerce_category(row.get("category")),
+            categories=normalize_execution_categories(row.get("categories") or []),
+            environmentIds=[str(item) for item in (row.get("environment_ids") or []) if item],
             scenario=_coerce_scenario(row.get("scenario")),
             automationStatus=str(automation_status),
             testFile=test_file,

@@ -62,6 +62,7 @@ export type ReportRun = {
   testCaseId?: string | null;
   testCaseCode?: string | null;
   testName?: string | null;
+  category?: string | null;
   status: string;
   startedAt?: string | null;
   completedAt?: string | null;
@@ -355,6 +356,7 @@ export type TestSuiteInput = {
   name: string;
   description?: string;
   category?: string;
+  categories?: string[];
 };
 
 export type TestSuiteSummary = {
@@ -363,6 +365,7 @@ export type TestSuiteSummary = {
   name: string;
   description?: string | null;
   category?: string | null;
+  categories?: string[] | null;
   caseCount: number;
   createdAt?: string | null;
 };
@@ -381,6 +384,8 @@ export type TestCaseInput = {
   name: string;
   description?: string;
   category?: TestCaseCategory;
+  categories?: string[];
+  environmentIds?: string[];
   scenario?: TestCaseScenario;
   suiteId?: string;
 };
@@ -459,10 +464,12 @@ export type StorageEntry = {
 
 export type UpdateTestCaseInput = {
   environmentId?: string | null;
+  environmentIds?: string[];
   authProfileId?: string | null;
   startPath?: string;
   expectedResult?: string | null;
   category?: TestCaseCategory;
+  categories?: string[];
   scenario?: TestCaseScenario;
   storageSeeds?: StorageEntry[];
   storageAssertions?: StorageEntry[];
@@ -476,10 +483,12 @@ export type TestCaseSummary = {
   name: string;
   description?: string | null;
   category?: TestCaseCategory;
+  categories?: string[];
   scenario?: TestCaseScenario;
   automationStatus: string;
   testFile?: string | null;
   environmentId?: string | null;
+  environmentIds?: string[];
   authProfileId?: string | null;
   startPath?: string;
   resolvedStartUrl?: string | null;
@@ -549,6 +558,7 @@ export type SuiteSummary = {
   id: string;
   name: string;
   category?: string | null;
+  categories?: string[] | null;
   cases: number;
   passed: number;
   failed: number;

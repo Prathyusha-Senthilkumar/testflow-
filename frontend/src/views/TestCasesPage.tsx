@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { TestCaseFormModal } from "@/components/test-cases/TestCaseFormModal";
+import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
 import {
   api,
   TEST_CASE_CATEGORIES,
@@ -292,7 +293,12 @@ export function TestCasesPage() {
                   <td className="px-3 font-mono text-xs">
                     <span className="rounded-lg bg-slate-100 px-2 py-1 text-sm">{t.code}</span>
                   </td>
-                  <td className="px-3 font-medium">{t.name}</td>
+                  <td className="px-3 font-medium">
+                    <div>{t.name}</div>
+                    <div className="mt-1">
+                      <SuiteCategoryBadges categories={t.categories} />
+                    </div>
+                  </td>
                   <td className="px-3 text-slate-700">{t.category ?? "Functional"}</td>
                   <td className="px-3 text-slate-700">{t.scenario ?? "Happy Path"}</td>
                   <td className="px-3">
@@ -333,6 +339,7 @@ export function TestCasesPage() {
 
       <TestCaseFormModal
         open={modalOpen}
+        projectId={projectId}
         loading={saving}
         onClose={() => setModalOpen(false)}
         onSubmit={createTestCase}

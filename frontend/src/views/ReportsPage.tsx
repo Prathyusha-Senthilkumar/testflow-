@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Download, Folder } from "lucide-react";
-import { Link } from "@/lib/navigation";
-import { api, type ProjectSummary, type ReportRun, type TestSuiteSummary } from "@/lib/api";
+import { useNavigate } from "@/lib/navigation";
+import { api, TEST_CASE_CATEGORIES, type ProjectSummary, type ReportRun, type TestSuiteSummary } from "@/lib/api";
 import { downloadReportCsv, formatExecutedAt } from "@/lib/reportCsv";
 
 type DatePreset = "today" | "7" | "14" | "30" | "all";
@@ -34,6 +34,8 @@ export function ReportsPage() {
   const [projectId, setProjectId] = useState("all");
   const [suiteId, setSuiteId] = useState("all");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [category, setCategory] = useState("all");
+  const navigate = useNavigate();
   const [datePreset, setDatePreset] = useState<DatePreset>("14");
   const [query, setQuery] = useState("");
 
@@ -75,6 +77,7 @@ export function ReportsPage() {
       if (projectId !== "all" && run.projectId !== projectId) return false;
       if (suiteId !== "all" && run.suiteId !== suiteId) return false;
       if (status !== "all" && run.status !== status) return false;
+      if (category !== "all" && caseCategory(run) !== category) return false;
       if (start) {
         const when = new Date(run.completedAt || run.startedAt || "");
         if (Number.isNaN(when.getTime()) || when < start) return false;
@@ -84,7 +87,7 @@ export function ReportsPage() {
         .filter(Boolean)
         .some((field) => String(field).toLowerCase().includes(needle));
     });
-  }, [datePreset, projectId, query, runs, status, suiteId]);
+  }, [category, datePreset, projectId, query, runs, status, suiteId]);
 
   const passed = filtered.filter((run) => run.status === "Passed").length;
   const failed = filtered.filter((run) => run.status === "Failed").length;
@@ -94,6 +97,7 @@ export function ReportsPage() {
     projectId,
     suiteId,
     status,
+    category,
     query,
     datePreset,
   });
@@ -166,6 +170,19 @@ export function ReportsPage() {
           {STATUS_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Test case category"
+          className="rounded-lg bg-indigo-50 px-3 py-2 text-sm"
+          value={category}
+          onChange={(event) => setCategory(event.target.value)}
+        >
+          <option value="all">All categories</option>
+          {categoryOptions(runs).map((option) => (
+            <option key={option} value={option}>
+              {option}
             </option>
           ))}
         </select>
@@ -308,19 +325,24 @@ export function ReportsPage() {
               <th className="px-4 py-3 text-left">Failure Date</th>
               <th className="px-4 py-3 text-left">Run By</th>
               <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-right">Action</th>
             </tr>
           </thead>
           <tbody>
             {failures.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
                   No failed runs for the selected filters.
                 </td>
               </tr>
             ) : (
               failures.map((run) => (
-                <tr key={run.id} className="border-t align-top">
+                <tr
+                  key={run.id}
+                  className="cursor-pointer border-t align-top hover:bg-indigo-50/60"
+                  onClick={() => {
+                    if (run.projectId) navigate(`/projects/${run.projectId}/results/${run.id}`);
+                  }}
+                >
                   <td className="px-4 py-4">
                     <span className="mr-2 rounded-lg bg-slate-100 px-2 py-1 font-mono text-xs">
                       {run.testCaseCode || "—"}
@@ -339,14 +361,6 @@ export function ReportsPage() {
                   <td className="px-4 py-4">{run.runBy || "—"}</td>
                   <td className="px-4 py-4">
                     <span className="rounded-lg bg-red-100 px-2 py-1 text-xs text-red-700">Failed</span>
-                  </td>
-                  <td className="px-4 py-4 text-right">
-                    <Link
-                      to={`/projects/${run.projectId}/results/${run.id}`}
-                      className="rounded-lg bg-indigo-50 px-3 py-1.5 text-sm text-indigo-700"
-                    >
-                      View Result
-                    </Link>
                   </td>
                 </tr>
               ))
@@ -379,6 +393,16 @@ function StatCard({
   );
 }
 
+function caseCategory(run: ReportRun): string {
+  return run.category || "Functional";
+}
+
+function categoryOptions(runs: ReportRun[]): string[] {
+  const found = new Set<string>(TEST_CASE_CATEGORIES);
+  for (const run of runs) found.add(caseCategory(run));
+  return [...found];
+}
+
 function rangeStart(preset: DatePreset, now = new Date()): Date | null {
   const option = DATE_OPTIONS.find((item) => item.value === preset);
   if (!option || option.days == null) return null;
@@ -390,7 +414,7 @@ function rangeStart(preset: DatePreset, now = new Date()): Date | null {
 function passRateDelta(
   allRuns: ReportRun[],
   current: ReportRun[],
-  filters: { projectId: string; suiteId: string; status: StatusFilter; query: string; datePreset: DatePreset }
+  filters: { projectId: string; suiteId: string; status: StatusFilter; category: string; query: string; datePreset: DatePreset }
 ): string {
   const start = rangeStart(filters.datePreset);
   if (!start) return "All recorded runs";
@@ -402,6 +426,7 @@ function passRateDelta(
     if (filters.projectId !== "all" && run.projectId !== filters.projectId) return false;
     if (filters.suiteId !== "all" && run.suiteId !== filters.suiteId) return false;
     if (filters.status !== "all" && run.status !== filters.status) return false;
+    if (filters.category !== "all" && caseCategory(run) !== filters.category) return false;
     const when = new Date(run.completedAt || run.startedAt || "");
     if (Number.isNaN(when.getTime()) || when < previousStart || when >= previousEnd) return false;
     if (!needle) return true;

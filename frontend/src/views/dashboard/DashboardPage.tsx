@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, FolderKanban, FlaskConical, Plus, XCircle } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, type DashboardData } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ export function DashboardPage() {
   const [data, setData] = useState<DashboardData>(emptyDashboard);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     api.dashboard()
@@ -82,11 +83,15 @@ export function DashboardPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="bg-slate-50 text-slate-500">
-                <tr>{["Project", "Suites", "Cases", "Pass Rate", "Last Run", ""].map((label) => <th className="px-5 py-3 font-medium" key={label}>{label}</th>)}</tr>
+                <tr>{["Project", "Suites", "Cases", "Pass Rate", "Last Run"].map((label) => <th className="px-5 py-3 font-medium" key={label}>{label}</th>)}</tr>
               </thead>
               <tbody>
                 {data.recentProjects.map((project) => (
-                  <tr className="border-t border-slate-100" key={project.id}>
+                  <tr
+                    className="cursor-pointer border-t border-slate-100 hover:bg-indigo-50/60"
+                    key={project.id}
+                    onClick={() => navigate(`/projects/${project.id}`)}
+                  >
                     <td className="px-5 py-4">
                       <div className="font-semibold text-slate-900">{project.name}</div>
                       <div className="mt-0.5 max-w-xs truncate text-xs text-slate-500">{project.baseUrl}</div>
@@ -95,7 +100,6 @@ export function DashboardPage() {
                     <td className="px-5">{project.cases}</td>
                     <td className="px-5"><Badge status={project.passRate === 100 ? "Passed" : project.failed > 0 ? "Failed" : ""}>{project.passRate}%</Badge></td>
                     <td className="px-5 text-slate-500">{project.lastRun ? new Date(project.lastRun).toLocaleString() : "Not run"}</td>
-                    <td className="px-5 text-right"><Link className="font-semibold text-indigo-600 hover:text-indigo-700" to={`/projects/${project.id}`}>Open</Link></td>
                   </tr>
                 ))}
               </tbody>

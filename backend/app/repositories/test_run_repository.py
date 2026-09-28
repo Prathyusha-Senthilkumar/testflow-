@@ -209,7 +209,7 @@ class TestRunRepository:
                 str(row["id"]): row
                 for row in (
                     self.db.from_("test_cases")
-                    .select("id,name,test_case_code,suite_id")
+                    .select("id,name,test_case_code,suite_id,category")
                     .in_("id", case_ids)
                     .execute()
                     .data
@@ -267,6 +267,7 @@ class TestRunRepository:
             "testCaseId": run.get("test_case_id"),
             "testCaseCode": case.get("test_case_code"),
             "testName": case.get("name"),
+            "category": case.get("category") or "Functional",
             "status": str(run.get("status") or "Not Run"),
             "startedAt": run.get("started_at"),
             "completedAt": run.get("completed_at"),

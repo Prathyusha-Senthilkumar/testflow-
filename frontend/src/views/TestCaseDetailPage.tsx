@@ -18,6 +18,12 @@ import { browserTimeZone, formatInTimeZone, supportedTimeZones, zonedWallTimeToU
 
 import { Select } from "@/components/ui/select";
 
+import { CategoryMultiSelect, EnvironmentMultiSelect } from "@/components/suites/CategoryMultiSelect";
+
+import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
+
+import type { SuiteCategory } from "@/lib/suiteCategory";
+
 import { Badge } from "@/components/ui/badge";
 
 import {
@@ -137,6 +143,10 @@ export function TestCaseDetailPage() {
   const [authProfiles, setAuthProfiles] = useState<AuthProfileSummary[]>([]);
 
   const [environmentId, setEnvironmentId] = useState<string>("env-default");
+
+  const [executionCategories, setExecutionCategories] = useState<SuiteCategory[]>([]);
+
+  const [applicableEnvironmentIds, setApplicableEnvironmentIds] = useState<string[]>([]);
 
   const [authProfileId, setAuthProfileId] = useState<string>("");
 
@@ -259,6 +269,10 @@ export function TestCaseDetailPage() {
 
         setCategory(data.category ?? "Functional");
 
+        setExecutionCategories((data.categories ?? []) as SuiteCategory[]);
+
+        setApplicableEnvironmentIds(data.environmentIds ?? []);
+
         setScenario(data.scenario ?? "Happy Path");
 
         setExpectedResult(resolveExpectedResult(data));
@@ -364,6 +378,10 @@ export function TestCaseDetailPage() {
         expectedResult: expectedResult.trim() || null,
 
         category,
+
+        categories: executionCategories,
+
+        environmentIds: applicableEnvironmentIds,
 
         scenario,
 
@@ -521,6 +539,10 @@ export function TestCaseDetailPage() {
 
         category,
 
+        categories: executionCategories,
+
+        environmentIds: applicableEnvironmentIds,
+
         scenario,
 
         storageSeeds,
@@ -584,6 +606,10 @@ export function TestCaseDetailPage() {
         expectedResult: expectedResult.trim() || null,
 
         category,
+
+        categories: executionCategories,
+
+        environmentIds: applicableEnvironmentIds,
 
         scenario,
 
@@ -718,6 +744,10 @@ export function TestCaseDetailPage() {
         expectedResult: expectedResult.trim() || null,
 
         category,
+
+        categories: executionCategories,
+
+        environmentIds: applicableEnvironmentIds,
 
         scenario,
 
@@ -965,6 +995,10 @@ export function TestCaseDetailPage() {
 
             <h1 className="text-3xl font-bold">{testCase.name}</h1>
 
+            <div className="mt-2">
+              <SuiteCategoryBadges categories={executionCategories} />
+            </div>
+
             <p className="mt-1.5 max-w-3xl text-sm text-slate-500">
 
               {testCase.description || "No description provided."}
@@ -1081,6 +1115,12 @@ export function TestCaseDetailPage() {
 
                 </div>
 
+                <div className="sm:col-span-2">
+
+                  <CategoryMultiSelect value={executionCategories} onChange={setExecutionCategories} />
+
+                </div>
+
                 <div>
 
                   <dt className="mb-1 text-slate-500">Scenario</dt>
@@ -1115,6 +1155,8 @@ export function TestCaseDetailPage() {
 
                   <dt className="mb-1 text-slate-500">Environment</dt>
 
+                  <dd className="mb-2 text-xs text-slate-500">Chosen when this test is run by itself.</dd>
+
                   <dd>
 
                     <Select
@@ -1130,6 +1172,16 @@ export function TestCaseDetailPage() {
                   </dd>
 
                 </div>
+
+                <EnvironmentMultiSelect
+
+                  environments={environments}
+
+                  value={applicableEnvironmentIds}
+
+                  onChange={setApplicableEnvironmentIds}
+
+                />
 
                 <div>
 

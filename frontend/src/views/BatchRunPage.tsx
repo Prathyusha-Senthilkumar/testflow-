@@ -292,6 +292,7 @@ export function BatchRunPage() {
 }
 
 function CaseTable({ cases, projectId }: { cases: BatchCaseResult[]; projectId: string }) {
+  const navigate = useNavigate();
   return (
     <table className="w-full text-sm">
       <thead className="bg-slate-50 text-xs uppercase text-slate-600">
@@ -304,7 +305,22 @@ function CaseTable({ cases, projectId }: { cases: BatchCaseResult[]; projectId: 
       </thead>
       <tbody>
         {cases.map((testCase) => (
-          <tr key={testCase.testCaseId} className="border-t align-top">
+          <tr
+            key={testCase.testCaseId}
+            className={`border-t align-top ${testCase.testRunId && projectId ? "cursor-pointer hover:bg-slate-50" : ""}`}
+            tabIndex={testCase.testRunId && projectId ? 0 : undefined}
+            onClick={() => {
+              if (testCase.testRunId && projectId) {
+                navigate(`/projects/${projectId}/results/${testCase.testRunId}`);
+              }
+            }}
+            onKeyDown={(event) => {
+              if ((event.key === "Enter" || event.key === " ") && testCase.testRunId && projectId) {
+                event.preventDefault();
+                navigate(`/projects/${projectId}/results/${testCase.testRunId}`);
+              }
+            }}
+          >
             <td className="px-4 py-4">
               <div className="font-medium">{testCase.name}</div>
               {testCase.testCaseCode && <div className="font-mono text-xs text-slate-500">{testCase.testCaseCode}</div>}
@@ -318,16 +334,6 @@ function CaseTable({ cases, projectId }: { cases: BatchCaseResult[]; projectId: 
                 <pre className="whitespace-pre-wrap break-words font-mono text-xs text-slate-700">{testCase.reason}</pre>
               ) : (
                 <span className="text-slate-400">—</span>
-              )}
-              {testCase.testRunId && projectId && (
-                <div className="mt-2">
-                  <a
-                    href={`/projects/${projectId}/results/${testCase.testRunId}`}
-                    className="text-sm font-medium text-indigo-700 hover:underline"
-                  >
-                    View result
-                  </a>
-                </div>
               )}
             </td>
           </tr>

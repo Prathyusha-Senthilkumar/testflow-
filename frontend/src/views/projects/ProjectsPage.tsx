@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, FolderKanban, Plus } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,7 @@ import { ProjectFormModal } from "@/components/projects/ProjectFormModal";
 import { api, type ProjectInput, type ProjectSummary } from "@/lib/api";
 
 export function ProjectsPage() {
+  const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,13 +70,13 @@ export function ProjectsPage() {
       ) : (
         <div className="mt-7 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (
-            <Card key={project.id} className="flex min-h-56 flex-col p-6">
+            <Card key={project.id} role="link" tabIndex={0} onClick={() => navigate(`/projects/${project.id}`)} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); navigate(`/projects/${project.id}`); } }} className="flex min-h-56 cursor-pointer flex-col p-6">
               <div className="flex items-start justify-between gap-4">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-indigo-50 text-indigo-600"><FolderKanban size={19} /></span>
                 <Badge status={project.passRate === 100 ? "Passed" : project.failed > 0 ? "Failed" : ""}>{project.passRate}% pass</Badge>
               </div>
               <h2 className="mt-5 text-lg font-semibold text-slate-900">{project.name}</h2>
-              <a className="mt-1 flex items-center gap-1 truncate text-sm text-indigo-600 hover:underline" href={project.baseUrl} target="_blank" rel="noreferrer">{project.baseUrl}<ExternalLink size={13} /></a>
+              <a className="mt-1 flex items-center gap-1 truncate text-sm text-indigo-600 hover:underline" href={project.baseUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>{project.baseUrl}<ExternalLink size={13} /></a>
               <div className="mt-5 grid grid-cols-3 gap-3 text-sm">
                 <div><p className="text-xs text-slate-400">Suites</p><p className="mt-1 font-semibold">{project.suites}</p></div>
                 <div><p className="text-xs text-slate-400">Cases</p><p className="mt-1 font-semibold">{project.cases}</p></div>
@@ -83,7 +84,7 @@ export function ProjectsPage() {
               </div>
               <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-4">
                 <p className="text-xs text-slate-400">{project.lastRun ? `Last run ${new Date(project.lastRun).toLocaleDateString()}` : "Not run yet"}</p>
-                <Link to={`/projects/${project.id}`} className="text-sm font-semibold text-indigo-600 hover:text-indigo-700">Open Project →</Link>
+                
               </div>
             </Card>
           ))}

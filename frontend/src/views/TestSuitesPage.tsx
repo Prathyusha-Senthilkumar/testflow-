@@ -6,7 +6,7 @@ import { Link, useParams } from "@/lib/navigation";
 import { api, type TestSuiteSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { CreateSuiteModal } from "@/components/suites/CreateSuiteModal";
-import { SuiteCategoryBadge } from "@/components/suites/SuiteCategoryBadge";
+import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
 
 export function TestSuitesPage() {
   const { id: projectId = "" } = useParams();
@@ -75,7 +75,7 @@ export function TestSuitesPage() {
             >
               <div className="flex flex-wrap items-center gap-2">
                 <div className="font-semibold text-slate-900">{suite.name}</div>
-                <SuiteCategoryBadge category={suite.category} />
+                <SuiteCategoryBadges categories={suite.categories} category={suite.category} />
               </div>
               {suite.description ? (
                 <p className="mt-1 text-sm text-slate-500">{suite.description}</p>

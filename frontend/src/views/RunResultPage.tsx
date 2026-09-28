@@ -97,8 +97,17 @@ export function RunResultPage() {
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
           <h1 className="text-3xl font-bold">
-            {run.testCaseCode ? `${run.testCaseCode} · ` : ""}
-            {run.testName || "Test run"}
+            {run.testCaseId ? (
+              <Link to={`/projects/${projectId || run.projectId}/test-cases/${run.testCaseId}`} className="hover:underline">
+                {run.testCaseCode ? `${run.testCaseCode} · ` : ""}
+                {run.testName || "Test run"}
+              </Link>
+            ) : (
+              <>
+                {run.testCaseCode ? `${run.testCaseCode} · ` : ""}
+                {run.testName || "Test run"}
+              </>
+            )}
           </h1>
           <div className="flex gap-2">
             {active && (
@@ -131,14 +140,6 @@ export function RunResultPage() {
             <p className="font-semibold">{cancelled ? "Reason" : "Failure reason"}</p>
             <p className="mt-2 whitespace-pre-wrap">{run.errorMessage}</p>
           </div>
-        )}
-        {run.testCaseId && (
-          <Link
-            to={`/projects/${projectId || run.projectId}/test-cases/${run.testCaseId}`}
-            className="mt-4 inline-block text-sm text-indigo-700 hover:underline"
-          >
-            Open test case
-          </Link>
         )}
       </div>
     </div>

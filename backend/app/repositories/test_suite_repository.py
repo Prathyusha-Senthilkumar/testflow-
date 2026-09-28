@@ -9,6 +9,10 @@ from app.schemas.test_suite import (
     CreateTestSuiteDto,
     TestSuiteSummary,
     UpdateTestSuiteDto,
+    MIGRATION_HINT,
+    missing_multi_column,
+    normalize_suite_categories,
+    parse_suite_categories,
 )
 
 
@@ -68,7 +72,8 @@ class TestSuiteRepository:
             projectId=str(row.get("project_id")),
             name=str(row.get("name")),
             description=row.get("description"),
-            category=row.get("category") or "regression",
+            category=parse_suite_categories(row)[0],
+            categories=parse_suite_categories(row),
             caseCount=self._count_cases(str(row.get("id"))),
             createdAt=row.get("created_at"),
         )
@@ -114,7 +119,8 @@ class TestSuiteRepository:
                 projectId=project_id,
                 name=input_dto.name.strip(),
                 description=input_dto.description,
-                category=input_dto.category,
+                category=(normalize_suite_categories(input_dto.categories, input_dto.category) or ["regression"])[0],
+                categories=normalize_suite_categories(input_dto.categories, input_dto.category) or ["regression"],
                 caseCount=0,
                 createdAt=datetime.now(timezone.utc).isoformat(),
             )
@@ -122,18 +128,23 @@ class TestSuiteRepository:
             self.demo_suite_cases[_membership_key(project_id, new_id)] = set()
             return suite
 
-        res = (
-            self.db.from_("test_suites")
-            .insert(
-                {
-                    "project_id": project_id,
-                    "name": input_dto.name.strip(),
-                    "description": input_dto.description,
-                    "category": input_dto.category,
-                }
-            )
-            .execute()
-        )
+        chosen = normalize_suite_categories(input_dto.categories, input_dto.category) or ["regression"]
+        payload = {
+            "project_id": project_id,
+            "name": input_dto.name.strip(),
+            "description": input_dto.description,
+            "category": chosen[0],
+            "categories": chosen,
+        }
+        try:
+            res = self.db.from_("test_suites").insert(payload).execute()
+        except Exception as exc:
+            if not missing_multi_column(exc):
+                raise
+            if len(chosen) > 1:
+                raise HTTPException(status_code=400, detail=MIGRATION_HINT) from exc
+            payload.pop("categories", None)
+            res = self.db.from_("test_suites").insert(payload).execute()
         if not res.data:
             raise HTTPException(status_code=500, detail="Could not create test suite")
         return self._map_row(res.data[0])
@@ -146,8 +157,11 @@ class TestSuiteRepository:
                 updates["name"] = input_dto.name.strip()
             if input_dto.description is not None:
                 updates["description"] = input_dto.description.strip() or None
-            if input_dto.category is not None:
-                updates["category"] = input_dto.category
+            if input_dto.categories is not None or input_dto.category is not None:
+                chosen = normalize_suite_categories(input_dto.categories, input_dto.category)
+                if chosen:
+                    updates["category"] = chosen[0]
+                    updates["categories"] = chosen
             updated = suite.model_copy(update=updates)
             self._replace(project_id, suite_id, updated)
             return self._with_count(project_id, updated)
@@ -157,12 +171,28 @@ class TestSuiteRepository:
             changes["name"] = input_dto.name.strip()
         if input_dto.description is not None:
             changes["description"] = input_dto.description.strip() or None
-        if input_dto.category is not None:
-            changes["category"] = input_dto.category
+        if input_dto.categories is not None or input_dto.category is not None:
+            chosen = normalize_suite_categories(input_dto.categories, input_dto.category)
+            if not chosen:
+                raise HTTPException(status_code=400, detail="Choose at least one category.")
+            changes["category"] = chosen[0]
+            changes["categories"] = chosen
         if changes:
-            self.db.from_("test_suites").update(changes).eq("project_id", project_id).eq(
-                "id", suite_id
-            ).execute()
+            try:
+                self.db.from_("test_suites").update(changes).eq("project_id", project_id).eq(
+                    "id", suite_id
+                ).execute()
+            except Exception as exc:
+                if not missing_multi_column(exc):
+                    raise
+                chosen = changes.get("categories") or []
+                if len(chosen) > 1:
+                    raise HTTPException(status_code=400, detail=MIGRATION_HINT) from exc
+                changes.pop("categories", None)
+                if changes:
+                    self.db.from_("test_suites").update(changes).eq("project_id", project_id).eq(
+                        "id", suite_id
+                    ).execute()
         return self.find_by_id(project_id, suite_id)
 
     def delete(self, project_id: str, suite_id: str) -> None:

@@ -3,6 +3,15 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 StorageKind = Literal["localStorage", "sessionStorage", "cookie"]
+EXECUTION_CATEGORIES = ("smoke", "sanity", "regression", "full_regression")
+
+
+def normalize_execution_categories(values: Optional[List[str]]) -> List[str]:
+    cleaned: List[str] = []
+    for item in values or []:
+        if item in EXECUTION_CATEGORIES and item not in cleaned:
+            cleaned.append(item)
+    return cleaned
 
 
 class StorageEntry(BaseModel):
@@ -34,6 +43,8 @@ class TestCaseSummary(BaseModel):
     scenario: TestCaseScenario = DEFAULT_TEST_CASE_SCENARIO
     automationStatus: str = Field(..., alias="automationStatus")
     testFile: Optional[str] = Field(None, alias="testFile")
+    categories: List[str] = Field(default_factory=list)
+    environmentIds: List[str] = Field(default_factory=list, alias="environmentIds")
     environmentId: Optional[str] = Field(default=None, alias="environmentId")
     authProfileId: Optional[str] = Field(default=None, alias="authProfileId")
     startPath: str = Field(default="/", alias="startPath")
@@ -57,6 +68,8 @@ class CreateTestCaseDto(BaseModel):
     description: Optional[str] = None
     category: TestCaseCategory = DEFAULT_TEST_CASE_CATEGORY
     scenario: TestCaseScenario = DEFAULT_TEST_CASE_SCENARIO
+    categories: Optional[List[str]] = None
+    environmentIds: Optional[List[str]] = Field(default=None, alias="environmentIds")
     suiteId: Optional[str] = Field(default=None, alias="suiteId")
 
 
@@ -68,6 +81,8 @@ class UpdateTestCaseDto(BaseModel):
     startPath: Optional[str] = Field(None, alias="startPath")
     expectedResult: Optional[str] = Field(None, alias="expectedResult")
     category: Optional[TestCaseCategory] = None
+    categories: Optional[List[str]] = None
+    environmentIds: Optional[List[str]] = Field(default=None, alias="environmentIds")
     scenario: Optional[TestCaseScenario] = None
     assertions: Optional[List[AssertionConfig]] = None
     storageSeeds: Optional[List[StorageEntry]] = Field(None, alias="storageSeeds")

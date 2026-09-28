@@ -7,3 +7,21 @@ export function SuiteCategoryBadge({ category }: { category?: string | null }) {
     </span>
   );
 }
+
+export function SuiteCategoryBadges({
+  categories,
+  category,
+}: {
+  categories?: string[] | null;
+  category?: string | null;
+}) {
+  const values = categories?.length ? categories : category ? [category] : [];
+  if (values.length === 0) return <span className="text-xs text-slate-400">—</span>;
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {values.map((value) => (
+        <SuiteCategoryBadge key={value} category={value} />
+      ))}
+    </span>
+  );
+}

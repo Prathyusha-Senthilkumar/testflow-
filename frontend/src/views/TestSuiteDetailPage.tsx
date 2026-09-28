@@ -7,7 +7,7 @@ import { api, type TestCaseInput, type TestCaseSummary, type TestSuiteDetail } f
 import { Button } from "@/components/ui/button";
 import { AddTestCasesModal } from "@/components/suites/AddTestCasesModal";
 import { EditSuiteModal } from "@/components/suites/EditSuiteModal";
-import { SuiteCategoryBadge } from "@/components/suites/SuiteCategoryBadge";
+import { SuiteCategoryBadge, SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
 import { TestCaseFormModal } from "@/components/test-cases/TestCaseFormModal";
 
 export function TestSuiteDetailPage() {
@@ -135,7 +135,7 @@ export function TestSuiteDetailPage() {
           </Link>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <h1 className="text-3xl font-bold">{suite.name}</h1>
-            <SuiteCategoryBadge category={suite.category} />
+            <SuiteCategoryBadges categories={suite.categories} category={suite.category} />
           </div>
           {suite.description ? <p className="mt-1 text-sm text-slate-500">{suite.description}</p> : null}
         </div>
@@ -202,7 +202,12 @@ export function TestSuiteDetailPage() {
                   }}
                 >
                   <td className="px-5 py-4 font-mono text-xs">{testCase.code}</td>
-                  <td className="px-5 py-4 font-medium text-indigo-600">{testCase.name}</td>
+                  <td className="px-5 py-4 font-medium text-indigo-600">
+                    <div>{testCase.name}</div>
+                    <div className="mt-1">
+                      <SuiteCategoryBadges categories={testCase.categories} />
+                    </div>
+                  </td>
                   <td className="px-5 py-4 text-slate-600">{testCase.category ?? "Functional"}</td>
                   <td className="px-5 py-4 text-slate-600">{testCase.scenario ?? "Happy Path"}</td>
                   <td className="px-5 py-4 text-slate-600">{testCase.automationStatus}</td>
@@ -228,6 +233,7 @@ export function TestSuiteDetailPage() {
 
       <TestCaseFormModal
         open={createOpen}
+        projectId={projectId}
         loading={creating}
         onClose={() => setCreateOpen(false)}
         onSubmit={handleCreate}

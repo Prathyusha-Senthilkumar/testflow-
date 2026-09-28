@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye, Play, Plus, Settings2, Sparkles } from "lucide-react";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { api, type EnvironmentSummary, type ProjectDetail, type ProjectInput } from "@/lib/api";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Button } from "@/components/ui/button";
 import { ProjectFormModal } from "@/components/projects/ProjectFormModal";
-import { SuiteCategoryBadge } from "@/components/suites/SuiteCategoryBadge";
+import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
 import { Modal } from "@/components/ui/modal";
 import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS, type SuiteCategory } from "@/lib/suiteCategory";
 
@@ -27,6 +27,8 @@ export function ProjectOverviewPage() {
   const [environmentId, setEnvironmentId] = useState("");
   const [suiteDialogId, setSuiteDialogId] = useState<string | null>(null);
   const [startingSuiteId, setStartingSuiteId] = useState<string | null>(null);
+  const [cancellingSuite, setCancellingSuite] = useState(false);
+  const cancelSuiteStart = useRef(false);
 
   useEffect(() => {
     if (!projectId) return;
@@ -50,16 +52,32 @@ export function ProjectOverviewPage() {
 
   async function runSuite() {
     if (!projectId || !suiteDialogId || startingSuiteId || !environmentId) return;
-    setStartingSuiteId(suiteDialogId);
+    const suiteId = suiteDialogId;
+    cancelSuiteStart.current = false;
+    setCancellingSuite(false);
+    setStartingSuiteId(suiteId);
     setError("");
     try {
-      const started = await api.startSuiteRun(projectId, suiteDialogId, environmentId);
+      const started = await api.startSuiteRun(projectId, suiteId, environmentId);
+      if (cancelSuiteStart.current) {
+        await api.cancelBatchRun(started.batchId);
+      }
       setSuiteDialogId(null);
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the suite run");
       setStartingSuiteId(null);
+      setCancellingSuite(false);
     }
+  }
+
+  function cancelSuiteDialog() {
+    if (startingSuiteId) {
+      cancelSuiteStart.current = true;
+      setCancellingSuite(true);
+      return;
+    }
+    setSuiteDialogId(null);
   }
 
   const editValue = useMemo<ProjectInput | undefined>(
@@ -195,12 +213,25 @@ export function ProjectOverviewPage() {
       </div>
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         {project.suitesList.map((suite) => (
-          <div key={suite.id} className="rounded-lg bg-white p-5 shadow-sm">
+          <div
+            key={suite.id}
+            role="link"
+            tabIndex={0}
+            onClick={() => navigate(`/projects/${project.id}/suites/${suite.id}`)}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                navigate(`/projects/${project.id}/suites/${suite.id}`);
+              }
+            }}
+            className="cursor-pointer rounded-lg bg-white p-5 shadow-sm transition hover:ring-2 hover:ring-indigo-200"
+          >
             <div className="flex items-start justify-between">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="font-semibold">{suite.name}</h3>
-                  <SuiteCategoryBadge category={suite.category} />
+                  <SuiteCategoryBadges categories={suite.categories} category={suite.category} />
                 </div>
                 <p className="mt-1 font-mono text-xs text-slate-500">{suite.cases} Test Cases</p>
               </div>
@@ -223,10 +254,10 @@ export function ProjectOverviewPage() {
               </span>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-              <Link to={`/projects/${project.id}/suites/${suite.id}`} className="rounded-lg border px-3 py-1.5 text-sm">Open Suite</Link>
               <button
                 type="button"
-                onClick={() => {
+                onClick={(event) => {
+                  event.stopPropagation();
                   setError("");
                   setSuiteDialogId(suite.id);
                 }}
@@ -298,20 +329,18 @@ export function ProjectOverviewPage() {
 
       <Modal
         open={suiteDialogId !== null}
-        onClose={() => {
-          if (!startingSuiteId) setSuiteDialogId(null);
-        }}
+        onClose={cancelSuiteDialog}
         title="Run Test Suite"
         description={project.suitesList.find((suite) => suite.id === suiteDialogId)?.name}
         footer={
           <>
             <button
               type="button"
-              className="rounded-lg border px-4 py-2 text-sm"
-              disabled={startingSuiteId !== null}
-              onClick={() => setSuiteDialogId(null)}
+              className="rounded-lg border border-orange-300 px-4 py-2 text-sm font-medium text-orange-800 disabled:opacity-60"
+              disabled={cancellingSuite}
+              onClick={cancelSuiteDialog}
             >
-              Cancel
+              {startingSuiteId ? (cancellingSuite ? "Cancelling..." : "Cancel run") : "Cancel"}
             </button>
             <button
               type="button"
