@@ -5,8 +5,8 @@ __pycache__/
 .venv/
 venv/
 
-# Test artifacts
-results/
+# Test artifacts (root output only; app routes named results stay tracked)
+/results/
 test-results/
 playwright-report/
 trace.zip
