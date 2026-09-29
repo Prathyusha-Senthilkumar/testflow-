@@ -255,7 +255,11 @@ class TestCaseRepository:
         if "categories" in input_dto.model_fields_set:
             changes["categories"] = normalize_execution_categories(input_dto.categories)
         if "environmentIds" in input_dto.model_fields_set:
-            changes["environment_ids"] = list(input_dto.environmentIds or [])
+            changes["environment_ids"] = [
+                item
+                for item in (self._normalize_environment_id(value) for value in (input_dto.environmentIds or []))
+                if item
+            ]
         if input_dto.scenario is not None:
             changes["scenario"] = input_dto.scenario
         if input_dto.environmentId is not None:
@@ -331,7 +335,33 @@ class TestCaseRepository:
         # The sentinel "env-default" means "project default"; store NULL in Supabase.
         if not environment_id or environment_id == DEFAULT_ENVIRONMENT_ID:
             return None
-        return environment_id
+        try:
+            from uuid import UUID
+
+            return str(UUID(str(environment_id)))
+        except ValueError:
+            return None
+
+    def delete(self, project_id: str, test_case_id: str) -> None:
+        self.find_by_id(project_id, test_case_id)
+        if not self.db:
+            self.demo_cases[project_id] = [
+                case for case in self.demo_cases.get(project_id, []) if case.id != test_case_id
+            ]
+            return
+        self._delete_rows("test_runs", "test_case_id", test_case_id)
+        self._delete_rows("test_case_versions", "test_case_id", test_case_id)
+        self._delete_rows("test_suite_cases", "test_case_id", test_case_id)
+        self.db.from_("test_cases").delete().eq("project_id", project_id).eq("id", test_case_id).execute()
+
+    def _delete_rows(self, table: str, column: str, value: str) -> None:
+        try:
+            self.db.from_(table).delete().eq(column, value).execute()
+        except Exception as exc:
+            message = str(exc)
+            if "PGRST205" in message or "does not exist" in message or "42P01" in message:
+                return
+            raise
 
     def _next_code(self, project_id: str) -> str:
         existing = self.list_by_project(project_id)

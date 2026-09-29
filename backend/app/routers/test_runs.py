@@ -1,6 +1,8 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Response
+
+from app.services.account_service import actor_from_authorization
 
 from app.repositories.test_run_repository import test_run_repository
 from app.schemas.execution import ExecutionStatusResponse
@@ -41,8 +43,8 @@ def cancel_test_run(run_id: str):
 
 
 @router.post("/{run_id}/rerun", response_model=ExecutionStatusResponse)
-def rerun_test_run(run_id: str):
-    return get_execution_service().rerun_test_run(run_id)
+def rerun_test_run(run_id: str, authorization: str | None = Header(default=None)):
+    return get_execution_service().rerun_test_run(run_id, run_by=actor_from_authorization(authorization))
 
 
 @router.get("/{run_id}", response_model=ReportRun)

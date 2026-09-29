@@ -142,7 +142,7 @@ export function TestCaseDetailPage() {
 
   const [authProfiles, setAuthProfiles] = useState<AuthProfileSummary[]>([]);
 
-  const [environmentId, setEnvironmentId] = useState<string>("env-default");
+  const [environmentId, setEnvironmentId] = useState<string>("");
 
   const [executionCategories, setExecutionCategories] = useState<SuiteCategory[]>([]);
 
@@ -265,7 +265,10 @@ export function TestCaseDetailPage() {
 
         setTestCase(data);
 
-        setEnvironmentId(data.environmentId ?? envs[0]?.id ?? "env-default");
+        const savedEnvironmentId = data.environmentId && data.environmentId !== "env-default" ? data.environmentId : "";
+        const savedEnvironments = (data.environmentIds ?? []).filter((id) => id && id !== "env-default");
+        if (savedEnvironments.length === 0 && savedEnvironmentId) savedEnvironments.push(savedEnvironmentId);
+        setEnvironmentId(savedEnvironments[0] ?? savedEnvironmentId);
 
         setAuthProfileId(data.authProfileId ?? "");
 
@@ -277,7 +280,7 @@ export function TestCaseDetailPage() {
 
         setExecutionCategories((data.categories ?? []) as SuiteCategory[]);
 
-        setApplicableEnvironmentIds(data.environmentIds ?? []);
+        setApplicableEnvironmentIds(savedEnvironments);
 
         setScenario(data.scenario ?? "Happy Path");
 
@@ -362,6 +365,11 @@ export function TestCaseDetailPage() {
   }, [projectId, startPath, environmentId]);
 
 
+
+  function changeApplicableEnvironments(ids: string[]) {
+    setApplicableEnvironmentIds(ids);
+    setEnvironmentId((current) => (ids.includes(current) ? current : ids[0] ?? ""));
+  }
 
   async function handleSave() {
 
@@ -1045,6 +1053,14 @@ export function TestCaseDetailPage() {
 
             </Button>
 
+            <Button type="button" variant="secondary" onClick={openScriptViewer}>
+
+              <Code2 size={15} className="mr-1 inline" />
+
+              View Script
+
+            </Button>
+
             <Button type="button" onClick={handleRun} disabled={!hasScript || recording || running}>
 
               <Play size={15} className="mr-1 inline" />
@@ -1105,7 +1121,7 @@ export function TestCaseDetailPage() {
 
                 <div>
 
-                  <dt className="mb-1 text-slate-500">Category</dt>
+                  <dt className="mb-1 text-slate-500">Type</dt>
 
                   <dd>
 
@@ -1125,7 +1141,11 @@ export function TestCaseDetailPage() {
 
                 <div className="sm:col-span-2">
 
-                  <CategoryMultiSelect value={executionCategories} onChange={setExecutionCategories} />
+                  <CategoryMultiSelect
+                    legend="Execution category"
+                    value={executionCategories}
+                    onChange={setExecutionCategories}
+                  />
 
                 </div>
 
@@ -1159,35 +1179,13 @@ export function TestCaseDetailPage() {
 
               <dl className="space-y-3 text-sm">
 
-                <div>
-
-                  <dt className="mb-1 text-slate-500">Environment</dt>
-
-                  <dd className="mb-2 text-xs text-slate-500">Chosen when this test is run by itself.</dd>
-
-                  <dd>
-
-                    <Select
-
-                      value={environmentId}
-
-                      onChange={setEnvironmentId}
-
-                      options={environments.map((env) => ({ value: env.id, label: env.name }))}
-
-                    />
-
-                  </dd>
-
-                </div>
-
                 <EnvironmentMultiSelect
 
                   environments={environments}
 
                   value={applicableEnvironmentIds}
 
-                  onChange={setApplicableEnvironmentIds}
+                  onChange={changeApplicableEnvironments}
 
                 />
 
@@ -1267,57 +1265,19 @@ export function TestCaseDetailPage() {
 
 
 
-            <div className="rounded-xl border border-slate-100 p-5">
+            {scriptMissing && (
 
-              <div className="flex items-center justify-between gap-3">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
 
-                <h2 className="font-semibold">ACT</h2>
+                The recorded script for this test case is no longer on disk, so it cannot run.
 
-                <Button type="button" variant="secondary" size="sm" onClick={openScriptViewer}>
+                Use <strong>Record Test</strong> to record it again, or open{" "}
 
-                  <Code2 size={14} className="mr-1 inline" />
-
-                  View Script
-
-                </Button>
+                <strong>View Script</strong> and paste the script to restore it.
 
               </div>
 
-              <dl className="mt-4 space-y-3 text-sm">
-
-                <div className="flex justify-between gap-3">
-
-                  <dt className="text-slate-500">Automation status</dt>
-
-                  <dd className="font-medium">{testCase.automationStatus}</dd>
-
-                </div>
-
-                <div className="flex justify-between gap-3">
-
-                  <dt className="text-slate-500">Script path</dt>
-
-                  <dd className="max-w-[16rem] truncate font-mono text-xs text-right">{testCase.testFile || "—"}</dd>
-
-                </div>
-
-              </dl>
-
-              {scriptMissing && (
-
-                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-
-                  The recorded script for this test case is no longer on disk, so it cannot run.
-
-                  Use <strong>Record Test</strong> to record it again, or open{" "}
-
-                  <strong>View Script</strong> and paste the script to restore it.
-
-                </div>
-
-              )}
-
-            </div>
+            )}
 
 
 
@@ -1339,7 +1299,7 @@ export function TestCaseDetailPage() {
 
                 <p className="mt-2 text-xs text-slate-500">
 
-                  Optional while drafting. When provided, Run Test checks that this text is visible on the page after ACT.
+                  Optional while drafting. When provided, Run Test checks that this text is visible on the page after the recorded steps.
 
                 </p>
 
@@ -2087,7 +2047,7 @@ export function TestCaseDetailPage() {
               : error || "Could not finish the run"
         }
         facts={[
-          { label: "Category", value: category },
+          { label: "Type", value: category },
           { label: "Scenario", value: scenario },
           {
             label: "Environment",

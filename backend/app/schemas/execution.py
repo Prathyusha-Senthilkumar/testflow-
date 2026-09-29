@@ -122,6 +122,7 @@ class BatchExecutionStatus(BaseModel):
     suite_category: Optional[str] = Field(None, alias="suiteCategory")
     environment_id: Optional[str] = Field(None, alias="environmentId")
     environment_name: Optional[str] = Field(None, alias="environmentName")
+    run_by: Optional[str] = Field(None, alias="runBy")
     duration_ms: Optional[int] = Field(None, alias="durationMs")
     cases: list[BatchCaseResult]
 

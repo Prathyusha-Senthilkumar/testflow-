@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Play, Plus, Search, Sparkles, Trash2, Upload } from "lucide-react";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -86,6 +86,20 @@ export function TestCasesPage() {
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [projectId]);
+
+  async function deleteTestCase(event: MouseEvent, testCaseId: string, name: string) {
+    event.stopPropagation();
+    if (!projectId) return;
+    if (!window.confirm(`Delete test case “${name}”? This cannot be undone.`)) return;
+    setError("");
+    try {
+      await api.deleteTestCase(projectId, testCaseId);
+      setCases((current) => current.filter((item) => item.id !== testCaseId));
+      setSelected((current) => current.filter((id) => id !== testCaseId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete test case");
+    }
+  }
 
   async function createTestCase(input: TestCaseInput) {
     if (!projectId) return;
@@ -253,6 +267,7 @@ export function TestCasesPage() {
                 <th className="px-3 py-3 text-left">Status</th>
                 <th className="px-3 py-3 text-left">Last Run</th>
                 <th className="px-3 py-3 text-left">Run By</th>
+                <th className="w-12 px-3 py-3 text-right"><span className="sr-only">Delete</span></th>
               </tr>
             </thead>
             <tbody>
@@ -326,6 +341,16 @@ export function TestCasesPage() {
                     {run ? formatWhen(run.completedAt || run.startedAt) : "Not run"}
                   </td>
                   <td className="px-3">{run?.runBy || "—"}</td>
+                  <td className="px-3 text-right" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${t.name}`}
+                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      onClick={(event) => deleteTestCase(event, t.id, t.name)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
                 </tr>
                 );
               })}

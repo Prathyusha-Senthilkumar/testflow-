@@ -89,6 +89,7 @@ class ProjectRepository:
         suites = self._all_rows("test_suites", "id,project_id")
         cases = self._all_rows("test_cases", "id,suite_id")
         latest_runs = self._latest_runs([str(c["id"]) for c in cases])
+        run_by_names = self._run_by_names(latest_runs)
 
         # Real schema: project -> test_suites(project_id) -> test_cases(suite_id).
         suite_to_project: Dict[str, str] = {
@@ -106,7 +107,7 @@ class ProjectRepository:
                 cases_by_project.setdefault(pid, []).append(str(case["id"]))
 
         return [
-            self._project_summary_from_base(row, cases_by_project, suite_counts, latest_runs)
+            self._project_summary_from_base(row, cases_by_project, suite_counts, latest_runs, run_by_names)
             for row in projects
         ]
 
@@ -132,11 +133,12 @@ class ProjectRepository:
         cases = self._cases_for_suites(suite_ids)
         case_ids = [str(c["id"]) for c in cases]
         latest_runs = self._latest_runs(case_ids)
+        run_by_names = self._run_by_names(latest_runs)
 
         cases_by_project = {id: case_ids}
         suite_counts = {id: len(suites)}
         project_summary = self._project_summary_from_base(
-            project_row, cases_by_project, suite_counts, latest_runs
+            project_row, cases_by_project, suite_counts, latest_runs, run_by_names
         )
 
         cases_by_suite: Dict[str, List[str]] = {}
@@ -144,7 +146,7 @@ class ProjectRepository:
             cases_by_suite.setdefault(str(case.get("suite_id")), []).append(str(case["id"]))
 
         suites_list = [
-            self._suite_summary_from_base(s, cases_by_suite, latest_runs) for s in suites
+            self._suite_summary_from_base(s, cases_by_suite, latest_runs, run_by_names) for s in suites
         ]
         suites_list.sort(key=lambda s: s.name.lower())
 
@@ -172,13 +174,19 @@ class ProjectRepository:
         )
         return res.data or []
 
+    def _run_by_names(self, latest_runs: Dict[str, dict]) -> Dict[str, str]:
+        from app.repositories.test_run_repository import test_run_repository
+
+        ids = [str(row.get("run_by")) for row in latest_runs.values() if row.get("run_by")]
+        return test_run_repository.profile_names(ids)
+
     def _latest_runs(self, case_ids: List[str]) -> Dict[str, dict]:
         """Latest test_run row per test_case_id (most recent started_at first)."""
         if not case_ids:
             return {}
         res = (
             self.db.from_("test_runs")
-            .select("test_case_id,status,started_at,completed_at")
+            .select("test_case_id,status,started_at,completed_at,run_by")
             .in_("test_case_id", case_ids)
             .order("started_at", desc=True)
             .execute()
@@ -193,6 +201,7 @@ class ProjectRepository:
     def _aggregate(self, case_ids: List[str], latest_runs: Dict[str, dict]) -> dict:
         passed = failed = 0
         last_run = None
+        last_run_by = None
         for cid in case_ids:
             run = latest_runs.get(cid)
             if not run:
@@ -205,6 +214,7 @@ class ProjectRepository:
             completed = run.get("completed_at")
             if completed and (last_run is None or completed > last_run):
                 last_run = completed
+                last_run_by = run.get("run_by")
         total = len(case_ids)
         pass_rate = round(100.0 * passed / total) if total else 0
         return {
@@ -213,6 +223,7 @@ class ProjectRepository:
             "failed": failed,
             "pass_rate": pass_rate,
             "last_run": last_run,
+            "last_run_by": str(last_run_by) if last_run_by else None,
         }
 
     def _project_summary_from_base(
@@ -221,6 +232,7 @@ class ProjectRepository:
         cases_by_project: Dict[str, List[str]],
         suite_counts: Dict[str, int],
         latest_runs: Dict[str, dict],
+        run_by_names: Optional[Dict[str, str]] = None,
     ) -> ProjectSummary:
         project_id = str(row.get("id"))
         case_ids = cases_by_project.get(project_id, [])
@@ -236,7 +248,7 @@ class ProjectRepository:
             failed=agg["failed"],
             passRate=agg["pass_rate"],
             lastRun=agg["last_run"],
-            lastRunBy=None,
+            lastRunBy=(run_by_names or {}).get(agg.get("last_run_by") or "") or None,
         )
 
     def _suite_summary_from_base(
@@ -244,6 +256,7 @@ class ProjectRepository:
         suite_row: dict,
         cases_by_suite: Dict[str, List[str]],
         latest_runs: Dict[str, dict],
+        run_by_names: Optional[Dict[str, str]] = None,
     ) -> SuiteSummary:
         suite_id = str(suite_row.get("id"))
         case_ids = cases_by_suite.get(suite_id, [])
@@ -260,8 +273,45 @@ class ProjectRepository:
             notRun=not_run,
             passRate=agg["pass_rate"],
             lastRun=agg["last_run"],
-            lastRunBy=None,
+            lastRunBy=(run_by_names or {}).get(agg.get("last_run_by") or "") or None,
         )
+
+    def delete(self, id: str) -> None:
+        self.find_by_id(id)
+        if not self.db:
+            self.demo_projects.pop(id, None)
+            return
+        case_ids = [
+            str(row["id"])
+            for row in (self.db.from_("test_cases").select("id").eq("project_id", id).execute().data or [])
+            if row.get("id")
+        ]
+        if case_ids:
+            self._delete_in("test_runs", "test_case_id", case_ids)
+            self._delete_in("test_case_versions", "test_case_id", case_ids)
+            self._delete_in("test_suite_cases", "test_case_id", case_ids)
+        self._delete_eq("test_cases", "project_id", id)
+        self._delete_eq("test_suites", "project_id", id)
+        self._delete_eq("environments", "project_id", id)
+        self.db.from_("projects").delete().eq("id", id).execute()
+
+    def _delete_eq(self, table: str, column: str, value: str) -> None:
+        try:
+            self.db.from_(table).delete().eq(column, value).execute()
+        except Exception as exc:
+            message = str(exc)
+            if "PGRST205" in message or "does not exist" in message or "42P01" in message:
+                return
+            raise
+
+    def _delete_in(self, table: str, column: str, values: List[str]) -> None:
+        try:
+            self.db.from_(table).delete().in_(column, values).execute()
+        except Exception as exc:
+            message = str(exc)
+            if "PGRST205" in message or "does not exist" in message or "42P01" in message:
+                return
+            raise
 
     def create(self, input_dto: CreateProjectDto) -> ProjectDetail:
         desc = input_dto.description.strip() if input_dto.description and input_dto.description.strip() else None

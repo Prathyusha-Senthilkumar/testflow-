@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Play, Plus, Settings2, Sparkles } from "lucide-react";
+import { Eye, Play, Plus, Settings2, Sparkles, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { api, type EnvironmentSummary, type ProjectDetail, type ProjectInput } from "@/lib/api";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -139,6 +139,23 @@ export function ProjectOverviewPage() {
         description={project.description ?? "Automated visual and interaction suites for regression testing"}
         actions={
           <>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={async () => {
+                if (!window.confirm(`Delete project “${project.name}”? Suites, test cases, and run history in this project will be deleted.`)) return;
+                setError("");
+                try {
+                  await api.deleteProject(project.id);
+                  navigate("/projects");
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Could not delete project");
+                }
+              }}
+            >
+              <Trash2 size={15} className="mr-1 inline" />
+              Delete Project
+            </Button>
             <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>
               <Settings2 size={15} className="mr-1 inline" />
               Edit Project
@@ -251,6 +268,7 @@ export function ProjectOverviewPage() {
               </div>
               <span className="text-slate-500">
                 Last Run: <b className="text-slate-700">{suite.lastRun ? new Date(suite.lastRun).toLocaleString() : "Not run"}</b>
+                {" · "}Run by: <b className="text-slate-700">{suite.lastRunBy || "—"}</b>
               </span>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">

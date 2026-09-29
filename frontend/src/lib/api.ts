@@ -62,7 +62,10 @@ export const accountApi = {
   updatePassword: (password: string) =>
     request<AccountResponse>("/auth/password", { method: "POST", body: JSON.stringify({ password }) }),
   forgotPassword: (email: string) =>
-    request<{ message: string }>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
+    request<{ message: string; resetLink?: string | null }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
   resetPassword: (accessToken: string, password: string) =>
     request<{ message: string }>("/auth/reset-password", {
       method: "POST",
@@ -181,6 +184,7 @@ export type BatchExecutionStatus = {
   suiteCategory?: string | null;
   environmentId?: string | null;
   environmentName?: string | null;
+  runBy?: string | null;
   durationMs?: number | null;
   cases: BatchCaseResult[];
 };
@@ -279,6 +283,7 @@ export const api = {
     request<ProjectDetail>("/projects", { method: "POST", body: JSON.stringify(input) }),
   updateProject: (id: string, input: Partial<ProjectInput>) =>
     request<ProjectDetail>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   testCases: (projectId: string) =>
     request<TestCaseSummary[]>(`/projects/${projectId}/test-cases`),
   testCase: (projectId: string, testCaseId: string) =>
@@ -298,6 +303,8 @@ export const api = {
       method: "POST",
       signal: AbortSignal.timeout(15 * 60 * 1000),
     }),
+  deleteTestCase: (projectId: string, testCaseId: string) =>
+    request<void>(`/projects/${projectId}/test-cases/${testCaseId}`, { method: "DELETE" }),
   updateTestCase: (projectId: string, testCaseId: string, input: UpdateTestCaseInput) =>
     request<TestCaseSummary>(`/projects/${projectId}/test-cases/${testCaseId}`, {
       method: "PATCH",

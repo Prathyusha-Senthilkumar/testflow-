@@ -13,26 +13,67 @@ class TestRunRepository:
     def db(self):
         return get_supabase_client()
 
+    def ensure_profile(self, user_id: str, name: str) -> bool:
+        """Keep a profiles row so test_runs.run_by can reference the signed-in user."""
+        if not self.db or not user_id:
+            return False
+        try:
+            self.db.from_("profiles").upsert(
+                {"id": user_id, "name": (name or "Account").strip() or "Account"},
+                on_conflict="id",
+            ).execute()
+            return True
+        except Exception:
+            return False
+
+    def profile_names(self, user_ids: list[str]) -> dict[str, str]:
+        ids = list({user_id for user_id in user_ids if user_id})
+        if not self.db or not ids:
+            return {}
+        names: dict[str, str] = {}
+        try:
+            rows = (
+                self.db.from_("profiles")
+                .select("id,name")
+                .in_("id", ids)
+                .execute()
+                .data
+                or []
+            )
+            names = {str(row["id"]): str(row.get("name") or "") for row in rows if row.get("id") and row.get("name")}
+        except Exception:
+            names = {}
+        missing = [user_id for user_id in ids if not names.get(user_id)]
+        if missing:
+            from app.services.account_service import display_names
+
+            names.update(display_names(missing))
+        return names
+
     def create_queued(
         self,
         test_case_id: str,
         job_id: str,
         config_path: Optional[str],
+        run_by: Optional[str] = None,
     ) -> Optional[str]:
         if not self.db:
             return None
-        res = (
-            self.db.from_("test_runs")
-            .insert(
-                {
-                    "test_case_id": test_case_id,
-                    "status": "Queued",
-                    "job_id": job_id,
-                    "config_path": config_path,
-                }
-            )
-            .execute()
-        )
+        payload = {
+            "test_case_id": test_case_id,
+            "status": "Queued",
+            "job_id": job_id,
+            "config_path": config_path,
+        }
+        if run_by:
+            payload["run_by"] = run_by
+        try:
+            res = self.db.from_("test_runs").insert(payload).execute()
+        except Exception:
+            if not run_by:
+                raise
+            payload.pop("run_by", None)
+            res = self.db.from_("test_runs").insert(payload).execute()
         if res.data:
             return str(res.data[0]["id"])
         return None
@@ -181,7 +222,8 @@ class TestRunRepository:
             or []
         )
         cases, suites, projects = self._report_lookups(runs)
-        return [self._report_row(run, cases, suites, projects) for run in runs]
+        names = self.profile_names([str(run.get("run_by") or "") for run in runs])
+        return [self._report_row(run, cases, suites, projects, names) for run in runs]
 
     def get_report(self, run_id: str) -> Optional[dict]:
         if not self.db:
@@ -199,7 +241,8 @@ class TestRunRepository:
         )
         if not rows:
             return None
-        return self._report_row(rows[0], *self._report_lookups(rows))
+        names = self.profile_names([str(rows[0].get("run_by") or "")])
+        return self._report_row(rows[0], *self._report_lookups(rows), names)
 
     def _report_lookups(self, runs: list[dict]) -> tuple[dict, dict, dict]:
         case_ids = list({str(run["test_case_id"]) for run in runs if run.get("test_case_id")})
@@ -254,6 +297,7 @@ class TestRunRepository:
         cases: dict,
         suites: dict,
         projects: dict,
+        names: Optional[dict] = None,
     ) -> dict:
         case = cases.get(str(run.get("test_case_id") or "")) or {}
         suite = suites.get(str(case.get("suite_id") or "")) or {}
@@ -273,7 +317,7 @@ class TestRunRepository:
             "completedAt": run.get("completed_at"),
             "durationMs": run.get("duration_ms"),
             "errorMessage": run.get("error_message"),
-            "runBy": run.get("run_by"),
+            "runBy": (names or {}).get(str(run.get("run_by") or "")) or None,
         }
 
     def mark_running(self, job_id: str) -> None:

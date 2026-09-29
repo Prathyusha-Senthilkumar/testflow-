@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "@/lib/navigation";
+import { Link, useNavigate, useParams, useSearchParams } from "@/lib/navigation";
 import { api, type ReportRun } from "@/lib/api";
 import { formatDuration, formatExecutedAt } from "@/lib/reportCsv";
 import { TestResultPage } from "@/views/TestResultPage";
@@ -9,6 +9,7 @@ import { TestResultPage } from "@/views/TestResultPage";
 export function RunResultPage() {
   const navigate = useNavigate();
   const { id: projectId = "", runId = "" } = useParams();
+  const fromRuns = useSearchParams().get("from") === "runs";
   const [run, setRun] = useState<ReportRun | null>(null);
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState("");
@@ -78,7 +79,10 @@ export function RunResultPage() {
     setError("");
     try {
       const started = await api.rerunTestRun(runId);
-      if (started.testRunId) navigate(`/projects/${projectId || run?.projectId}/results/${started.testRunId}`);
+      if (started.testRunId) {
+        const from = fromRuns ? "?from=runs" : "";
+        navigate(`/projects/${projectId || run?.projectId}/results/${started.testRunId}${from}`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not rerun");
       setBusy(false);
@@ -120,9 +124,18 @@ export function RunResultPage() {
                 Rerun
               </button>
             )}
-            <Link to="/reports" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">
-              Back to Reports
-            </Link>
+            {fromRuns && run.testCaseId ? (
+              <Link
+                to={`/projects/${projectId || run.projectId}/test-cases/${run.testCaseId}`}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
+              >
+                Back to test case
+              </Link>
+            ) : (
+              <Link to="/reports" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">
+                Back to Reports
+              </Link>
+            )}
           </div>
         </div>
       </div>

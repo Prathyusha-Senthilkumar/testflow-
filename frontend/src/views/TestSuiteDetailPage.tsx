@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
-import { api, type TestCaseInput, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
+import { api, type EnvironmentSummary, type TestCaseInput, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { AddTestCasesModal } from "@/components/suites/AddTestCasesModal";
 import { EditSuiteModal } from "@/components/suites/EditSuiteModal";
 import { SuiteCategoryBadge, SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
@@ -22,6 +23,12 @@ export function TestSuiteDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [runOpen, setRunOpen] = useState(false);
+  const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
+  const [environmentId, setEnvironmentId] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const cancelStart = useRef(false);
 
   const inSuite = useMemo(
     () => new Set((suite?.testCases ?? []).map((testCase) => testCase.id)),
@@ -31,10 +38,11 @@ export function TestSuiteDetailPage() {
   useEffect(() => {
     if (!projectId || !suiteId) return;
     setLoading(true);
-    Promise.all([api.testSuite(projectId, suiteId), api.testCases(projectId)])
-      .then(([detail, cases]) => {
+    Promise.all([api.testSuite(projectId, suiteId), api.testCases(projectId), api.environments(projectId)])
+      .then(([detail, cases, environmentRows]) => {
         setSuite(detail);
         setProjectCases(cases);
+        setEnvironments(environmentRows);
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
@@ -72,6 +80,20 @@ export function TestSuiteDetailPage() {
     }
   }
 
+  async function handleDeleteCase(testCaseId: string, name: string) {
+    if (!projectId || !suiteId) return;
+    if (!window.confirm(`Delete test case “${name}”? This cannot be undone.`)) return;
+    setError("");
+    try {
+      await api.deleteTestCase(projectId, testCaseId);
+      const updated = await api.testSuite(projectId, suiteId);
+      setSuite(updated);
+      setProjectCases((current) => current.filter((item) => item.id !== testCaseId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete test case");
+    }
+  }
+
   async function handleRemove(testCaseId: string) {
     if (!projectId || !suiteId) return;
     setError("");
@@ -97,6 +119,33 @@ export function TestSuiteDetailPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function runSuite() {
+    if (!projectId || !suiteId || starting || !environmentId) return;
+    cancelStart.current = false;
+    setCancelling(false);
+    setStarting(true);
+    setError("");
+    try {
+      const started = await api.startSuiteRun(projectId, suiteId, environmentId);
+      if (cancelStart.current) await api.cancelBatchRun(started.batchId);
+      setRunOpen(false);
+      navigate(`/runs/batches/${started.batchId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start the suite run");
+      setStarting(false);
+      setCancelling(false);
+    }
+  }
+
+  function closeRunDialog() {
+    if (starting) {
+      cancelStart.current = true;
+      setCancelling(true);
+      return;
+    }
+    setRunOpen(false);
   }
 
   async function handleDelete() {
@@ -140,6 +189,10 @@ export function TestSuiteDetailPage() {
           {suite.description ? <p className="mt-1 text-sm text-slate-500">{suite.description}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={() => setRunOpen(true)}>
+            <Play size={15} className="mr-1 inline" />
+            Run Test Suite
+          </Button>
           <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>
             <Pencil size={15} className="mr-1 inline" />
             Edit Suite
@@ -221,9 +274,17 @@ export function TestSuiteDetailPage() {
                     <button
                       type="button"
                       onClick={() => handleRemove(testCase.id)}
-                      className="text-sm text-red-600 hover:underline"
+                      className="mr-3 text-sm text-slate-600 hover:underline"
                     >
                       Remove
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${testCase.name}`}
+                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      onClick={() => handleDeleteCase(testCase.id, testCase.name)}
+                    >
+                      <Trash2 size={16} className="inline" />
                     </button>
                   </td>
                 </tr>
@@ -249,6 +310,55 @@ export function TestSuiteDetailPage() {
         onClose={() => setAddOpen(false)}
         onSubmit={handleAdd}
       />
+
+      <Modal
+        open={runOpen}
+        onClose={closeRunDialog}
+        title="Run Test Suite"
+        description={suite.name}
+        footer={
+          <>
+            <button
+              type="button"
+              className="rounded-lg border border-orange-300 px-4 py-2 text-sm font-medium text-orange-800 disabled:opacity-60"
+              disabled={cancelling}
+              onClick={closeRunDialog}
+            >
+              {starting ? (cancelling ? "Cancelling..." : "Cancel run") : "Cancel"}
+            </button>
+            <button
+              type="button"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              disabled={starting || !environmentId}
+              onClick={runSuite}
+            >
+              {starting ? "Starting..." : "Run Suite"}
+            </button>
+          </>
+        }
+      >
+        {environments.length === 0 ? (
+          <p className="text-sm text-amber-700">
+            No environments are configured for this project. Add an environment before running tests.
+          </p>
+        ) : (
+          <label className="block text-sm font-medium text-slate-700">
+            Environment
+            <select
+              className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
+              value={environmentId}
+              onChange={(event) => setEnvironmentId(event.target.value)}
+            >
+              <option value="">Select Environment</option>
+              {environments.map((environment) => (
+                <option key={environment.id} value={environment.id}>
+                  {environment.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </Modal>
 
       <EditSuiteModal
         open={editOpen}

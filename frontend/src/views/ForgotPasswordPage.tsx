@@ -11,16 +11,19 @@ export function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [resetLink, setResetLink] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
     setNotice("");
+    setResetLink("");
     setLoading(true);
     try {
       const result = await accountApi.forgotPassword(email.trim());
       setNotice(result.message);
+      setResetLink(result.resetLink || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send the reset email");
     } finally {
@@ -49,9 +52,18 @@ export function ForgotPasswordPage() {
           />
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           {notice ? <p className="text-sm text-slate-600">{notice}</p> : null}
-          <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700" disabled={loading} loading={loading}>
-            Send reset link
-          </Button>
+          {resetLink ? (
+            <a
+              href={resetLink}
+              className="block w-full rounded-lg bg-indigo-600 px-4 py-2 text-center text-sm font-medium text-white hover:bg-indigo-700"
+            >
+              Choose a new password
+            </a>
+          ) : (
+            <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700" disabled={loading} loading={loading}>
+              Send reset link
+            </Button>
+          )}
         </form>
         <Link to="/login" className="mt-4 block text-center text-sm text-indigo-700 hover:underline">
           Back to sign in

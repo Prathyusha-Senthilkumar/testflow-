@@ -132,6 +132,41 @@ def refresh(refresh_token: str) -> AccountResponse:
     return _from_session(payload)
 
 
+def display_names(user_ids: list[str]) -> dict[str, str]:
+    """Account names from Supabase Auth. Empty when a user cannot be loaded."""
+    names: dict[str, str] = {}
+    for user_id in user_ids:
+        if not user_id or user_id in names:
+            continue
+        try:
+            user = _auth_request("GET", f"/auth/v1/admin/users/{user_id}")
+        except HTTPException:
+            continue
+        if isinstance(user.get("user"), dict):
+            user = user["user"]
+        if not isinstance(user, dict) or not user.get("id"):
+            continue
+        names[str(user.get("id"))] = _display_name(user)
+    return names
+
+
+def actor_from_authorization(authorization: str | None) -> tuple[str, str] | None:
+    """Signed-in user id and display name, or None when the request has no usable session."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        return None
+    try:
+        account = current_user(token)
+    except HTTPException:
+        return None
+    user_id = str(account.userId or "").strip()
+    if not user_id:
+        return None
+    return user_id, account.name or account.email or "Account"
+
+
 def current_user(access_token: str) -> AccountResponse:
     user = _auth_request("GET", "/auth/v1/user", user_token=access_token)
     if not user.get("id"):
@@ -152,16 +187,36 @@ def update_profile(access_token: str, name: str) -> AccountResponse:
     return _from_user(user, access_token=access_token)
 
 
-def request_password_reset(email: str) -> None:
+def request_password_reset(email: str) -> str | None:
+    """Send a reset email. When the mailer fails, return a recovery link instead."""
     email = email.strip()
     if not email:
         raise HTTPException(status_code=400, detail="Email is required.")
     redirect = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password"
-    _auth_request(
+    try:
+        _auth_request(
+            "POST",
+            "/auth/v1/recover?redirect_to=" + urllib.parse.quote(redirect, safe=""),
+            {"email": email},
+        )
+    except HTTPException as exc:
+        if "sending recovery email" not in str(exc.detail).lower():
+            raise
+        return _recovery_link(email, redirect)
+    return None
+
+
+def _recovery_link(email: str, redirect: str) -> str:
+    payload = _auth_request(
         "POST",
-        "/auth/v1/recover?redirect_to=" + urllib.parse.quote(redirect, safe=""),
-        {"email": email},
+        "/auth/v1/admin/generate_link",
+        {"type": "recovery", "email": email, "options": {"redirect_to": redirect}},
     )
+    properties = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+    link = payload.get("action_link") or properties.get("action_link")
+    if not link:
+        raise HTTPException(status_code=400, detail="Could not create a reset link.")
+    return str(link)
 
 
 def reset_password(access_token: str, password: str) -> AccountResponse:

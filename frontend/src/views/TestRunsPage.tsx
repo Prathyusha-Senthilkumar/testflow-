@@ -97,7 +97,7 @@ function RunActions({ run }: { run: GroupedRun }) {
       if (run.runType === "individual") {
         const started = await api.rerunTestRun(run.id);
         if (started.testRunId && (started.projectId || run.projectId)) {
-          navigate(`/projects/${started.projectId || run.projectId}/results/${started.testRunId}`);
+          navigate(`/projects/${started.projectId || run.projectId}/results/${started.testRunId}?from=runs`);
         }
         return;
       }
@@ -195,7 +195,7 @@ export function TestRunsPage() {
 
   function openRun(run: GroupedRun) {
     if (run.runType === "individual") {
-      if (run.projectId) navigate(`/projects/${run.projectId}/results/${run.id}`);
+      if (run.projectId) navigate(`/projects/${run.projectId}/results/${run.id}?from=runs`);
       return;
     }
     navigate(`/runs/batches/${run.id}`);

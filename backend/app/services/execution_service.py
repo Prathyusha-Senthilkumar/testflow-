@@ -81,6 +81,7 @@ class ExecutionService:
         self,
         request: StartExecutionRequest,
         environment_base_url: Optional[str] = None,
+        run_by: Optional[tuple[str, str]] = None,
     ) -> ExecutionStatusResponse:
         try:
             if request.script_path and request.script_path.strip():
@@ -122,10 +123,15 @@ class ExecutionService:
         test_run_id = None
         if request.test_case_id:
             try:
+                run_by_id = None
+                if run_by:
+                    test_run_repository.ensure_profile(run_by[0], run_by[1])
+                    run_by_id = run_by[0]
                 test_run_id = test_run_repository.create_queued(
                     test_case_id=request.test_case_id,
                     job_id=job.id,
                     config_path=config_path,
+                    run_by=run_by_id,
                 )
             except Exception as exc:  # pragma: no cover - persistence is best-effort at enqueue
                 import logging
@@ -215,7 +221,13 @@ class ExecutionService:
             scheduled_for=scheduled_for,
         )
 
-    def start_suite(self, project_id: str, suite_id: str, environment_id: str) -> BatchExecutionStatus:
+    def start_suite(
+        self,
+        project_id: str,
+        suite_id: str,
+        environment_id: str,
+        run_by: Optional[tuple[str, str]] = None,
+    ) -> BatchExecutionStatus:
         """Enqueue each runnable case in the suite through the single-test path."""
         from app.repositories.project_repository import project_repository
         from app.repositories.test_suite_repository import test_suite_repository
@@ -225,7 +237,12 @@ class ExecutionService:
         test_suite_repository.find_by_id(project_id, suite_id)
         case_ids = test_suite_repository.list_case_ids(project_id, suite_id)
         return self._start_batch(
-            "suite", project_id, suite_id, _unique_ids(case_ids), environment=environment
+            "suite",
+            project_id,
+            suite_id,
+            _unique_ids(case_ids),
+            environment=environment,
+            run_by=run_by,
         )
 
     def start_project(
@@ -233,6 +250,7 @@ class ExecutionService:
         project_id: str,
         suite_category: Optional[str] = None,
         environment_id: Optional[str] = None,
+        run_by: Optional[tuple[str, str]] = None,
     ) -> BatchExecutionStatus:
         """Enqueue project cases once. A category limits the run to suites in that category."""
         from app.repositories.project_repository import project_repository
@@ -271,6 +289,7 @@ class ExecutionService:
             case_ids,
             suite_category=suite_category,
             environment=environment,
+            run_by=run_by,
         )
 
     def list_grouped_runs(self) -> list[GroupedRun]:
@@ -347,7 +366,9 @@ class ExecutionService:
         _save_batch(payload)
         return self._status_from_payload(payload)
 
-    def rerun_batch(self, batch_id: str) -> BatchExecutionStatus:
+    def rerun_batch(
+        self, batch_id: str, run_by: Optional[tuple[str, str]] = None
+    ) -> BatchExecutionStatus:
         payload = _load_batch(batch_id)
         if payload is None:
             raise HTTPException(status_code=404, detail="Batch run not found")
@@ -362,8 +383,10 @@ class ExecutionService:
             suite_id = payload.get("suiteId")
             if not suite_id:
                 raise HTTPException(status_code=400, detail="This suite run has no suite to start again")
-            return self.start_suite(project_id, str(suite_id), str(environment_id))
-        return self.start_project(project_id, payload.get("suiteCategory"), str(environment_id))
+            return self.start_suite(project_id, str(suite_id), str(environment_id), run_by=run_by)
+        return self.start_project(
+            project_id, payload.get("suiteCategory"), str(environment_id), run_by=run_by
+        )
 
     def cancel_test_run(self, run_id: str) -> None:
         row = test_run_repository.find_for_rerun(run_id)
@@ -376,7 +399,9 @@ class ExecutionService:
             raise HTTPException(status_code=404, detail="Execution job not found")
         test_run_repository.mark_cancelled(job_id)
 
-    def rerun_test_run(self, run_id: str) -> ExecutionStatusResponse:
+    def rerun_test_run(
+        self, run_id: str, run_by: Optional[tuple[str, str]] = None
+    ) -> ExecutionStatusResponse:
         row = test_run_repository.find_for_rerun(run_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Test run not found")
@@ -391,7 +416,8 @@ class ExecutionService:
                 project_id=row.get("projectId"),
                 test_case_id=row.get("testCaseId"),
                 test_case_code=row.get("testCaseCode"),
-            )
+            ),
+            run_by=run_by,
         )
 
     def _start_batch(
@@ -402,6 +428,7 @@ class ExecutionService:
         case_ids: list[str],
         suite_category: Optional[str] = None,
         environment=None,
+        run_by: Optional[tuple[str, str]] = None,
     ) -> BatchExecutionStatus:
         from app.services.test_cases_service import TestCasesService
         from app.repositories.project_repository import project_repository
@@ -467,6 +494,7 @@ class ExecutionService:
                             test_case_code=case.code,
                         ),
                         environment_base_url=environment.baseUrl if environment is not None else None,
+                        run_by=run_by,
                     )
                     entry["jobId"] = started.job_id
                 except Exception as exc:
@@ -484,6 +512,7 @@ class ExecutionService:
             "environmentName": environment.name if environment is not None else None,
             "environmentBaseUrl": environment.baseUrl if environment is not None else None,
             "createdAt": datetime.now(timezone.utc).isoformat(),
+            "runBy": run_by[1] if run_by else None,
             "cases": stored_cases,
         }
         _save_batch(payload)
@@ -562,6 +591,7 @@ class ExecutionService:
             suite_category=payload.get("suiteCategory"),
             environment_id=payload.get("environmentId"),
             environment_name=payload.get("environmentName"),
+            run_by=payload.get("runBy"),
             duration_ms=_batch_duration_ms(created_at, completed_at, finished),
             cases=results,
         )

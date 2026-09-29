@@ -72,6 +72,10 @@ class TestCasesService:
         created = self.test_cases.create(project_id, normalized)
         return self._attach_resolved_url(project_id, created)
 
+    def delete(self, project_id: str, test_case_id: str) -> None:
+        self._ensure_project_exists(project_id)
+        self.test_cases.delete(project_id, test_case_id)
+
     def update(self, project_id: str, test_case_id: str, input_dto: UpdateTestCaseDto) -> TestCaseSummary:
         self._ensure_project_exists(project_id)
         existing = self.test_cases.find_by_id(project_id, test_case_id)

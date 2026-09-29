@@ -37,7 +37,12 @@ def signup(body: SignupDto) -> AccountResponse:
 
 @router.post("/forgot-password", response_model=MessageResponse)
 def forgot_password(body: ForgotPasswordDto) -> MessageResponse:
-    account_service.request_password_reset(body.email)
+    reset_link = account_service.request_password_reset(body.email)
+    if reset_link:
+        return MessageResponse(
+            message="The reset email could not be sent. Use this link to choose a new password.",
+            resetLink=reset_link,
+        )
     return MessageResponse(message="If an account exists for that email, a reset link has been sent.")
 
 

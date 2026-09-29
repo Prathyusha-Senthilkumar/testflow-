@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 from app.repositories.project_repository import ProjectRepository, project_repository
 from app.services.projects_service import ProjectsService
@@ -55,6 +55,12 @@ def create_project(
     service: ProjectsService = Depends(get_projects_service),
 ):
     return service.create(input_dto)
+
+@router.delete("/{id}", status_code=204)
+def delete_project(id: str, service: ProjectsService = Depends(get_projects_service)):
+    service.delete(id)
+    return Response(status_code=204)
+
 
 @router.patch("/{id}", response_model=ProjectDetail)
 def update_project(

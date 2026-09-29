@@ -206,13 +206,23 @@ export function BatchRunPage() {
                 Rerun
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => navigate("/runs")}
-              className="rounded-lg border px-4 py-2 text-sm font-medium"
-            >
-              Back to Test Runs
-            </button>
+            {run.batchType === "suite" && run.suiteId ? (
+              <button
+                type="button"
+                onClick={() => navigate(`/projects/${run.projectId}/suites/${run.suiteId}`)}
+                className="rounded-lg border px-4 py-2 text-sm font-medium"
+              >
+                Back to test suite
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => navigate("/projects")}
+                className="rounded-lg border px-4 py-2 text-sm font-medium"
+              >
+                Back to projects
+              </button>
+            )}
           </div>
         </div>
         {run.batchType === "project" && run.suiteCategory && (
@@ -221,6 +231,7 @@ export function BatchRunPage() {
         {run.environmentName && (
           <p className="mt-1 text-sm text-slate-600">Environment: {run.environmentName}</p>
         )}
+        <p className="mt-1 text-sm text-slate-600">Run by: {run.runBy || "—"}</p>
         <p className="mt-3 text-sm text-slate-600">
           {run.passed} Passed · {run.failed} Failed · {run.skipped} Skipped
           {(run.cancelled ?? 0) > 0 ? ` · ${run.cancelled} Cancelled` : ""}

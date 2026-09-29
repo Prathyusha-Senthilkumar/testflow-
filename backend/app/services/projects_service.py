@@ -33,6 +33,9 @@ class ProjectsService:
         environment_repository.ensure_default(project.id, project.baseUrl)
         return project
 
+    def delete(self, id: str) -> None:
+        self.repository.delete(id)
+
     def update(self, id: str, input_dto: UpdateProjectDto) -> ProjectDetail:
         normalized = UpdateProjectDto(
             name=input_dto.name,

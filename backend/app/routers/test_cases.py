@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from app.repositories.project_repository import project_repository
 from app.repositories.test_case_repository import test_case_repository
@@ -46,6 +46,16 @@ def create_test_case(
     service: TestCasesService = Depends(get_test_cases_service),
 ):
     return service.create(project_id, input_dto)
+
+
+@router.delete("/{test_case_id}", status_code=204)
+def delete_test_case(
+    project_id: str,
+    test_case_id: str,
+    service: TestCasesService = Depends(get_test_cases_service),
+):
+    service.delete(project_id, test_case_id)
+    return Response(status_code=204)
 
 
 @router.patch("/{test_case_id}", response_model=TestCaseSummary)
