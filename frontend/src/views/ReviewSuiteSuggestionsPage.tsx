@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, Plus, SlidersHorizontal, Sparkles, X } from "lucide-react";
-import { Link, useNavigate, useParams } from "@/lib/navigation";
+import { useNavigate, useParams } from "@/lib/navigation";
 import { suggestedSuites, testCases } from "@/lib/demoData";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { CreateSuiteModal } from "@/components/suites/CreateSuiteModal";

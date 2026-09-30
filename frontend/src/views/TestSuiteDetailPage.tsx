@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { AddTestCasesModal } from "@/components/suites/AddTestCasesModal";
 import { EditSuiteModal } from "@/components/suites/EditSuiteModal";
-import { SuiteCategoryBadge, SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
+import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
 import { TestCaseFormModal } from "@/components/test-cases/TestCaseFormModal";
 
 export function TestSuiteDetailPage() {

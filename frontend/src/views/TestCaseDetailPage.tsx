@@ -727,7 +727,7 @@ export function TestCaseDetailPage() {
 
     }
 
-    let runAtIso = "";
+    let runAtIso: string;
 
     try {
 

@@ -34,14 +34,14 @@ def test_suite_management_flow():
 
     suite1 = client.post(
         f"/api/projects/{project_id}/test-suites",
-        json={"name": "Login Regression", "description": "Login flows"},
+        json={"name": "Login Regression", "description": "Login flows", "category": "regression"},
     )
     assert suite1.status_code == 200
     suite1_id = suite1.json()["id"]
 
     suite2 = client.post(
         f"/api/projects/{project_id}/test-suites",
-        json={"name": "Smoke Tests"},
+        json={"name": "Smoke Tests", "category": "smoke"},
     )
     suite2_id = suite2.json()["id"]
 

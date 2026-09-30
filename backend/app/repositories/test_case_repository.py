@@ -116,7 +116,6 @@ class TestCaseRepository:
             else None
         )
         code = self._next_code(project_id)
-        suite_id = self._suite_id_for_create(project_id, input_dto.suiteId)
 
         if not self.db:
             new_id = f"demo-case-{int(time.time() * 1000)}"
@@ -143,7 +142,9 @@ class TestCaseRepository:
             return case
 
         # Deployed schema: no project_id / automation_status / code columns.
-        # suite_id and test_file are NOT NULL.
+        # suite_id and test_file are NOT NULL. Resolved only when a database
+        # client exists; demo mode keeps cases in memory.
+        suite_id = self._suite_id_for_create(project_id, input_dto.suiteId)
         categories = normalize_execution_categories(input_dto.categories)
         environment_ids = list(input_dto.environmentIds or [])
         payload = {

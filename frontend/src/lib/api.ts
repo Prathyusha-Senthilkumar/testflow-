@@ -24,7 +24,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(
       message === "Failed to fetch"
         ? `Could not reach the API at ${API_URL}. Is FastAPI running (e.g. uvicorn on port 8000)?`
-        : message
+        : message,
+      { cause: err }
     );
   }
   if (!response.ok) {
