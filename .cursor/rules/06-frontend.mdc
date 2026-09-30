@@ -1,0 +1,65 @@
+---
+description: "Frontend implementation and UI consistency rules for TestFlow"
+globs:
+  - "frontend/**/*.{ts,tsx,js,jsx,css}"
+alwaysApply: false
+---
+
+# TestFlow Frontend Rules
+
+## Technology
+
+The TestFlow frontend uses:
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+
+Do not introduce another frontend framework or CSS/UI styling library without explicit permission.
+
+## Styling
+
+Use Tailwind CSS for application styling.
+
+Do not introduce:
+- Bootstrap
+- Material UI
+- Chakra UI
+- styled-components
+- Emotion
+- Sass/SCSS
+- another CSS framework or component styling library
+
+unless explicitly approved.
+
+If existing shared TestFlow UI components are available, reuse them instead of recreating equivalent components.
+
+## UI Consistency
+
+Maintain visual consistency with the existing TestFlow application.
+
+Before creating or modifying UI:
+1. Inspect similar existing screens/components.
+2. Reuse existing spacing, typography, border radius, form styles, cards, buttons, badges, modals, and layout patterns.
+3. Reuse shared components whenever possible.
+4. Do not redesign unrelated parts of a page.
+
+A new feature should look like part of the existing TestFlow application, not like a separate design system.
+
+## Components
+
+Prefer existing shared components over page-specific duplicates.
+
+Do not create a new Button, Input, Select, Modal, Badge, Card, or similar primitive if an appropriate shared component already exists.
+
+Keep Storybook-compatible shared components consistent with their existing APIs.
+
+## Scope
+
+When implementing a frontend feature:
+- change only the required UI
+- preserve existing responsive behavior
+- preserve existing navigation and workflows
+- do not add new screens, dialogs, animations, or interactions unless requested
+
+If the requirement would require changing the existing design system or shared component API, ask before doing so.

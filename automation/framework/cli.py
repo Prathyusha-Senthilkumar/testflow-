@@ -65,12 +65,13 @@ def cmd_record(args: argparse.Namespace) -> int:
     if not url:
         print("No URL supplied and config/framework.json has no base_url.")
         return 2
-    return PlaywrightRecorder(PROJECT_ROOT, cfg).record(
+    exit_code, _error = PlaywrightRecorder(PROJECT_ROOT, cfg).record(
         title=args.title,
         url=url,
         output=args.output,
         browser=args.browser or cfg.get("browser", "chromium"),
     )
+    return exit_code
 
 
 def build_parser() -> argparse.ArgumentParser:

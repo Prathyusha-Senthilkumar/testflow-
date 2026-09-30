@@ -1,0 +1,110 @@
+name: TestFlow CI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflow-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000/api
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      USE_DEMO_DATA: "true"
+      # Disposable demo-mode key so Auth Profile tests can encrypt in memory.
+      # This is not a production secret and is not used outside this job.
+      TESTFLOW_SECRET_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      PYTHONPATH: backend:.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r requirements.txt
+
+      - name: Compile backend
+        run: python -m compileall -q backend/app
+
+      - name: Import application
+        run: python -c "from app.main import app"
+
+      - name: Unit and API tests
+        run: |
+          python -m pytest tests/test_url_resolve.py tests/test_codegen_command.py backend/tests
+
+  worker:
+    name: Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: |
+          npm install --no-save --no-audit --no-fund typescript @types/node
+          npx tsc --noEmit
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build frontend image
+        run: docker build -f frontend/Dockerfile --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000/api -t testflow-frontend:ci .
+
+      - name: Build backend image
+        run: docker build -f backend/Dockerfile --target backend -t testflow-backend:ci .
+
+      - name: Build worker image
+        run: docker build -f worker/Dockerfile -t testflow-worker:ci .

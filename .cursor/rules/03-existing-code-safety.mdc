@@ -1,0 +1,41 @@
+---
+description: "Safe modification and integration practices for the existing multi-developer TestFlow codebase"
+alwaysApply: true
+---
+
+# Existing Code Safety
+
+TestFlow is an existing multi-developer codebase. Treat existing working code as intentional unless there is evidence otherwise.
+
+## Before coding
+1. Inspect relevant existing files.
+2. Understand the current data flow.
+3. Identify existing components, routers, services, repositories, schemas, utilities, and automation modules related to the feature.
+4. Reuse them whenever appropriate.
+
+Never create a parallel implementation when an existing service, repository, component, API client, runner, resolver, or shared utility already owns that responsibility.
+
+## Preserve existing functionality
+- Prefer the smallest change that satisfies the requirement.
+- Do not remove or rewrite working functionality merely because another implementation seems cleaner.
+- Avoid broad refactoring while implementing an unrelated feature.
+- Do not substantially modify code outside the requested task without approval.
+
+## Multi-developer safety
+Do not assume existing code is disposable or obsolete.
+Do not rewrite another developer's implementation merely because you prefer another approach.
+
+If the requested task requires substantial changes to another existing feature/module:
+1. Explain which module needs to change.
+2. Explain why.
+3. Describe the minimum required modification.
+4. Ask permission before modifying it.
+
+## Integration work
+- Preserve both developers' intended completed functionality.
+- Identify actual integration points.
+- Make only minimum changes required to connect features.
+- Do not redesign either feature unnecessarily.
+- Do not silently resolve semantic conflicts by deleting or replacing one implementation.
+
+If two implementations conflict architecturally, report the conflict and ask how it should be resolved.

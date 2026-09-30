@@ -1,0 +1,26 @@
+[
+    {
+        "timestamp_utc": "2026-09-23T10:14:54.685163+00:00",
+        "title": "Open events page",
+        "test_file_location": "automation/generated/e8eeb4cc-25fa-42db-8287-92efbdd04b16/95564b01-7968-4df8-9283-3663c915a591/test_recorded.py",
+        "test_case_location": "automation/generated/e8eeb4cc-25fa-42db-8287-92efbdd04b16/95564b01-7968-4df8-9283-3663c915a591/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-23T10:15:25.172977+00:00",
+        "title": "Open events page",
+        "test_file_location": "automation/generated/e8eeb4cc-25fa-42db-8287-92efbdd04b16/95564b01-7968-4df8-9283-3663c915a591/test_recorded.py",
+        "test_case_location": "automation/generated/e8eeb4cc-25fa-42db-8287-92efbdd04b16/95564b01-7968-4df8-9283-3663c915a591/test_case.md",
+        "test_result": "Pass",
+        "pytest_return_code": 0
+    },
+    {
+        "timestamp_utc": "2026-09-23T13:30:12.899864+00:00",
+        "title": "Open events page",
+        "test_file_location": "automation/generated/e8eeb4cc-25fa-42db-8287-92efbdd04b16/95564b01-7968-4df8-9283-3663c915a591/test_recorded.py",
+        "test_case_location": "automation/generated/e8eeb4cc-25fa-42db-8287-92efbdd04b16/95564b01-7968-4df8-9283-3663c915a591/test_case.md",
+        "test_result": "Fail",
+        "pytest_return_code": 1
+    }
+]

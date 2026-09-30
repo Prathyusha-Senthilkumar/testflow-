@@ -1,0 +1,53 @@
+---
+description: "Required planning, implementation, verification, and reporting workflow for TestFlow coding tasks"
+alwaysApply: true
+---
+
+# Development Workflow and Communication
+
+Keep implementation communication concise and clear.
+
+## Before code changes
+Before implementing a requested change, provide a short plan of approximately 3-5 lines stating:
+- what will change
+- which existing area is involved
+- which files are expected to be modified
+- whether existing behavior may be affected
+
+Do not produce a large architectural plan for a small task.
+If the plan requires a protected change under the project rules, ask permission before proceeding.
+
+## During implementation
+- Prefer small, targeted changes.
+- Do not expand the task while coding.
+- Inspect relevant existing code before editing.
+- If an unexpected issue requires changes outside scope, stop and tell the user before modifying it.
+- Do not hide important assumptions.
+
+## After implementation
+Provide a concise summary with:
+
+### What changed
+What was implemented.
+
+### Files modified
+Important files created or changed.
+
+### How to test
+Clear manual verification steps.
+
+### Important notes
+Known limitations, assumptions, required restarts, approved configuration/migration steps, and issues discovered but intentionally left unchanged.
+
+## Verification language
+Do not claim a feature works unless appropriately verified.
+Clearly distinguish:
+- implemented
+- code-level validation passed
+- manually verified
+- not yet tested
+
+## Communication style
+Be concise and focused.
+Do not overwhelm the user with unnecessary architecture explanations unless requested.
+When clarification is required, ask a focused question rather than deciding for the user.

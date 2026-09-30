@@ -1,12 +1,14 @@
-import os
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PORT: int = 3000
     FRONTEND_URL: str = "http://localhost:5173"
+    USE_DEMO_DATA: bool = False
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
+    REDIS_URL: Optional[str] = None
+    RECORDING_DELEGATE_URL: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

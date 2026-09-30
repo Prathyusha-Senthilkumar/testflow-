@@ -1,0 +1,71 @@
+services:
+  redis:
+    image: redis:7-alpine
+    # Host 6380 avoids conflict with an existing local Redis on 6379 (e.g. testflow-redis).
+    # Backend/worker still use redis://redis:6379/0 inside the Compose network.
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: backend
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      FRONTEND_URL: http://localhost:3000
+      # Storage mode: demo by default; set USE_DEMO_DATA=false + Supabase creds in the
+      # root .env (gitignored) to persist to Supabase.
+      USE_DEMO_DATA: ${USE_DEMO_DATA:-true}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Encrypts Auth Profile credentials at rest. Never commit this value.
+      TESTFLOW_SECRET_KEY: ${TESTFLOW_SECRET_KEY:-}
+      # Headed Playwright codegen runs on the Windows host (host_recorder_main.py).
+      RECORDING_DELEGATE_URL: http://host.docker.internal:8765
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./automation:/app/automation
+      - ./tests:/app/tests
+      - ./results:/app/results
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      USE_DEMO_DATA: ${USE_DEMO_DATA:-true}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      TESTFLOW_SECRET_KEY: ${TESTFLOW_SECRET_KEY:-}
+    volumes:
+      - ./automation:/app/automation
+      - ./tests:/app/tests
+      - ./results:/app/results
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend

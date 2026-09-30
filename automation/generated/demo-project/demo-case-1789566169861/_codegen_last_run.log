@@ -1,0 +1,4 @@
+Playwright codegen launch
+command: C:\Users\PrathyushaS\AppData\Local\Python\pythoncore-3.14-64\python.exe -m playwright codegen --browser chromium --target python-pytest --output C:/Users/PrathyushaS/Downloads/college_website_testing_framework_nextjs/college_website_testing_framework/automation/generated/demo-project/demo-case-1789566169861/test_recorded.py https://www.srmist.edu.in/
+cwd: C:\Users\PrathyushaS\Downloads\college_website_testing_framework_nextjs\college_website_testing_framework
+output: C:/Users/PrathyushaS/Downloads/college_website_testing_framework_nextjs/college_website_testing_framework/automation/generated/demo-project/demo-case-1789566169861/test_recorded.py
