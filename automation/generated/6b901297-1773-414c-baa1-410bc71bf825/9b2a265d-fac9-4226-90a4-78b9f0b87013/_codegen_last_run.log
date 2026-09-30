@@ -1,4 +1,0 @@
-Playwright codegen launch
-command: C:\Users\PrathyushaS\AppData\Local\Python\pythoncore-3.14-64\python.exe -m playwright codegen --browser chromium --target python-pytest --output C:/sf/testflow-/automation/generated/6b901297-1773-414c-baa1-410bc71bf825/9b2a265d-fac9-4226-90a4-78b9f0b87013/test_recorded.ts --load-storage C:/sf/testflow-/automation/auth-profiles/6b901297-1773-414c-baa1-410bc71bf825/auth-1790159757408/storage_state.json https://evolv-dev.revature.io/admin/tenants
-cwd: C:\sf\testflow-
-output: C:/sf/testflow-/automation/generated/6b901297-1773-414c-baa1-410bc71bf825/9b2a265d-fac9-4226-90a4-78b9f0b87013/test_recorded.ts

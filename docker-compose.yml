@@ -4,7 +4,7 @@ services:
     # Host 6380 avoids conflict with an existing local Redis on 6379 (e.g. testflow-redis).
     # Backend/worker still use redis://redis:6379/0 inside the Compose network.
     ports:
-      - "6380:6379"
+      - "${REDIS_HOST_PORT:-6380}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -18,10 +18,10 @@ services:
       dockerfile: backend/Dockerfile
       target: backend
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     environment:
       REDIS_URL: redis://redis:6379/0
-      FRONTEND_URL: http://localhost:3000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       # Storage mode: demo by default; set USE_DEMO_DATA=false + Supabase creds in the
       # root .env (gitignored) to persist to Supabase.
       USE_DEMO_DATA: ${USE_DEMO_DATA:-true}
@@ -30,7 +30,7 @@ services:
       # Encrypts Auth Profile credentials at rest. Never commit this value.
       TESTFLOW_SECRET_KEY: ${TESTFLOW_SECRET_KEY:-}
       # Headed Playwright codegen runs on the Windows host (host_recorder_main.py).
-      RECORDING_DELEGATE_URL: http://host.docker.internal:8765
+      RECORDING_DELEGATE_URL: ${RECORDING_DELEGATE_URL:-http://host.docker.internal:8765}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -64,8 +64,8 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000/api
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend

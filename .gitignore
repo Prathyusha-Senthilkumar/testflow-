@@ -11,6 +11,12 @@ test-results/
 playwright-report/
 trace.zip
 *.webm
+*.log
+coverage/
+*.tsbuildinfo
+result_history.json
+# In-memory API tests use project ids demo-<timestamp>. Saved recordings stay tracked.
+automation/generated/demo-*/
 
 # Node / build output
 node_modules/

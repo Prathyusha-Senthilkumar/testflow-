@@ -17,6 +17,9 @@ backend/src
 /results
 **/test-results
 **/playwright-report
+coverage
+**/*.log
+**/*.tsbuildinfo
 **/*.md
 .cursor
 terminals
