@@ -220,9 +220,6 @@ export function ProjectOverviewPage() {
           <p className="mt-1 text-sm text-slate-500">Automated visual and interaction suites for regression testing.</p>
         </div>
         <div className="flex gap-2">
-          <Link to={`/projects/${project.id}/suites/review`} className="rounded-lg border bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700">
-            <Sparkles size={15} className="mr-1 inline" /> Review Suggestions
-          </Link>
           <Link to={`/projects/${project.id}/suites`} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white">
             <Plus size={15} className="mr-1 inline" /> Create Suite
           </Link>

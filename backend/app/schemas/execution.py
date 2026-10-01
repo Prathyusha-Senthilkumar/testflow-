@@ -48,6 +48,7 @@ class ExecutionResultPayload(BaseModel):
     validation_errors: Optional[list[str]] = Field(None, alias="validationErrors")
     error_message: Optional[str] = Field(None, alias="errorMessage")
     duration_ms: Optional[int] = Field(None, alias="durationMs")
+    screenshot_path: Optional[str] = Field(None, alias="screenshotPath")
 
 
 class ExecutionStatusResponse(BaseModel):

@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 from typing import Optional
 
 from app.database import get_supabase_client
@@ -199,6 +201,7 @@ class TestRunRepository:
                     "completedAt": run.get("completed_at"),
                     "durationMs": run.get("duration_ms"),
                     "errorMessage": run.get("error_message"),
+                    "screenshotPath": run.get("screenshot_path") or None,
                     "jobId": job_id or None,
                     "scheduledFor": schedule.get("scheduledFor"),
                     "timeZone": schedule.get("timeZone"),
@@ -231,7 +234,7 @@ class TestRunRepository:
         rows = (
             self.db.from_("test_runs")
             .select(
-                "id,test_case_id,status,started_at,completed_at,duration_ms,error_message,run_by"
+                "id,test_case_id,status,started_at,completed_at,duration_ms,error_message,run_by,screenshot_path"
             )
             .eq("id", run_id)
             .limit(1)
@@ -318,6 +321,7 @@ class TestRunRepository:
             "durationMs": run.get("duration_ms"),
             "errorMessage": run.get("error_message"),
             "runBy": (names or {}).get(str(run.get("run_by") or "")) or None,
+            "screenshotPath": run.get("screenshot_path") or None,
         }
 
     def mark_running(self, job_id: str) -> None:
@@ -379,6 +383,73 @@ class TestRunRepository:
         report["configPath"] = row.get("config_path")
         report["errorMessage"] = row.get("error_message")
         return report
+
+    def screenshot_file(self, run_id: str) -> Optional[Path]:
+        """Resolve the stored final screenshot. Rejects anything outside results/<run>/final-screenshot.png."""
+        if not self.db:
+            return None
+        rows = (
+            self.db.from_("test_runs")
+            .select("screenshot_path")
+            .eq("id", run_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        stored = str((rows[0] if rows else {}).get("screenshot_path") or "")
+        if not re.fullmatch(r"results/[A-Za-z0-9_-]+/final-screenshot\.png", stored):
+            return None
+        from app.services.automation_service import _REPO_ROOT
+
+        root = Path(_REPO_ROOT).resolve()
+        candidate = (root / stored).resolve()
+        results = (root / "results").resolve()
+        if results not in candidate.parents or not candidate.is_file():
+            return None
+        return candidate
+
+    def screenshot_steps(self, run_id: str) -> list[dict]:
+        """Step images stored beside the final screenshot. No extra database column."""
+        final = self.screenshot_file(run_id)
+        if final is None:
+            return []
+        directory = final.parent
+        manifest = directory / "steps.json"
+        entries: list[dict] = []
+        if manifest.is_file():
+            try:
+                raw = json.loads(manifest.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                raw = []
+            if isinstance(raw, list):
+                for item in raw:
+                    if not isinstance(item, dict):
+                        continue
+                    file_name = str(item.get("file") or "")
+                    if not _screenshot_name(file_name):
+                        continue
+                    if not (directory / file_name).is_file():
+                        continue
+                    entries.append({"file": file_name, "label": str(item.get("label") or file_name)[:160]})
+        if not entries and final.is_file():
+            entries.append({"file": "final-screenshot.png", "label": "Final screenshot"})
+        return entries
+
+    def screenshot_named(self, run_id: str, file_name: str) -> Optional[Path]:
+        if not _screenshot_name(file_name):
+            return None
+        final = self.screenshot_file(run_id)
+        if final is None:
+            return None
+        candidate = (final.parent / file_name).resolve()
+        if candidate.parent != final.parent.resolve() or not candidate.is_file():
+            return None
+        return candidate
+
+
+def _screenshot_name(file_name: str) -> bool:
+    return re.fullmatch(r"(?:step-\d{2}|final-screenshot)\.png", file_name) is not None
 
 
 def remember_schedule(

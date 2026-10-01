@@ -1,9 +1,48 @@
 import { readAccount } from "./account";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api").replace(/\/$/, "");
+function resolveApiUrl(): string {
+  if (typeof window !== "undefined") return "/api";
+  const internalApiUrl = process.env["INTERNAL_API_URL"]?.trim();
+  const publicApiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000/api").replace(/\/$/, "");
+  return (internalApiUrl || publicApiUrl).replace(/\/$/, "");
+}
+
+const GET_CACHE_MS = 8000;
+const getCache = new Map<string, { at: number; data: unknown }>();
+const inflight = new Map<string, Promise<unknown>>();
+
+function cacheKey(path: string, init: RequestInit) {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method !== "GET") return "";
+  return path;
+}
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const key = cacheKey(path, init);
+  if (key) {
+    const hit = getCache.get(key);
+    if (hit && Date.now() - hit.at < GET_CACHE_MS) return hit.data as T;
+    const pending = inflight.get(key);
+    if (pending) return pending as Promise<T>;
+  }
+
+  const promise = performRequest<T>(path, init).then((data) => {
+    if (key) getCache.set(key, { at: Date.now(), data });
+    else getCache.clear();
+    return data;
+  });
+
+  if (key) {
+    inflight.set(key, promise);
+    promise.finally(() => {
+      if (inflight.get(key) === promise) inflight.delete(key);
+    });
+  }
+  return promise;
+}
+
+async function performRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   const account = readAccount();
@@ -18,12 +57,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, { ...init, headers });
+    const apiUrl = resolveApiUrl();
+    response = await fetch(`${apiUrl}${path}`, { ...init, headers });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Network request failed";
     throw new Error(
       message === "Failed to fetch"
-        ? `Could not reach the API at ${API_URL}. Is FastAPI running (e.g. uvicorn on port 8000)?`
+        ? `Could not reach the API at ${resolveApiUrl()}. Is FastAPI running (e.g. uvicorn on port 8000)?`
         : message,
       { cause: err }
     );
@@ -107,7 +147,18 @@ export type ReportRun = {
   durationMs?: number | null;
   errorMessage?: string | null;
   runBy?: string | null;
+  screenshotPath?: string | null;
 };
+
+export type RunScreenshot = { file: string; label: string };
+
+export function testRunScreenshotUrl(runId: string): string {
+  return `${resolveApiUrl()}/test-runs/${encodeURIComponent(runId)}/screenshot`;
+}
+
+export function testRunStepUrl(runId: string, file: string): string {
+  return `${resolveApiUrl()}/test-runs/${encodeURIComponent(runId)}/screenshots/${encodeURIComponent(file)}`;
+}
 
 export type TestRunHistoryItem = {
   id: string;
@@ -122,6 +173,7 @@ export type TestRunHistoryItem = {
   jobId?: string | null;
   scheduledFor?: string | null;
   timeZone?: string | null;
+  screenshotPath?: string | null;
 };
 
 export type ExecutionResultPayload = {
@@ -392,6 +444,7 @@ export const api = {
   },
   reportRuns: () => request<ReportRun[]>("/test-runs/report?limit=1000"),
   reportRun: (runId: string) => request<ReportRun>(`/test-runs/${runId}`),
+  runScreenshots: (runId: string) => request<RunScreenshot[]>(`/test-runs/${runId}/screenshots`),
 };
 
 export type TestSuiteInput = {
@@ -572,6 +625,7 @@ export type TestRunResult = {
   status: "Passed" | "Failed";
   duration: number;
   error: string | null;
+  testRunId?: string | null;
 };
 
 export type DashboardData = {

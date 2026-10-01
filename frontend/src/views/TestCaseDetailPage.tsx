@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 
 import { RunProgressModal } from "@/components/runs/RunProgressModal";
+import { StepScreenshots } from "@/components/runs/StepScreenshots";
 
 import { browserTimeZone, formatInTimeZone, supportedTimeZones, zonedWallTimeToUtc } from "@/lib/scheduleTime";
 
@@ -58,6 +59,7 @@ import {
 
   type TestCaseVersionSummary,
 
+  type RunScreenshot,
   type TestRunResult,
 
 } from "@/lib/api";
@@ -65,6 +67,27 @@ import {
 import { versionLabel } from "@/lib/roman";
 
 
+
+function ExecutionScreenshot({ runId }: { runId?: string | null }) {
+  const [steps, setSteps] = useState<RunScreenshot[] | null>(null);
+  useEffect(() => {
+    if (!runId) {
+      setSteps(null);
+      return;
+    }
+    let cancelled = false;
+    api.runScreenshots(runId).then((items) => {
+      if (!cancelled) setSteps(items);
+    }).catch(() => {
+      if (!cancelled) setSteps([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+  if (!runId || !steps || steps.length === 0) return null;
+  return <StepScreenshots runId={runId} steps={steps} />;
+}
 
 function resolveExpectedResult(data: TestCaseSummary): string {
 
@@ -668,6 +691,8 @@ export function TestCaseDetailPage() {
         duration: (payload?.durationMs ?? 0) / 1000,
 
         error: payload?.errorMessage ?? finished.error ?? null,
+
+        testRunId: finished.testRunId ?? null,
 
       });
 
@@ -1778,6 +1803,8 @@ export function TestCaseDetailPage() {
 
                 )}
 
+                <ExecutionScreenshot runId={latestFinished.id} />
+
                 {latestFinished.errorMessage && (
 
                   <div>
@@ -1823,6 +1850,8 @@ export function TestCaseDetailPage() {
                   <dd className="font-medium">{lastResult.duration.toFixed(2)}s</dd>
 
                 </div>
+
+                <ExecutionScreenshot runId={lastResult.testRunId} />
 
                 {lastResult.error && (
 

@@ -1,6 +1,9 @@
 import logging
 from typing import Optional
-from supabase import create_client, Client
+
+import httpx
+from supabase import Client, ClientOptions, create_client
+
 from app.config import settings
 
 logger = logging.getLogger("testflow.database")
@@ -41,10 +44,36 @@ def get_active_storage_mode() -> str:
     return _resolve_active_mode()
 
 
+_client: Optional[Client] = None
+
+
+class _RetryDisconnectedTransport(httpx.HTTPTransport):
+    """Retry one read when Supabase closes a keep-alive connection."""
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        try:
+            return super().handle_request(request)
+        except httpx.RemoteProtocolError:
+            if request.method not in {"GET", "HEAD"}:
+                raise
+            return super().handle_request(request)
+
+
 def get_supabase_client() -> Optional[Client]:
+    global _client
     if _resolve_active_mode() != "supabase":
         return None
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+    if _client is None:
+        http_client = httpx.Client(
+            transport=_RetryDisconnectedTransport(),
+            timeout=httpx.Timeout(30.0),
+        )
+        _client = create_client(
+            settings.SUPABASE_URL,
+            settings.SUPABASE_SERVICE_ROLE_KEY,
+            options=ClientOptions(httpx_client=http_client),
+        )
+    return _client
 
 
 # Resolved lazily by repositories; not created eagerly so importing this module

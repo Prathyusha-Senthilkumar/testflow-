@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Page } from "playwright";
 import { applyEnvironment, retargetUrl, scriptBody } from "./playback.js";
@@ -22,12 +22,14 @@ export type RunOutcome = {
   validation_errors: string[] | null;
   error_message: string | null;
   duration_ms: number;
+  screenshot_path: string | null;
+  screenshot_error: string | null;
 };
 
 export async function runRecordedTest(
   repoRoot: string,
   configPath: string,
-  options?: { isCancelled?: () => Promise<boolean>; environmentBaseUrl?: string | null }
+  options?: { isCancelled?: () => Promise<boolean>; environmentBaseUrl?: string | null; runId?: string | null }
 ): Promise<RunOutcome> {
   const started = Date.now();
   const caseDir = path.resolve(repoRoot, path.dirname(configPath));
@@ -99,14 +101,23 @@ export async function runRecordedTest(
     }
   });
 
+  let success = false;
+  let errorMessage: string | null = null;
+  let shots: StepShots | null = null;
   try {
     await seedStorage(page, meta);
+    shots = await startStepShots(page, repoRoot, options?.runId || "");
     const run = new Function(
       "page",
       "expect",
-      `return (async () => {\n${body}\n})();`
-    ) as (page: Page, expect: (target: Page) => { toHaveTitle: (title: string | RegExp) => Promise<void> }) => Promise<void>;
-    await run(page, expectTitle);
+      "__shot",
+      `return (async () => {\n${withStepShots(body)}\n})();`
+    ) as (
+      page: Page,
+      expect: (target: Page) => { toHaveTitle: (title: string | RegExp) => Promise<void> },
+      shot: (step: number, label: string) => Promise<void>
+    ) => Promise<void>;
+    await run(page, expectTitle, shots.capture);
     const expected = String(meta.expectedResult || "").trim();
     if (expected) {
       const text = await page.locator("body").innerText({ timeout: 10000 });
@@ -118,14 +129,78 @@ export async function runRecordedTest(
     const violations = uniqueViolations(rawViolations);
     if (violations.length > 0) throw new Error(formatViolations(violations));
     if (networkFailures.length > 0) throw new Error(formatNetwork(networkFailures));
-    return outcome(configPath, true, null, Date.now() - started);
+    success = true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return outcome(configPath, false, message.slice(0, 3000), Date.now() - started);
+    errorMessage = message.slice(0, 3000);
+  }
+  let screenshotPath: string | null = null;
+  let screenshotError: string | null = null;
+  try {
+    screenshotPath = await captureFinalScreenshot(page, repoRoot, options?.runId || "");
+  } catch (error) {
+    screenshotError = error instanceof Error ? error.message : String(error);
+    console.error(`Screenshot capture failed: ${screenshotError}`);
   } finally {
+    if (shots) await shots.finish(Boolean(screenshotPath)).catch(() => undefined);
     clearInterval(cancelTimer);
     await browser.close().catch(() => undefined);
   }
+  return outcome(configPath, success, errorMessage, Date.now() - started, screenshotPath, screenshotError);
+}
+
+type StepShots = {
+  capture: (step: number, label: string) => Promise<void>;
+  finish: (includeFinal: boolean) => Promise<void>;
+};
+
+function withStepShots(body: string): string {
+  return body
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line, index) => {
+      const step = index + 1;
+      const label = JSON.stringify(line.trim().slice(0, 160));
+      return `try {\n${line}\nawait __shot(${step}, ${label});\n} catch (error) {\nawait __shot(${step}, ${label});\nthrow error;\n}`;
+    })
+    .join("\n");
+}
+
+async function startStepShots(page: Page, repoRoot: string, runId: string): Promise<StepShots> {
+  const key = runId.replace(/[^A-Za-z0-9_-]/g, "");
+  const shots: { file: string; label: string }[] = [];
+  const directory = key ? path.join(repoRoot, "results", key) : "";
+  if (directory) await mkdir(directory, { recursive: true });
+  return {
+    async capture(step: number, label: string) {
+      if (!directory || page.isClosed()) return;
+      const file = `step-${String(step).padStart(2, "0")}.png`;
+      try {
+        await page.screenshot({ path: path.join(directory, file), fullPage: false });
+        shots.push({ file, label: label.slice(0, 160) });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Step screenshot failed: ${message}`);
+      }
+    },
+    async finish(includeFinal: boolean) {
+      if (!directory) return;
+      if (includeFinal) shots.push({ file: "final-screenshot.png", label: "Final screenshot" });
+      if (shots.length === 0) return;
+      await writeFile(path.join(directory, "steps.json"), JSON.stringify(shots), "utf8");
+    },
+  };
+}
+
+export async function captureFinalScreenshot(page: Page, repoRoot: string, runId: string): Promise<string | null> {
+  const key = runId.replace(/[^A-Za-z0-9_-]/g, "");
+  if (!key) return null;
+  if (page.isClosed()) return null;
+  const relative = path.posix.join("results", key, "final-screenshot.png");
+  const filePath = path.join(repoRoot, "results", key, "final-screenshot.png");
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await page.screenshot({ path: filePath, fullPage: false });
+  return relative;
 }
 
 function expectTitle(target: Page) {
@@ -138,7 +213,14 @@ function expectTitle(target: Page) {
   };
 }
 
-function outcome(configPath: string, success: boolean, error: string | null, duration: number): RunOutcome {
+function outcome(
+  configPath: string,
+  success: boolean,
+  error: string | null,
+  duration: number,
+  screenshotPath: string | null = null,
+  screenshotError: string | null = null
+): RunOutcome {
   return {
     success,
     status: success ? "Pass" : "Fail",
@@ -150,6 +232,8 @@ function outcome(configPath: string, success: boolean, error: string | null, dur
     validation_errors: null,
     error_message: error,
     duration_ms: duration,
+    screenshot_path: screenshotPath,
+    screenshot_error: screenshotError,
   };
 }
 

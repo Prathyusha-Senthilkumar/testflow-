@@ -36,7 +36,8 @@ if str(_REPO_ROOT) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(_REPO_ROOT))
 
 from automation.framework.testflow_meta import read_meta, write_meta
-from automation.framework.url_resolve import normalize_start_path
+from automation.framework.url_resolve import normalize_start_path, resolve_start_url
+from app.schemas.environment import DEFAULT_ENVIRONMENT_ID
 
 
 class TestCasesService:
@@ -56,7 +57,19 @@ class TestCasesService:
     def list_for_project(self, project_id: str) -> List[TestCaseSummary]:
         self._ensure_project_exists(project_id)
         cases = self.test_cases.list_by_project(project_id)
-        return [self._attach_resolved_url(project_id, case) for case in cases]
+        environments = {item.id: item for item in self.environments.list_for_project(project_id)}
+        default = environments.get(DEFAULT_ENVIRONMENT_ID) or next(iter(environments.values()), None)
+        attached: List[TestCaseSummary] = []
+        for case in cases:
+            env = environments.get(case.environmentId or "") or default
+            resolved = None
+            if env is not None:
+                try:
+                    resolved = resolve_start_url(env.baseUrl, case.startPath)
+                except ValueError:
+                    resolved = None
+            attached.append(case.model_copy(update={"resolvedStartUrl": resolved}))
+        return attached
 
     def get(self, project_id: str, test_case_id: str) -> TestCaseSummary:
         self._ensure_project_exists(project_id)

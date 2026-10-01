@@ -59,8 +59,10 @@ async function runOne(jobId: string): Promise<void> {
     const result = await runRecordedTest(REPO_ROOT, payload.configPath, {
       isCancelled: async () => (await readJob(jobId))?.state === "cancelled",
       environmentBaseUrl: payload.environmentBaseUrl,
+      runId: jobId,
     });
     const latest = await readJob(jobId);
+    if (result.screenshot_error) console.error(`Job ${jobId} screenshot capture failed: ${result.screenshot_error}`);
     if (result.success) {
       await updateJob(jobId, { state: "completed", result, error: null });
       await markRun(jobId, {
@@ -69,6 +71,7 @@ async function runOne(jobId: string): Promise<void> {
         error_message: null,
         completed_at: new Date().toISOString(),
       });
+      await saveScreenshot(jobId, result.screenshot_path);
       console.log(`Job ${jobId} passed`);
       return;
     }
@@ -84,6 +87,7 @@ async function runOne(jobId: string): Promise<void> {
       error_message: result.error_message,
       completed_at: new Date().toISOString(),
     });
+    await saveScreenshot(jobId, result.screenshot_path);
     console.log(`Job ${jobId} failed`);
   } catch (error) {
     const latest = await readJob(jobId);
@@ -128,6 +132,16 @@ async function updateJob(jobId: string, patch: Record<string, unknown>): Promise
   if (current.state === "cancelled" && patch.state && patch.state !== "cancelled") return;
   const next = { ...current, ...patch };
   await redis.set(JOB_PREFIX + jobId, JSON.stringify(next), "EX", 60 * 60 * 48);
+}
+
+async function saveScreenshot(jobId: string, screenshotPath: string | null): Promise<void> {
+  if (!screenshotPath) return;
+  try {
+    await markRun(jobId, { screenshot_path: screenshotPath });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Job ${jobId} screenshot path was not saved: ${message}`);
+  }
 }
 
 async function markRun(jobId: string, fields: Record<string, unknown>): Promise<void> {

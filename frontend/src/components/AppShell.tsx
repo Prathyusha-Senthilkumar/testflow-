@@ -103,32 +103,32 @@ export function AppShell({children}:{children?:React.ReactNode}){
   const [ready,setReady]=useState(false);
   useEffect(()=>{
     let cancelled=false;
-    async function guard(){
-      const account=readAccount();
-      if(!account){
-        navigate("/login");
-        return;
-      }
-      if(accountNeedsRefresh(account)){
-        try{
-          const fresh=await accountApi.refresh(account.refreshToken);
-          if(!fresh.accessToken||!fresh.refreshToken||!fresh.userId) throw new Error("expired");
-          writeAccount({
-            accessToken:fresh.accessToken,
-            refreshToken:fresh.refreshToken,
-            userId:fresh.userId,
-            email:fresh.email,
-            name:fresh.name,
-          });
-        }catch{
-          clearAccount();
-          navigate("/login");
-          return;
-        }
-      }
-      if(!cancelled) setReady(true);
+    const account=readAccount();
+    if(!account){
+      navigate("/login");
+      return;
     }
-    void guard();
+    setReady(true);
+    if(!accountNeedsRefresh(account)) return;
+    const refreshToken=account.refreshToken;
+    async function refresh(){
+      try{
+        const fresh=await accountApi.refresh(refreshToken);
+        if(!fresh.accessToken||!fresh.refreshToken||!fresh.userId) throw new Error("expired");
+        writeAccount({
+          accessToken:fresh.accessToken,
+          refreshToken:fresh.refreshToken,
+          userId:fresh.userId,
+          email:fresh.email,
+          name:fresh.name,
+        });
+      }catch{
+        if(cancelled) return;
+        clearAccount();
+        navigate("/login");
+      }
+    }
+    void refresh();
     return ()=>{ cancelled=true; };
   },[navigate]);
   if(!ready) return null;

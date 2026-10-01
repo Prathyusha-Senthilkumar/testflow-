@@ -1,12 +1,13 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 
 from app.services.account_service import actor_from_authorization
 
 from app.repositories.test_run_repository import test_run_repository
 from app.schemas.execution import ExecutionStatusResponse
-from app.schemas.test_run import GroupedRun, ReportRun, TestRunHistoryItem
+from app.schemas.test_run import GroupedRun, ReportRun, RunScreenshot, TestRunHistoryItem
 from app.services.execution_service import get_execution_service
 
 router = APIRouter(prefix="/test-runs", tags=["test-runs"])
@@ -45,6 +46,27 @@ def cancel_test_run(run_id: str):
 @router.post("/{run_id}/rerun", response_model=ExecutionStatusResponse)
 def rerun_test_run(run_id: str, authorization: str | None = Header(default=None)):
     return get_execution_service().rerun_test_run(run_id, run_by=actor_from_authorization(authorization))
+
+
+@router.get("/{run_id}/screenshots", response_model=List[RunScreenshot])
+def list_run_screenshots(run_id: str):
+    return test_run_repository.screenshot_steps(run_id)
+
+
+@router.get("/{run_id}/screenshots/{file_name}")
+def get_run_screenshot_file(run_id: str, file_name: str):
+    file_path = test_run_repository.screenshot_named(run_id, file_name)
+    if file_path is None:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return FileResponse(file_path, media_type="image/png", filename=file_name)
+
+
+@router.get("/{run_id}/screenshot")
+def get_run_screenshot(run_id: str):
+    file_path = test_run_repository.screenshot_file(run_id)
+    if file_path is None:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return FileResponse(file_path, media_type="image/png", filename="final-screenshot.png")
 
 
 @router.get("/{run_id}", response_model=ReportRun)

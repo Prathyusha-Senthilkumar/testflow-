@@ -28,20 +28,32 @@ export function SettingsPage() {
     }
     setAccount(current);
     setName(current.name);
+    let cancelled = false;
     accountApi
       .me()
       .then((fresh) => {
+        if (cancelled) return;
         const next = { ...current, name: fresh.name, email: fresh.email };
         writeAccount(next);
         setAccount(next);
         setName(fresh.name);
       })
       .catch(() => undefined);
-  }, [navigate]);
+    return () => {
+      cancelled = true;
+    };
+    // Load once on entry. `navigate` is only used for the signed-out redirect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function saveProfile(event: React.FormEvent) {
     event.preventDefault();
     if (!account) return;
+    if (!name.trim()) {
+      setProfileError("Name is required.");
+      setProfileMessage("");
+      return;
+    }
     setProfileError("");
     setProfileMessage("");
     setSavingProfile(true);
@@ -95,10 +107,10 @@ export function SettingsPage() {
       <h1 className="text-3xl font-bold">Settings</h1>
       <p className="mt-1 text-sm text-slate-500">Your TestFlow account.</p>
 
-      <form onSubmit={saveProfile} className="mt-6 max-w-xl rounded-xl bg-white p-6 shadow-sm">
+      <form onSubmit={saveProfile} noValidate className="mt-6 max-w-xl rounded-xl bg-white p-6 shadow-sm">
         <h2 className="font-semibold">Profile</h2>
         <div className="mt-4 space-y-4">
-          <Input label="Name" value={name} onChange={(event) => setName(event.target.value)} required />
+          <Input label="Name" value={name} onChange={(event) => setName(event.target.value)} />
           <Input label="Email" value={account.email} readOnly />
         </div>
         {profileError ? <p className="mt-3 text-sm text-red-600">{profileError}</p> : null}
@@ -108,7 +120,7 @@ export function SettingsPage() {
         </Button>
       </form>
 
-      <form onSubmit={savePassword} className="mt-4 max-w-xl rounded-xl bg-white p-6 shadow-sm">
+      <form onSubmit={savePassword} noValidate className="mt-4 max-w-xl rounded-xl bg-white p-6 shadow-sm">
         <h2 className="font-semibold">Password</h2>
         <p className="mt-1 text-sm text-slate-500">Choose a new password for this account.</p>
         <div className="mt-4 space-y-4">
@@ -117,16 +129,14 @@ export function SettingsPage() {
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            minLength={6}
-            required
+            autoComplete="new-password"
           />
           <Input
             label="Confirm password"
             type="password"
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
-            minLength={6}
-            required
+            autoComplete="new-password"
           />
         </div>
         {passwordError ? <p className="mt-3 text-sm text-red-600">{passwordError}</p> : null}

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "@/lib/navigation";
-import { api, type ReportRun } from "@/lib/api";
+import { api, type ReportRun, type RunScreenshot } from "@/lib/api";
+import { StepScreenshots } from "@/components/runs/StepScreenshots";
 import { formatDuration, formatExecutedAt } from "@/lib/reportCsv";
 import { TestResultPage } from "@/views/TestResultPage";
 
@@ -14,6 +15,7 @@ export function RunResultPage() {
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [screenshots, setScreenshots] = useState<RunScreenshot[]>([]);
 
   useEffect(() => {
     if (!runId) return;
@@ -37,6 +39,20 @@ export function RunResultPage() {
       window.clearInterval(timer);
     };
   }, [runId]);
+
+  useEffect(() => {
+    const status = run?.status;
+    if (!runId || status === "Queued" || status === "Running" || !status) return;
+    let cancelled = false;
+    api.runScreenshots(runId).then((items) => {
+      if (!cancelled) setScreenshots(items);
+    }).catch(() => {
+      if (!cancelled) setScreenshots([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, run?.status]);
 
   if (missing) return <TestResultPage />;
 
@@ -155,6 +171,13 @@ export function RunResultPage() {
           </div>
         )}
       </div>
+
+      {screenshots.length > 0 && !active && (
+        <div className="mt-5 rounded-lg bg-white p-5 shadow-sm">
+          <h2 className="font-semibold">Screenshots</h2>
+          <StepScreenshots runId={run.id} steps={screenshots} />
+        </div>
+      )}
     </div>
   );
 }

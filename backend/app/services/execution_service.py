@@ -41,6 +41,7 @@ def _result_payload(raw: Any) -> Optional[ExecutionResultPayload]:
         validation_errors=raw.get("validation_errors"),
         error_message=raw.get("error_message"),
         duration_ms=raw.get("duration_ms"),
+        screenshot_path=raw.get("screenshot_path"),
     )
 
 
@@ -210,6 +211,7 @@ class ExecutionService:
         scheduled_for = None
         if state == "scheduled":
             scheduled_for = get_queue_service().scheduled_time(job)
+        persisted = test_run_repository.map_by_job_ids([job.id]).get(job.id) or {}
         return ExecutionStatusResponse(
             job_id=job.id,
             state=state,  # type: ignore[arg-type]
@@ -219,6 +221,7 @@ class ExecutionService:
             result=result,
             error=error,
             scheduled_for=scheduled_for,
+            test_run_id=persisted.get("id"),
         )
 
     def start_suite(

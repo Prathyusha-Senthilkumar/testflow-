@@ -2,6 +2,11 @@ from typing import Optional, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class RunScreenshot(BaseModel):
+    file: str
+    label: str
+
+
 class TestRunResult(BaseModel):
     status: Literal["Passed", "Failed"]
     duration: float
@@ -28,6 +33,7 @@ class ReportRun(BaseModel):
     durationMs: Optional[int] = Field(None, alias="durationMs")
     errorMessage: Optional[str] = Field(None, alias="errorMessage")
     runBy: Optional[str] = Field(None, alias="runBy")
+    screenshotPath: Optional[str] = Field(None, alias="screenshotPath")
 
 
 class GroupedRun(BaseModel):
@@ -73,3 +79,4 @@ class TestRunHistoryItem(BaseModel):
     jobId: Optional[str] = Field(None, alias="jobId")
     scheduledFor: Optional[str] = Field(None, alias="scheduledFor")
     timeZone: Optional[str] = Field(None, alias="timeZone")
+    screenshotPath: Optional[str] = Field(None, alias="screenshotPath")
