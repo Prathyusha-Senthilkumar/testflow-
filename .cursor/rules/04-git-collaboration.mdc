@@ -1,0 +1,40 @@
+---
+description: "Git safety and collaboration rules for the shared TestFlow repository"
+alwaysApply: true
+---
+
+# Git Safety and Collaboration
+
+Cursor may use non-destructive Git inspection operations when needed, including:
+- `git status`
+- `git diff`
+- `git log`
+- `git branch --show-current`
+- `git branch -a`
+- `git remote -v`
+- `git fetch`
+
+## Permission required
+Ask for explicit permission before Git operations that modify the working tree, current branch, commits, remote repository state, or history, including:
+- `git add`
+- `git commit`
+- `git push`
+- `git pull` when it may merge/rebase changes
+- `git merge`
+- `git rebase`
+- `git reset`
+- `git stash`
+- `git switch`
+- `git checkout` when changing branches/files
+- creating or deleting branches
+- force pushing
+- resolving merge conflicts by modifying code
+
+Do not automatically commit, push, create branches, or switch branches.
+
+## Destructive operations
+Never perform destructive operations such as `git reset --hard`, `git clean -fd`, force push, or deleting branches containing work unless the user explicitly requests the exact operation and understands its consequences.
+
+## Integration conflicts
+Do not automatically choose one developer's version when a meaningful conflict exists.
+Inspect the conflict, explain what each side contains, preserve both intended features where possible, and ask before a resolution that changes feature behavior.

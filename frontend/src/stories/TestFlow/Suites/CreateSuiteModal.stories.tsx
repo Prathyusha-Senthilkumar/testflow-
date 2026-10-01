@@ -11,6 +11,7 @@ const meta = {
   args: {
     open: true,
     onClose: fn(),
+    onSubmit: fn(),
   },
 } satisfies Meta<typeof CreateSuiteModal>;
 

@@ -1,0 +1,13 @@
+{
+  "startPath": "https://example.com",
+  "resolvedStartUrl": "https://example.com",
+  "assertions": [
+    {
+      "id": "a2",
+      "type": "page_title_contains",
+      "value": "Wrong Title"
+    }
+  ],
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}

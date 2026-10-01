@@ -2,7 +2,7 @@
 
 import NextLink from "next/link";
 import { usePathname, useRouter, useParams as useNextParams, useSearchParams as useNextSearchParams } from "next/navigation";
-import type { ComponentProps, ReactNode } from "react";
+import { useCallback, type ComponentProps, type ReactNode } from "react";
 
 type LinkProps = Omit<ComponentProps<typeof NextLink>, "href"> & { to: string };
 export function Link({to,...props}:LinkProps){ return <NextLink href={to} {...props}/>; }
@@ -17,7 +17,7 @@ export function NavLink({to,className,...props}:NavLinkProps){
 
 export function useNavigate(){
   const router=useRouter();
-  return (to:string, options?:{replace?:boolean}) => options?.replace ? router.replace(to) : router.push(to);
+  return useCallback((to:string, options?:{replace?:boolean}) => options?.replace ? router.replace(to) : router.push(to), [router]);
 }
 export function useLocation(){ return {pathname:usePathname() ?? ""}; }
 export function useParams(){ return useNextParams() as Record<string,string>; }

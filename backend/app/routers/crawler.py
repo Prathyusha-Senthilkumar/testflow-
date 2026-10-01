@@ -4,13 +4,12 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from app.schemas.crawler import CrawlRequest, CrawlJobStatus
 from app.services.crawler_service import crawler_service
 from app.services.test_generator_service import test_generator_service
-from app.repositories.project_repository import ProjectRepository
+from app.repositories.project_repository import project_repository as project_repo
 
 router = APIRouter(prefix="/crawler", tags=["Crawler & Test Generator"])
 
 # In-memory tracking for background crawl jobs
 active_jobs: Dict[str, CrawlJobStatus] = {}
-project_repo = ProjectRepository()
 
 
 async def execute_crawl_and_generation(job_id: str, request: CrawlRequest):

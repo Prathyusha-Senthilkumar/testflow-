@@ -1,0 +1,14 @@
+{
+  "startPath": "/admissions/",
+  "environmentId": "env-1789655275344",
+  "resolvedStartUrl": "https://www.srmist.edu.in/admissions/",
+  "assertions": [
+    {
+      "id": "072d891a-61c1-4072-bcb7-d74a0c4dccab",
+      "type": "url_contains",
+      "value": "admissions"
+    }
+  ],
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}

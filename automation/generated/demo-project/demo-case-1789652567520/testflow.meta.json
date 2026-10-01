@@ -1,0 +1,14 @@
+{
+  "startPath": "/academics/",
+  "environmentId": "env-1789653219902",
+  "resolvedStartUrl": "https://www.srmist.edu.in/academics/",
+  "assertions": [
+    {
+      "id": "74227643-84eb-41fc-9eff-bf652dbebeb9",
+      "type": "url_contains",
+      "value": "academics"
+    }
+  ],
+  "recordedModule": "test_recorded.py",
+  "recordedTestName": "test_example"
+}

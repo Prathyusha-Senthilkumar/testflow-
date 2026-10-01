@@ -5,12 +5,18 @@ __pycache__/
 .venv/
 venv/
 
-# Test artifacts
-results/
+# Test artifacts (root output only; app routes named results stay tracked)
+/results/
 test-results/
 playwright-report/
 trace.zip
 *.webm
+*.log
+coverage/
+*.tsbuildinfo
+result_history.json
+# In-memory API tests use project ids demo-<timestamp>. Saved recordings stay tracked.
+automation/generated/demo-*/
 
 # Node / build output
 node_modules/
@@ -26,6 +32,9 @@ frontend/.env
 backend/.env
 auth.json
 storage_state*.json
+automation/auth-profiles/**/storage_state.json
+automation/auth-profiles/**/credentials.enc
+automation/auth-profiles/**/_codegen*.log
 playwright/.auth/
 tests/login/credentials.json
 
