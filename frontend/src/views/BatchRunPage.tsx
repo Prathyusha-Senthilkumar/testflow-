@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "@/lib/navigation";
 import { api, type BatchCaseResult, type BatchExecutionStatus } from "@/lib/api";
@@ -77,7 +78,7 @@ export function BatchRunPage() {
   const [selectedSuiteId, setSelectedSuiteId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!batchId) return;
+    if (!batchId || run?.finished) return;
     let cancelled = false;
     const load = () => {
       api
@@ -98,7 +99,7 @@ export function BatchRunPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [batchId]);
+  }, [batchId, run?.finished]);
 
   const suites = useMemo(() => groupSuites(run), [run]);
   const selectedSuite = suites.find((suite) => suite.id === selectedSuiteId) ?? null;
@@ -114,7 +115,7 @@ export function BatchRunPage() {
   if (!run) {
     return (
       <div className="p-6 lg:p-8">
-        <div className="rounded-lg bg-white p-6 text-sm text-slate-500 shadow-sm">Loading run…</div>
+        <div className="rounded-lg bg-white shadow-sm"><LoadingSpinner label="Loading run…" /></div>
       </div>
     );
   }

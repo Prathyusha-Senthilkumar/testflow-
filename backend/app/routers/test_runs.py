@@ -7,7 +7,7 @@ from app.services.account_service import actor_from_authorization
 
 from app.repositories.test_run_repository import test_run_repository
 from app.schemas.execution import ExecutionStatusResponse
-from app.schemas.test_run import GroupedRun, ReportRun, RunScreenshot, TestRunHistoryItem
+from app.schemas.test_run import GroupedRun, LatestCaseRun, ReportRun, RunScreenshot, TestRunHistoryItem
 from app.services.execution_service import get_execution_service
 
 router = APIRouter(prefix="/test-runs", tags=["test-runs"])
@@ -29,6 +29,12 @@ def list_test_runs(
 def list_grouped_runs():
     """Individual runs plus suite and project batches still stored for this execution history."""
     return get_execution_service().list_grouped_runs()
+
+
+@router.get("/latest", response_model=List[LatestCaseRun])
+def list_latest_case_runs(projectId: str = Query(..., min_length=1)):
+    """Latest result for each test case in one project."""
+    return test_run_repository.list_latest_for_project(projectId)
 
 
 @router.get("/report", response_model=List[ReportRun])

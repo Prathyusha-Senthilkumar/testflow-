@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useState } from "react";
 
 import { CirclePlay, Code2, History, Mic, Play } from "lucide-react";
@@ -68,7 +69,23 @@ import { versionLabel } from "@/lib/roman";
 
 
 
-function ExecutionScreenshot({ runId }: { runId?: string | null }) {
+function ExecutionScreenshot({
+  runId,
+  status,
+  errorMessage,
+  testName,
+  executedAt,
+  duration,
+  environment,
+}: {
+  runId?: string | null;
+  status?: string | null;
+  errorMessage?: string | null;
+  testName?: string | null;
+  executedAt?: string | null;
+  duration?: string | null;
+  environment?: string | null;
+}) {
   const [steps, setSteps] = useState<RunScreenshot[] | null>(null);
   useEffect(() => {
     if (!runId) {
@@ -85,8 +102,26 @@ function ExecutionScreenshot({ runId }: { runId?: string | null }) {
       cancelled = true;
     };
   }, [runId]);
-  if (!runId || !steps || steps.length === 0) return null;
-  return <StepScreenshots runId={runId} steps={steps} />;
+  if (!runId || steps == null) return null;
+  if (steps.length === 0) {
+    if (status !== "Failed" || !errorMessage) return null;
+    const failure = errorMessage.split(/\r?\n/).find((line) => line.trim()) || errorMessage;
+    return <p className="mt-3 text-sm text-red-700">{failure}</p>;
+  }
+  return (
+    <StepScreenshots
+      runId={runId}
+      steps={steps}
+      status={status}
+      errorMessage={status === "Failed" ? errorMessage : null}
+      report={{
+        testName: testName || "Test case",
+        executedAt,
+        duration,
+        environment,
+      }}
+    />
+  );
 }
 
 function resolveExpectedResult(data: TestCaseSummary): string {
@@ -340,6 +375,10 @@ export function TestCaseDetailPage() {
           setScheduled(upcoming);
 
           setCaseRuns(runs);
+
+          const live = runs.some((item) => item.status === "Queued" || item.status === "Running");
+
+          if (!live) window.clearInterval(timer);
 
         })
 
@@ -970,7 +1009,7 @@ export function TestCaseDetailPage() {
 
   if (loading) {
 
-    return <div className="p-6 text-sm text-slate-500 lg:p-8">Loading test case...</div>;
+    return <div className="p-6 lg:p-8"><LoadingSpinner label="Loading test case…" /></div>;
 
   }
 
@@ -1803,23 +1842,19 @@ export function TestCaseDetailPage() {
 
                 )}
 
-                <ExecutionScreenshot runId={latestFinished.id} />
+                <ExecutionScreenshot
+                  runId={latestFinished.id}
+                  status={latestFinished.status}
+                  errorMessage={latestFinished.errorMessage}
+                  testName={testCase ? `${testCase.code} ${testCase.name}` : "Test case"}
+                  executedAt={formatInTimeZone(
+                    latestFinished.completedAt || latestFinished.startedAt || "",
+                    latestFinished.timeZone || scheduleZone
+                  )}
+                  duration={latestFinished.durationMs != null ? `${(latestFinished.durationMs / 1000).toFixed(2)}s` : null}
+                  environment={null}
+                />
 
-                {latestFinished.errorMessage && (
-
-                  <div>
-
-                    <dt className="text-slate-500">Error</dt>
-
-                    <dd className="mt-1 max-h-40 overflow-auto rounded-lg bg-slate-950 p-3 font-mono text-xs text-red-200">
-
-                      {latestFinished.errorMessage}
-
-                    </dd>
-
-                  </div>
-
-                )}
 
               </dl>
 
@@ -1851,23 +1886,15 @@ export function TestCaseDetailPage() {
 
                 </div>
 
-                <ExecutionScreenshot runId={lastResult.testRunId} />
+                <ExecutionScreenshot
+                  runId={lastResult.testRunId}
+                  status={lastResult.status}
+                  errorMessage={lastResult.error}
+                  testName={testCase ? `${testCase.code} ${testCase.name}` : "Test case"}
+                  duration={`${lastResult.duration.toFixed(2)}s`}
+                  environment={environments.find((env) => env.id === environmentId)?.name ?? null}
+                />
 
-                {lastResult.error && (
-
-                  <div>
-
-                    <dt className="text-slate-500">Error</dt>
-
-                    <dd className="mt-1 max-h-40 overflow-auto rounded-lg bg-slate-950 p-3 font-mono text-xs text-red-200">
-
-                      {lastResult.error}
-
-                    </dd>
-
-                  </div>
-
-                )}
 
               </dl>
 
@@ -1913,7 +1940,7 @@ export function TestCaseDetailPage() {
 
         {scriptLoading ? (
 
-          <p className="text-sm text-slate-500">Loading script...</p>
+          <LoadingSpinner label="Loading script…" compact />
 
         ) : (
 

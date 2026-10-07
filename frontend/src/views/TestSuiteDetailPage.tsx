@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
@@ -161,7 +162,7 @@ export function TestSuiteDetailPage() {
   }
 
   if (loading) {
-    return <div className="p-6 lg:p-8 text-sm text-slate-500">Loading suite…</div>;
+    return <div className="p-6 lg:p-8"><LoadingSpinner label="Loading suite…" /></div>;
   }
 
   if (!suite) {

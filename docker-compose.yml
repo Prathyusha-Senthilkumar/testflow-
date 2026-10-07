@@ -47,10 +47,11 @@ services:
       dockerfile: worker/Dockerfile
     environment:
       REDIS_URL: redis://redis:6379/0
+      # Number of Playwright jobs this worker can execute concurrently.
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-5}
       USE_DEMO_DATA: ${USE_DEMO_DATA:-true}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
-      TESTFLOW_SECRET_KEY: ${TESTFLOW_SECRET_KEY:-}
     volumes:
       - ./automation:/app/automation
       - ./tests:/app/tests

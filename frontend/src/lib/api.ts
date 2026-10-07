@@ -8,31 +8,34 @@ function resolveApiUrl(): string {
   return (internalApiUrl || publicApiUrl).replace(/\/$/, "");
 }
 
-const GET_CACHE_MS = 8000;
+const GET_CACHE_MS = 20000;
+const GET_STALE_MS = 180000;
 const getCache = new Map<string, { at: number; data: unknown }>();
 const inflight = new Map<string, Promise<unknown>>();
 
 function cacheKey(path: string, init: RequestInit) {
   const method = (init.method ?? "GET").toUpperCase();
   if (method !== "GET") return "";
-  return path;
+  // Live execution status must not be served from the short GET cache.
+  if (path.startsWith("/executions") || (path.startsWith("/test-runs") && !path.startsWith("/test-runs/latest"))) return "";
+  const account = readAccount();
+  const accountId = account?.userId || account?.email || "anonymous";
+  return `${accountId}|${path}`;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const key = cacheKey(path, init);
-  if (key) {
-    const hit = getCache.get(key);
-    if (hit && Date.now() - hit.at < GET_CACHE_MS) return hit.data as T;
-    const pending = inflight.get(key);
-    if (pending) return pending as Promise<T>;
-  }
+if (typeof window !== "undefined") {
+  window.addEventListener("testflow-account", () => {
+    getCache.clear();
+    inflight.clear();
+  });
+}
 
+function startRequest<T>(path: string, init: RequestInit, key: string): Promise<T> {
   const promise = performRequest<T>(path, init).then((data) => {
     if (key) getCache.set(key, { at: Date.now(), data });
     else getCache.clear();
     return data;
   });
-
   if (key) {
     inflight.set(key, promise);
     promise.finally(() => {
@@ -40,6 +43,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     });
   }
   return promise;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const key = cacheKey(path, init);
+  if (key) {
+    const hit = getCache.get(key);
+    const age = hit ? Date.now() - hit.at : Number.POSITIVE_INFINITY;
+    const pending = inflight.get(key);
+    if (pending && age >= GET_STALE_MS) return pending as Promise<T>;
+    if (hit && age < GET_STALE_MS) {
+      if (age >= GET_CACHE_MS && !pending) startRequest<T>(path, init, key);
+      return hit.data as T;
+    }
+    if (pending) return pending as Promise<T>;
+  }
+
+  return startRequest<T>(path, init, key);
 }
 
 async function performRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -150,7 +170,7 @@ export type ReportRun = {
   screenshotPath?: string | null;
 };
 
-export type RunScreenshot = { file: string; label: string };
+export type RunScreenshot = { file: string; label: string; failed?: boolean; error?: string | null };
 
 export function testRunScreenshotUrl(runId: string): string {
   return `${resolveApiUrl()}/test-runs/${encodeURIComponent(runId)}/screenshot`;
@@ -437,6 +457,10 @@ export const api = {
   cancelScheduledExecution: (jobId: string) =>
     request<void>(`/executions/scheduled/${jobId}`, { method: "DELETE" }),
   groupedRuns: () => request<GroupedRun[]>("/test-runs/grouped"),
+  latestCaseRuns: (projectId: string) =>
+    request<Array<{ testCaseId: string; projectId?: string | null; status: string; startedAt?: string | null; completedAt?: string | null; runBy?: string | null }>>(
+      `/test-runs/latest?projectId=${encodeURIComponent(projectId)}`,
+    ),
   testRuns: (limit = 50, testCaseId?: string) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (testCaseId) params.set("testCaseId", testCaseId);
@@ -587,6 +611,7 @@ export type TestCaseSummary = {
   authProfileId?: string | null;
   startPath?: string;
   resolvedStartUrl?: string | null;
+  suiteId?: string | null;
   expectedResult?: string | null;
   storageSeeds?: StorageEntry[];
   storageAssertions?: StorageEntry[];

@@ -1,8 +1,8 @@
-"""Encrypt-at-rest helper for Auth Profile credentials.
+"""Fernet helpers for Auth Profile secrets.
 
-The key comes from environment configuration only - never from source or git.
-Prefers TESTFLOW_SECRET_KEY; otherwise derives a stable key from the existing
-server-side Supabase service-role secret so no plaintext is ever written.
+Normal runtime encryption/decryption uses TESTFLOW_SECRET_KEY only.  The legacy
+service-role-derived key is exposed only to the explicit one-time re-key tool so
+rotating Supabase credentials cannot silently make Auth Profiles unreadable.
 """
 
 import base64
@@ -17,50 +17,72 @@ from app.config import settings
 
 
 class SecretUnavailableError(RuntimeError):
-    """Raised when no key material is configured."""
+    """Raised when the dedicated Auth Profile key is unavailable or invalid."""
 
 
-def _key_material() -> Optional[str]:
-    explicit = (os.environ.get("TESTFLOW_SECRET_KEY") or "").strip()
-    if explicit:
-        return explicit
-    fallback = (settings.SUPABASE_SERVICE_ROLE_KEY or "").strip()
-    return fallback or None
-
-
-def _fernet() -> Fernet:
-    material = _key_material()
+def _explicit_fernet() -> Fernet:
+    material = (os.environ.get("TESTFLOW_SECRET_KEY") or "").strip()
     if not material:
         raise SecretUnavailableError(
-            "No encryption key configured. Set TESTFLOW_SECRET_KEY in the environment "
-            "before storing Auth Profile credentials."
+            "TESTFLOW_SECRET_KEY is required for Auth Profile encryption. "
+            "Configure one stable Fernet key before using Auth Profiles."
         )
     try:
-        # A already-valid Fernet key is used directly.
         return Fernet(material.encode("utf-8"))
-    except Exception:
-        digest = hashlib.sha256(material.encode("utf-8")).digest()
-        return Fernet(base64.urlsafe_b64encode(digest))
+    except Exception as exc:
+        raise SecretUnavailableError(
+            "TESTFLOW_SECRET_KEY must be a valid Fernet key."
+        ) from exc
+
+
+def _legacy_fernet() -> Fernet:
+    """Legacy reader used only by the explicit re-key migration utility."""
+    material = (settings.SUPABASE_SERVICE_ROLE_KEY or "").strip()
+    if not material:
+        raise SecretUnavailableError("Legacy key material is unavailable.")
+    digest = hashlib.sha256(material.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
 
 
 def is_configured() -> bool:
-    return _key_material() is not None
+    try:
+        _explicit_fernet()
+        return True
+    except SecretUnavailableError:
+        return False
 
 
 def encrypt_mapping(payload: dict) -> str:
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    return _fernet().encrypt(raw).decode("utf-8")
+    return _explicit_fernet().encrypt(raw).decode("utf-8")
 
 
-def decrypt_mapping(token: str) -> Optional[dict]:
+def _decode(token: str, fernet: Fernet) -> Optional[dict]:
     if not token:
         return None
     try:
-        raw = _fernet().decrypt(token.encode("utf-8"))
-    except (InvalidToken, SecretUnavailableError, ValueError):
-        return None
-    try:
+        raw = fernet.decrypt(token.encode("utf-8"))
         value = json.loads(raw.decode("utf-8"))
-    except json.JSONDecodeError:
+    except (InvalidToken, ValueError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def decrypt_mapping(token: str) -> Optional[dict]:
+    """Decrypt runtime data with the dedicated key only."""
+    if not token:
+        return None
+    try:
+        return _decode(token, _explicit_fernet())
+    except SecretUnavailableError:
+        return None
+
+
+def decrypt_mapping_legacy(token: str) -> Optional[dict]:
+    """Decrypt pre-migration data. Do not use in normal request handling."""
+    if not token:
+        return None
+    try:
+        return _decode(token, _legacy_fernet())
+    except SecretUnavailableError:
+        return None

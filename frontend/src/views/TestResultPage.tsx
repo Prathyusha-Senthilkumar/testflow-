@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { Link, useParams } from "@/lib/navigation";
 import { useExecutionPolling } from "@/hooks/useExecutionPolling";
 import { testCases } from "@/lib/demoData";
@@ -23,7 +24,7 @@ export function TestResultPage() {
   if (!execution) {
     return (
       <div className="p-6 lg:p-8">
-        <div className="rounded-xl bg-white p-6 shadow-sm text-sm text-slate-500">Loading execution result…</div>
+        <div className="rounded-xl bg-white shadow-sm"><LoadingSpinner label="Loading execution result…" /></div>
       </div>
     );
   }

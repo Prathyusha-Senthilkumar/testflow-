@@ -1,3 +1,7 @@
+import logging
+import threading
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,10 +20,24 @@ from app.routers.test_runs import router as test_runs_router
 from app.routers.auth_profiles import router as auth_profiles_router
 from app.routers.account import router as account_router
 
+logger = logging.getLogger("testflow.api")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    from app.services.batch_queue import consume_forever
+
+    thread = threading.Thread(target=consume_forever, name="batch-queue", daemon=True)
+    thread.start()
+    logger.info("Batch queue consumer started")
+    yield
+
+
 app = FastAPI(
     title="TestFlow API",
     description="Python FastAPI backend for TestFlow QA Automation platform",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS configuration

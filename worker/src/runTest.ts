@@ -111,13 +111,15 @@ export async function runRecordedTest(
       "page",
       "expect",
       "__shot",
+      "__fail",
       `return (async () => {\n${withStepShots(body)}\n})();`
     ) as (
       page: Page,
       expect: (target: Page) => { toHaveTitle: (title: string | RegExp) => Promise<void> },
-      shot: (step: number, label: string) => Promise<void>
+      shot: (step: number, label: string) => Promise<void>,
+      fail: (step: number, message: string) => Promise<void>
     ) => Promise<void>;
-    await run(page, expectTitle, shots.capture);
+    await run(page, expectTitle, shots.capture, shots.fail);
     const expected = String(meta.expectedResult || "").trim();
     if (expected) {
       const text = await page.locator("body").innerText({ timeout: 10000 });
@@ -151,6 +153,7 @@ export async function runRecordedTest(
 
 type StepShots = {
   capture: (step: number, label: string) => Promise<void>;
+  fail: (step: number, message: string) => Promise<void>;
   finish: (includeFinal: boolean) => Promise<void>;
 };
 
@@ -161,14 +164,14 @@ function withStepShots(body: string): string {
     .map((line, index) => {
       const step = index + 1;
       const label = JSON.stringify(line.trim().slice(0, 160));
-      return `try {\n${line}\nawait __shot(${step}, ${label});\n} catch (error) {\nawait __shot(${step}, ${label});\nthrow error;\n}`;
+      return `try {\n${line}\nawait __shot(${step}, ${label});\n} catch (error) {\nawait __shot(${step}, ${label});\nawait __fail(${step}, error instanceof Error ? error.message : String(error));\nthrow error;\n}`;
     })
     .join("\n");
 }
 
 async function startStepShots(page: Page, repoRoot: string, runId: string): Promise<StepShots> {
   const key = runId.replace(/[^A-Za-z0-9_-]/g, "");
-  const shots: { file: string; label: string }[] = [];
+  const shots: { file: string; label: string; failed?: boolean; error?: string }[] = [];
   const directory = key ? path.join(repoRoot, "results", key) : "";
   if (directory) await mkdir(directory, { recursive: true });
   return {
@@ -182,6 +185,14 @@ async function startStepShots(page: Page, repoRoot: string, runId: string): Prom
         const message = error instanceof Error ? error.message : String(error);
         console.error(`Step screenshot failed: ${message}`);
       }
+    },
+    async fail(step: number, message: string) {
+      const file = `step-${String(step).padStart(2, "0")}.png`;
+      const entry = [...shots].reverse().find((shot) => shot.file === file);
+      if (!entry) return;
+      const text = message.trim().slice(0, 800);
+      entry.failed = true;
+      entry.error = text;
     },
     async finish(includeFinal: boolean) {
       if (!directory) return;

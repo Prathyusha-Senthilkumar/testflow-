@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Play, Plus, Search, Sparkles, Trash2, Upload } from "lucide-react";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
@@ -10,10 +11,9 @@ import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
 import {
   api,
   TEST_CASE_CATEGORIES,
-  type ReportRun,
   type TestCaseInput,
   type TestCaseSummary,
-  type TestSuiteDetail,
+  type TestSuiteSummary,
 } from "@/lib/api";
 
 export function TestCasesPage() {
@@ -26,8 +26,8 @@ export function TestCasesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [suiteFilter, setSuiteFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [suites, setSuites] = useState<TestSuiteDetail[]>([]);
-  const [runs, setRuns] = useState<ReportRun[]>([]);
+  const [suites, setSuites] = useState<TestSuiteSummary[]>([]);
+  const [runs, setRuns] = useState<CaseRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -35,16 +35,16 @@ export function TestCasesPage() {
 
   const suiteByCase = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
-    for (const suite of suites) {
-      for (const testCase of suite.testCases) {
-        map.set(testCase.id, { id: suite.id, name: suite.name });
-      }
+    const suiteById = new Map(suites.map((suite) => [suite.id, suite]));
+    for (const testCase of cases) {
+      const suite = testCase.suiteId ? suiteById.get(testCase.suiteId) : undefined;
+      if (suite) map.set(testCase.id, { id: suite.id, name: suite.name });
     }
     return map;
-  }, [suites]);
+  }, [cases, suites]);
 
   const latestRunByCase = useMemo(() => {
-    const map = new Map<string, ReportRun>();
+    const map = new Map<string, CaseRun>();
     const ordered = [...runs].sort((a, b) => runTime(b) - runTime(a));
     for (const run of ordered) {
       if (!run.testCaseId || map.has(run.testCaseId)) continue;
@@ -73,15 +73,17 @@ export function TestCasesPage() {
     if (!projectId) return;
     setLoading(true);
     setError("");
-    Promise.all([api.project(projectId), api.testCases(projectId), api.testSuites(projectId), api.reportRuns()])
-      .then(async ([project, testCases, suiteSummaries, reportRuns]) => {
-        const details = await Promise.all(
-          suiteSummaries.map((suite) => api.testSuite(projectId, suite.id))
-        );
+    Promise.all([
+      api.project(projectId),
+      api.testCases(projectId),
+      api.testSuites(projectId),
+      api.latestCaseRuns(projectId),
+    ])
+      .then(([project, testCases, suiteSummaries, latestRuns]) => {
         setProjectName(project.name);
         setCases(testCases);
-        setSuites(details);
-        setRuns(reportRuns);
+        setSuites(suiteSummaries);
+        setRuns(latestRuns);
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
@@ -240,7 +242,7 @@ export function TestCasesPage() {
 
       <div className="mt-3 overflow-hidden rounded-lg bg-white shadow-sm">
         {loading ? (
-          <div className="px-5 py-12 text-center text-sm text-slate-500">Loading test cases...</div>
+          <LoadingSpinner label="Loading test cases…" />
         ) : rows.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-slate-500">
             {cases.length === 0
@@ -375,7 +377,16 @@ export function TestCasesPage() {
   );
 }
 
-function caseStatus(run: ReportRun | undefined): "Passed" | "Failed" | "Running" | "Untested" | "Queued" {
+type CaseRun = {
+  testCaseId?: string | null;
+  projectId?: string | null;
+  status: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  runBy?: string | null;
+};
+
+function caseStatus(run: CaseRun | undefined): "Passed" | "Failed" | "Running" | "Untested" | "Queued" {
   if (!run) return "Untested";
   if (run.status === "Passed" || run.status === "Failed" || run.status === "Running" || run.status === "Queued") {
     return run.status;
@@ -383,7 +394,7 @@ function caseStatus(run: ReportRun | undefined): "Passed" | "Failed" | "Running"
   return "Untested";
 }
 
-function runTime(run: ReportRun): number {
+function runTime(run: CaseRun): number {
   const value = new Date(run.completedAt || run.startedAt || "").getTime();
   return Number.isNaN(value) ? 0 : value;
 }

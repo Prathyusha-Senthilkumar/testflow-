@@ -32,10 +32,30 @@ export function DashboardPage() {
         <div><p className="text-sm font-medium text-indigo-600">Workspace overview</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Dashboard</h1><p className="mt-2 text-sm text-slate-500">Track projects, test coverage and the latest execution status from one place.</p></div>
       </div>
       {error && <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Could not refresh dashboard data: {error}</div>}
-      <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metrics.map(({ label, value, icon: Icon, helper }) => <Card key={label} className="p-5"><div className="flex items-start justify-between"><div><p className="text-sm font-medium text-slate-500">{label}</p><p className="mt-2 text-3xl font-bold text-slate-900">{loading ? "-" : value}</p></div><span className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-50 text-indigo-600"><Icon size={19} /></span></div><p className="mt-3 text-xs text-slate-400">{helper}</p></Card>)}</div>
+      <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metrics.map(({ label, value, icon: Icon, helper }) => <Card key={label} className="p-5"><div className="flex items-start justify-between"><div><p className="text-sm font-medium text-slate-500">{label}</p><p className="mt-2 text-3xl font-bold text-slate-900">{loading ? <Skeleton className="h-9 w-14" /> : value}</p></div><span className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-50 text-indigo-600"><Icon size={19} /></span></div><p className="mt-3 text-xs text-slate-400">{helper}</p></Card>)}</div>
       <div className="mt-9 flex items-center justify-between"><div><h2 className="text-lg font-semibold">Recent Projects</h2><p className="mt-1 text-sm text-slate-500">Open a project to review its suites and current test status.</p></div><Link to="/projects" className="flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700">View all <ArrowRight size={15} /></Link></div>
-      <Card className="mt-4 overflow-hidden">{data.recentProjects.length === 0 && !loading ? <div className="px-6 py-12 text-center"><FolderKanban className="mx-auto text-slate-300" size={34} /><h3 className="mt-3 font-semibold">No projects yet</h3><p className="mt-1 text-sm text-slate-500">Create your first project to start organizing tests.</p><Link to="/projects" className="mt-4 inline-flex text-sm font-semibold text-indigo-600">Go to Projects</Link></div> : <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50 text-slate-500"><tr>{["Project", "Suites", "Cases", "Pass Rate", "Last Run"].map(label => <th className="px-5 py-3 font-medium" key={label}>{label}</th>)}</tr></thead><tbody>{data.recentProjects.map(project => <tr className="cursor-pointer border-t border-slate-100 hover:bg-indigo-50/60" key={project.id} onClick={() => navigate(`/projects/${project.id}`)}><td className="px-5 py-4"><div className="font-semibold text-slate-900">{project.name}</div><div className="mt-0.5 max-w-xs truncate text-xs text-slate-500">{project.baseUrl}</div></td><td className="px-5">{project.suites}</td><td className="px-5">{project.cases}</td><td className="px-5"><Badge status={project.passRate === 100 ? "Passed" : project.failed > 0 ? "Failed" : ""}>{project.passRate}%</Badge></td><td className="px-5 text-slate-500">{project.lastRun ? new Date(project.lastRun).toLocaleString() : "Not run"}</td></tr>)}</tbody></table></div>}</Card>
+      <Card className="mt-4 overflow-hidden">{data.recentProjects.length === 0 && !loading ? <div className="px-6 py-12 text-center"><FolderKanban className="mx-auto text-slate-300" size={34} /><h3 className="mt-3 font-semibold">No projects yet</h3><p className="mt-1 text-sm text-slate-500">Create your first project to start organizing tests.</p><Link to="/projects" className="mt-4 inline-flex text-sm font-semibold text-indigo-600">Go to Projects</Link></div> : <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50 text-slate-500"><tr>{["Project", "Suites", "Cases", "Pass Rate", "Last Run"].map(label => <th className="px-5 py-3 font-medium" key={label}>{label}</th>)}</tr></thead><tbody>{loading ? <DashboardTableSkeleton /> : data.recentProjects.map(project => <tr className="cursor-pointer border-t border-slate-100 hover:bg-indigo-50/60" key={project.id} onClick={() => navigate(`/projects/${project.id}`)}><td className="px-5 py-4"><div className="font-semibold text-slate-900">{project.name}</div><div className="mt-0.5 max-w-xs truncate text-xs text-slate-500">{project.baseUrl}</div></td><td className="px-5">{project.suites}</td><td className="px-5">{project.cases}</td><td className="px-5"><Badge status={project.passRate === 100 ? "Passed" : project.failed > 0 ? "Failed" : ""}>{project.passRate}%</Badge></td><td className="px-5 text-slate-500">{project.lastRun ? new Date(project.lastRun).toLocaleString() : "Not run"}</td></tr>)}</tbody></table></div>}</Card>
     </div>
+  );
+}
+
+function Skeleton({ className = "" }: { className?: string }) {
+  return <span aria-hidden="true" className={`block animate-pulse rounded bg-slate-200 ${className}`} />;
+}
+
+function DashboardTableSkeleton() {
+  return (
+    <>
+      {[0, 1, 2].map((row) => (
+        <tr key={row} className="border-t border-slate-100">
+          <td className="px-5 py-4"><Skeleton className="h-4 w-36" /><Skeleton className="mt-2 h-3 w-52" /></td>
+          <td className="px-5"><Skeleton className="h-4 w-8" /></td>
+          <td className="px-5"><Skeleton className="h-4 w-8" /></td>
+          <td className="px-5"><Skeleton className="h-6 w-16 rounded-full" /></td>
+          <td className="px-5"><Skeleton className="h-4 w-32" /></td>
+        </tr>
+      ))}
+    </>
   );
 }
 

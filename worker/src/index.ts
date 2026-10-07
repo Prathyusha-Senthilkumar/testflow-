@@ -6,6 +6,7 @@ const QUEUE_KEY = "testflow:queue";
 const SCHEDULE_KEY = "testflow:scheduled";
 const JOB_PREFIX = "testflow:job:";
 const REPO_ROOT = process.env.TESTFLOW_ROOT || "/app";
+const WORKER_CONCURRENCY = Math.max(1, Number.parseInt(process.env.WORKER_CONCURRENCY || "3", 10) || 3);
 
 type JobPayload = {
   id: string;
@@ -22,15 +23,31 @@ const supabase =
     ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
     : null;
 
-async function main(): Promise<void> {
-  console.log("TestFlow Node worker listening on queue: testflow:queue");
+async function consume(workerNumber: number): Promise<void> {
+  // Each consumer uses its own blocking Redis connection. Sharing one connection
+  // would serialize BRPOP calls and defeat concurrency.
+  const consumerRedis = redis.duplicate();
+  console.log(`TestFlow consumer ${workerNumber} ready`);
+  for (;;) {
+    const item = await consumerRedis.brpop(QUEUE_KEY, 5);
+    if (!item) continue;
+    await runOne(item[1]);
+  }
+}
+
+async function schedulePromoter(): Promise<void> {
   for (;;) {
     await promoteScheduled();
-    const item = await redis.brpop(QUEUE_KEY, 5);
-    if (!item) continue;
-    const jobId = item[1];
-    await runOne(jobId);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
+}
+
+async function main(): Promise<void> {
+  console.log(`TestFlow Node worker listening on ${QUEUE_KEY} with concurrency=${WORKER_CONCURRENCY}`);
+  await Promise.all([
+    schedulePromoter(),
+    ...Array.from({ length: WORKER_CONCURRENCY }, (_, index) => consume(index + 1)),
+  ]);
 }
 
 async function promoteScheduled(): Promise<void> {

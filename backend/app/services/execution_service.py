@@ -1,4 +1,5 @@
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -255,36 +256,32 @@ class ExecutionService:
         environment_id: Optional[str] = None,
         run_by: Optional[tuple[str, str]] = None,
     ) -> BatchExecutionStatus:
-        """Enqueue project cases once. A category limits the run to suites in that category."""
+        """Enqueue project cases once. A category filters test cases across all project suites."""
         from app.repositories.project_repository import project_repository
         from app.repositories.test_case_repository import test_case_repository
-        from app.repositories.test_suite_repository import test_suite_repository
+        from app.schemas.test_case import EXECUTION_CATEGORIES
         from app.schemas.test_suite import SUITE_CATEGORY_LABELS
 
         project_repository.find_by_id(project_id)
         environment = _require_project_environment(project_id, environment_id)
+        project_cases = test_case_repository.list_by_project(project_id)
+
         if suite_category:
-            if suite_category not in SUITE_CATEGORY_LABELS:
-                raise HTTPException(status_code=400, detail="Choose a valid suite category.")
-            matching = [
-                suite
-                for suite in test_suite_repository.list_by_project(project_id)
-                if suite_category in (suite.categories or [suite.category])
+            if suite_category not in EXECUTION_CATEGORIES:
+                raise HTTPException(status_code=400, detail="Choose a valid test category.")
+            matching_cases = [
+                case for case in project_cases if suite_category in (case.categories or [])
             ]
-            if not matching:
+            if not matching_cases:
                 label = SUITE_CATEGORY_LABELS[suite_category]
                 raise HTTPException(
                     status_code=400,
-                    detail=f"No {label} test suites are available for this project.",
+                    detail=f"No {label} test cases are available for this project.",
                 )
-            case_ids: list[str] = []
-            for suite in matching:
-                case_ids.extend(test_suite_repository.list_case_ids(project_id, suite.id))
-            case_ids = _unique_ids(case_ids)
+            case_ids = _unique_ids([case.id for case in matching_cases])
         else:
-            case_ids = _unique_ids(
-                [case.id for case in test_case_repository.list_by_project(project_id)]
-            )
+            # No category means All Categories: run every project test case once.
+            case_ids = _unique_ids([case.id for case in project_cases])
         return self._start_batch(
             "project",
             project_id,
@@ -293,6 +290,7 @@ class ExecutionService:
             suite_category=suite_category,
             environment=environment,
             run_by=run_by,
+            prefetched_cases={str(case.id): case for case in project_cases},
         )
 
     def list_grouped_runs(self) -> list[GroupedRun]:
@@ -343,11 +341,14 @@ class ExecutionService:
         payload = _load_batch(batch_id)
         if payload is None:
             raise HTTPException(status_code=404, detail="Batch run not found")
+
+        # Keep status polling read-only unless this call actually repairs
+        # missing suite metadata. Re-saving an unchanged snapshot here can
+        # overwrite newer batch updates for the same batch.
         if _ensure_case_suites(payload):
             _save_batch(payload)
-        status = self._status_from_payload(payload)
-        _save_batch(payload)
-        return status
+
+        return self._status_from_payload(payload)
 
     def cancel_batch(self, batch_id: str) -> BatchExecutionStatus:
         payload = _load_batch(batch_id)
@@ -380,7 +381,7 @@ class ExecutionService:
         if not environment_id:
             raise HTTPException(
                 status_code=400,
-                detail="This run does not have a saved environment. Start a new run and choose an environment.",
+                detail="This run does not have a saved environment. Start a new run and choose an environment.",       
             )
         if payload.get("batchType") == "suite":
             suite_id = payload.get("suiteId")
@@ -432,7 +433,9 @@ class ExecutionService:
         suite_category: Optional[str] = None,
         environment=None,
         run_by: Optional[tuple[str, str]] = None,
+        prefetched_cases: Optional[dict[str, Any]] = None,
     ) -> BatchExecutionStatus:
+        """Create a batch quickly and queue it for expansion into test jobs."""
         from app.services.test_cases_service import TestCasesService
         from app.repositories.project_repository import project_repository
         from app.repositories.test_case_repository import test_case_repository
@@ -443,33 +446,28 @@ class ExecutionService:
         batch_suite_name = None
         if suite_id:
             _, batch_suite_name = _batch_names(project_id, suite_id)
+
         stored_cases: list[dict] = []
         for case_id in case_ids:
             try:
-                case = cases_service.get(project_id, case_id)
+                case = (prefetched_cases or {}).get(str(case_id))
+                if case is None:
+                    case = cases_service.get(project_id, case_id)
             except HTTPException as exc:
-                stored_cases.append(
-                    {
-                        "testCaseId": case_id,
-                        "testCaseCode": "",
-                        "name": "Test case",
-                        "jobId": None,
-                        "skippedReason": None,
-                        "enqueueError": _public_reason(exc.detail) or "Test case could not be loaded",
-                    }
-                )
+                stored_cases.append({
+                    "testCaseId": case_id, "testCaseCode": "", "name": "Test case",
+                    "jobId": None, "skippedReason": None,
+                    "enqueueError": _public_reason(exc.detail) or "Test case could not be loaded",
+                    "dispatchPending": False,
+                })
                 continue
             except Exception as exc:
-                stored_cases.append(
-                    {
-                        "testCaseId": case_id,
-                        "testCaseCode": "",
-                        "name": "Test case",
-                        "jobId": None,
-                        "skippedReason": None,
-                        "enqueueError": _public_reason(exc) or "Test case could not be loaded",
-                    }
-                )
+                stored_cases.append({
+                    "testCaseId": case_id, "testCaseCode": "", "name": "Test case",
+                    "jobId": None, "skippedReason": None,
+                    "enqueueError": _public_reason(exc) or "Test case could not be loaded",
+                    "dispatchPending": False,
+                })
                 continue
 
             script = (case.testFile or "").replace("\\", "/").strip()
@@ -477,33 +475,18 @@ class ExecutionService:
             suite_snapshot = suite_lookup.get(case.id, ("", "Suite"))
             if suite_id:
                 suite_snapshot = (str(suite_id), batch_suite_name or suite_snapshot[1] or "Suite")
-            entry = {
+            stored_cases.append({
                 "testCaseId": case.id,
                 "testCaseCode": case.code,
                 "name": case.name,
                 "suiteId": suite_snapshot[0] or None,
                 "suiteName": suite_snapshot[1] or "Suite",
+                "scriptPath": script if runnable else None,
                 "jobId": None,
                 "skippedReason": None if runnable else _NO_SCRIPT_REASON,
                 "enqueueError": None,
-            }
-            if runnable:
-                try:
-                    started = self.start(
-                        StartExecutionRequest(
-                            script_path=script,
-                            project_id=project_id,
-                            test_case_id=case.id,
-                            test_case_code=case.code,
-                        ),
-                        environment_base_url=environment.baseUrl if environment is not None else None,
-                        run_by=run_by,
-                    )
-                    entry["jobId"] = started.job_id
-                except Exception as exc:
-                    detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
-                    entry["enqueueError"] = _public_reason(detail) or "Could not start this test"
-            stored_cases.append(entry)
+                "dispatchPending": runnable,
+            })
 
         payload = {
             "id": batch_id,
@@ -516,10 +499,71 @@ class ExecutionService:
             "environmentBaseUrl": environment.baseUrl if environment is not None else None,
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "runBy": run_by[1] if run_by else None,
+            "runById": run_by[0] if run_by else None,
+            "dispatchState": "queued",
             "cases": stored_cases,
         }
         _save_batch(payload)
+        from app.services.batch_queue import enqueue_batch
+
+        enqueue_batch(batch_id)
         return self._status_from_payload(payload)
+
+    def dispatch_batch(self, batch_id: str) -> None:
+        """Turn one queued batch into normal test jobs."""
+        payload = _load_batch(batch_id)
+        if payload is None or payload.get("cancelled"):
+            return
+        payload["dispatchState"] = "dispatching"
+        _save_batch(payload)
+        run_by = None
+        if payload.get("runById"):
+            run_by = (str(payload["runById"]), str(payload.get("runBy") or ""))
+        environment_base_url = payload.get("environmentBaseUrl")
+
+        pending = [
+            entry
+            for entry in payload.get("cases") or []
+            if entry.get("dispatchPending") and not entry.get("jobId")
+        ]
+
+        save_lock = threading.Lock()
+
+        def launch(entry: dict) -> None:
+            if payload.get("cancelled"):
+                with save_lock:
+                    entry["dispatchPending"] = False
+                    _save_batch(payload)
+                return
+            try:
+                started = self.start(
+                    StartExecutionRequest(
+                        script_path=str(entry.get("scriptPath") or ""),
+                        project_id=str(payload.get("projectId") or ""),
+                        test_case_id=str(entry.get("testCaseId") or ""),
+                        test_case_code=str(entry.get("testCaseCode") or ""),
+                    ),
+                    environment_base_url=environment_base_url,
+                    run_by=run_by,
+                )
+                entry["jobId"] = started.job_id
+            except Exception as exc:
+                detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                entry["enqueueError"] = _public_reason(detail) or "Could not start this test"
+            finally:
+                with save_lock:
+                    entry["dispatchPending"] = False
+                    _save_batch(payload)
+
+        if pending:
+            from concurrent.futures import ThreadPoolExecutor
+
+            workers = min(4, len(pending))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(launch, pending))
+
+        payload["dispatchState"] = "cancelled" if payload.get("cancelled") else "completed"
+        _save_batch(payload)
 
     def _status_from_payload(
         self,
@@ -609,6 +653,8 @@ class ExecutionService:
         duration_ms = stored.get("durationMs")
         if entry.get("skippedReason"):
             return "skipped", str(entry["skippedReason"]), None, None
+        if entry.get("dispatchPending"):
+            return "queued", None, None, None
         if entry.get("enqueueError"):
             return "failed", str(entry["enqueueError"]), None, test_run_id
         job_id = entry.get("jobId")
@@ -696,7 +742,7 @@ def _outcome_from_saved_run(
         return "queued", None, duration_ms, test_run_id
     if not stored:
         return "failed", "Execution status is no longer available", None, None
-    return "failed", stored.get("errorMessage") or "Execution status is no longer available", duration_ms, test_run_id
+    return "failed", stored.get("errorMessage") or "Execution status is no longer available", duration_ms, test_run_id 
 
 
 def _case_suites(case_ids: list[str]) -> dict[str, tuple[str, str]]:

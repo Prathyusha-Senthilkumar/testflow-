@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { FileText, FolderKanban, Layers, Search } from "lucide-react";
 import { useNavigate } from "@/lib/navigation";
@@ -164,6 +165,8 @@ export function TestRunsPage() {
           if (!cancelled) {
             setRuns(items);
             setError("");
+            const live = items.some((item) => item.status === "Queued" || item.status === "Running");
+            if (!live) window.clearInterval(timer);
           }
         })
         .catch((err: Error) => {
@@ -259,7 +262,7 @@ export function TestRunsPage() {
             {loading ? (
               <tr>
                 <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
-                  Loading run history...
+                  <LoadingSpinner label="Loading run history…" compact className="justify-center" />
                 </td>
               </tr>
             ) : visible.length === 0 ? (

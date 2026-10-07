@@ -47,6 +47,8 @@ initial_demo_project = ProjectDetail(
 
 
 class ProjectRepository:
+    _overview_ok: bool | None = None
+    _suite_overview_ok: bool | None = None
     def __init__(self):
         self.demo_projects: Dict[str, ProjectDetail] = {
             initial_demo_project.id: initial_demo_project.model_copy(deep=True)
@@ -60,56 +62,68 @@ class ProjectRepository:
         if not self.db:
             projects = [
                 ProjectSummary(
-                    id=p.id,
-                    name=p.name,
-                    baseUrl=p.baseUrl,
-                    description=p.description,
-                    suites=p.suites,
-                    cases=p.cases,
-                    passed=p.passed,
-                    failed=p.failed,
-                    passRate=p.passRate,
-                    lastRun=p.lastRun,
-                    lastRunBy=p.lastRunBy,
+                    id=p.id, name=p.name, baseUrl=p.baseUrl, description=p.description,
+                    suites=p.suites, cases=p.cases, passed=p.passed, failed=p.failed,
+                    passRate=p.passRate, lastRun=p.lastRun, lastRunBy=p.lastRunBy,
                 )
                 for p in self.demo_projects.values()
             ]
             return sorted(projects, key=lambda item: item.id, reverse=True)
 
-        res = (
-            self.db.from_("projects")
-            .select("*")
-            .order("created_at", desc=True)
-            .execute()
-        )
-        if hasattr(res, "error") and res.error:
-            raise Exception(res.error)
+        # project_overview performs the latest-run aggregation in Postgres.  The
+        # previous implementation downloaded every suite/case/run and aggregated
+        # in Python, causing several sequential Supabase round-trips per page.
+        if self._overview_enabled():
+            try:
+                rows = self.db.from_("project_overview").select("*").execute().data or []
+                self._resolve_overview_names(rows)
+                return [self._project_summary_from_overview(row) for row in rows]
+            except Exception:
+                ProjectRepository._overview_ok = False
+        return self._find_all_from_base_tables()
 
-        projects = res.data or []
-        suites = self._all_rows("test_suites", "id,project_id")
-        cases = self._all_rows("test_cases", "id,suite_id")
+    def _overview_enabled(self) -> bool:
+        if ProjectRepository._overview_ok is None:
+            ProjectRepository._overview_ok = self._relation_exists("project_overview")
+        return bool(ProjectRepository._overview_ok)
+
+    def _suite_overview_enabled(self) -> bool:
+        if ProjectRepository._suite_overview_ok is None:
+            ProjectRepository._suite_overview_ok = self._relation_exists("suite_overview")
+        return bool(ProjectRepository._suite_overview_ok)
+
+    def _relation_exists(self, name: str) -> bool:
+        try:
+            self.db.from_(name).select("id").limit(1).execute()
+            return True
+        except Exception:
+            return False
+
+    def _find_all_from_base_tables(self) -> List[ProjectSummary]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            projects_future = pool.submit(
+                lambda: self.db.from_("projects").select("*").order("created_at", desc=True).execute()
+            )
+            suites_future = pool.submit(self._all_rows, "test_suites", "id,project_id")
+            cases_future = pool.submit(self._all_rows, "test_cases", "id,suite_id")
+            projects = projects_future.result().data or []
+            suites = suites_future.result()
+            cases = cases_future.result()
         latest_runs = self._latest_runs([str(c["id"]) for c in cases])
         run_by_names = self._run_by_names(latest_runs)
-
-        # Real schema: project -> test_suites(project_id) -> test_cases(suite_id).
-        suite_to_project: Dict[str, str] = {
-            str(s["id"]): str(s["project_id"]) for s in suites if s.get("project_id")
-        }
+        suite_to_project = {str(s["id"]): str(s["project_id"]) for s in suites if s.get("project_id")}
         suite_counts: Dict[str, int] = {}
-        for s in suites:
-            pid = str(s.get("project_id"))
+        for suite in suites:
+            pid = str(suite.get("project_id"))
             suite_counts[pid] = suite_counts.get(pid, 0) + 1
-
         cases_by_project: Dict[str, List[str]] = {}
         for case in cases:
             pid = suite_to_project.get(str(case.get("suite_id")))
             if pid:
                 cases_by_project.setdefault(pid, []).append(str(case["id"]))
-
-        return [
-            self._project_summary_from_base(row, cases_by_project, suite_counts, latest_runs, run_by_names)
-            for row in projects
-        ]
+        return [self._project_summary_from_base(row, cases_by_project, suite_counts, latest_runs, run_by_names) for row in projects]
 
     def find_by_id(self, id: str) -> ProjectDetail:
         if not self.db:
@@ -118,41 +132,84 @@ class ProjectRepository:
                 raise HTTPException(status_code=404, detail="Project not found")
             return project
 
-        res = (
-            self.db.from_("projects")
-            .select("*")
-            .eq("id", id)
-            .execute()
-        )
-        if not res.data or len(res.data) == 0:
+        if self._overview_enabled() and self._suite_overview_enabled():
+            try:
+                return self._find_by_id_from_overviews(id)
+            except HTTPException:
+                raise
+            except Exception:
+                ProjectRepository._overview_ok = False
+                ProjectRepository._suite_overview_ok = False
+        return self._find_by_id_from_base_tables(id)
+
+    def _find_by_id_from_overviews(self, id: str) -> ProjectDetail:
+        try:
+            overview_rows = self.db.from_("project_overview").select("*").eq("id", id).limit(1).execute().data or []
+            if not overview_rows:
+                raise HTTPException(status_code=404, detail="Project not found")
+            self._resolve_overview_names(overview_rows)
+            project_summary = self._project_summary_from_overview(overview_rows[0])
+            suite_rows = self.db.from_("test_suites").select("id,name,category,categories").eq("project_id", id).execute().data or []
+            suite_overview_rows = self.db.from_("suite_overview").select("*").eq("project_id", id).execute().data or []
+            self._resolve_overview_names(suite_overview_rows)
+            overview_by_id = {str(row.get("id")): row for row in suite_overview_rows}
+            suites_list = []
+            for suite in suite_rows:
+                agg = overview_by_id.get(str(suite.get("id"))) or {}
+                categories = parse_suite_categories(suite.get("categories"), suite.get("category"))
+                suites_list.append(SuiteSummary(
+                    id=str(suite.get("id")), name=str(suite.get("name") or "Untitled"),
+                    category=categories[0] if categories else "regression", categories=categories,
+                    cases=int(agg.get("cases") or 0), passed=int(agg.get("passed") or 0),
+                    failed=int(agg.get("failed") or 0), notRun=int(agg.get("not_run") or 0),
+                    passRate=float(agg.get("pass_rate") or 0), lastRun=agg.get("last_run"),
+                    lastRunBy=agg.get("last_run_by"),
+                ))
+            suites_list.sort(key=lambda item: item.name.lower())
+            return ProjectDetail(**project_summary.model_dump(by_alias=True), suitesList=suites_list)
+        except HTTPException:
+            raise
+        except Exception:
+            return self._find_by_id_from_base_tables(id)
+
+    def _find_by_id_from_base_tables(self, id: str) -> ProjectDetail:
+        res = self.db.from_("projects").select("*").eq("id", id).execute()
+        if not res.data:
             raise HTTPException(status_code=404, detail="Project not found")
         project_row = res.data[0]
-
         suites = self._all_rows("test_suites", "*", ("project_id", id))
         suite_ids = [str(s["id"]) for s in suites]
         cases = self._cases_for_suites(suite_ids)
         case_ids = [str(c["id"]) for c in cases]
         latest_runs = self._latest_runs(case_ids)
         run_by_names = self._run_by_names(latest_runs)
-
-        cases_by_project = {id: case_ids}
-        suite_counts = {id: len(suites)}
-        project_summary = self._project_summary_from_base(
-            project_row, cases_by_project, suite_counts, latest_runs, run_by_names
-        )
-
+        project_summary = self._project_summary_from_base(project_row, {id: case_ids}, {id: len(suites)}, latest_runs, run_by_names)
         cases_by_suite: Dict[str, List[str]] = {}
         for case in cases:
             cases_by_suite.setdefault(str(case.get("suite_id")), []).append(str(case["id"]))
+        suites_list = [self._suite_summary_from_base(row, cases_by_suite, latest_runs, run_by_names) for row in suites]
+        suites_list.sort(key=lambda item: item.name.lower())
+        return ProjectDetail(**project_summary.model_dump(by_alias=True), suitesList=suites_list)
 
-        suites_list = [
-            self._suite_summary_from_base(s, cases_by_suite, latest_runs, run_by_names) for s in suites
-        ]
-        suites_list.sort(key=lambda s: s.name.lower())
+    def _resolve_overview_names(self, rows: list) -> None:
+        from app.repositories.test_run_repository import test_run_repository
 
-        return ProjectDetail(
-            **project_summary.model_dump(by_alias=True),
-            suitesList=suites_list,
+        ids = [str(row.get("last_run_by")) for row in rows if row.get("last_run_by")]
+        names = test_run_repository.profile_names(ids)
+        for row in rows:
+            key = str(row.get("last_run_by") or "")
+            if names.get(key):
+                row["last_run_by"] = names[key]
+
+    @staticmethod
+    def _project_summary_from_overview(row: dict) -> ProjectSummary:
+        return ProjectSummary(
+            id=str(row.get("id")), name=str(row.get("name") or "Untitled"),
+            baseUrl=str(row.get("base_url") or ""), description=row.get("description"),
+            suites=int(row.get("suites") or 0), cases=int(row.get("cases") or 0),
+            passed=int(row.get("passed") or 0), failed=int(row.get("failed") or 0),
+            passRate=float(row.get("pass_rate") or 0), lastRun=row.get("last_run"),
+            lastRunBy=row.get("last_run_by"),
         )
 
     # ---- Base-table aggregation helpers -----------------------------------

@@ -99,6 +99,7 @@ class AuthProfilesService:
         profile = self.profiles.find_by_id(project_id, profile_id)
         save_path = self.profiles.storage_state_path(project_id, profile_id)
         record_auth_profile_login(profile.loginUrl, save_path)
+        self.profiles.persist_storage_file(project_id, profile_id)
         return self.profiles.find_by_id(project_id, profile_id)
 
     def require_storage_path(self, project_id: str, profile_id: str) -> str:
@@ -108,7 +109,7 @@ class AuthProfilesService:
                 status_code=400,
                 detail="Auth profile has no saved session. Record login first.",
             )
-        return str(self.profiles.storage_state_path(project_id, profile_id).resolve())
+        return str(self.profiles.ensure_storage_file(project_id, profile_id).resolve())
 
 
 def _require_refresh_fields(refresh: AuthRefreshConfig) -> None:

@@ -214,13 +214,14 @@ export function ReportsPage() {
       )}
 
       <div className="mt-5 grid gap-4 lg:grid-cols-4">
-        <StatCard label="TOTAL RUNS" value={loading ? "…" : String(filtered.length)} detail="Matching the selected filters" />
-        <StatCard label="PASSED" value={loading ? "…" : String(passed)} detail="Successful executions" tone="pass" />
-        <StatCard label="FAILED" value={loading ? "…" : String(failed)} detail="Action required" tone="fail" />
+        <StatCard label="TOTAL RUNS" value={String(filtered.length)} detail="Matching the selected filters" loading={loading} />
+        <StatCard label="PASSED" value={String(passed)} detail="Successful executions" tone="pass" loading={loading} />
+        <StatCard label="FAILED" value={String(failed)} detail="Action required" tone="fail" loading={loading} />
         <StatCard
           label="PASS RATE"
-          value={loading ? "…" : `${passRate.toFixed(1)}%`}
-          detail={loading ? "Calculating" : delta}
+          value={`${passRate.toFixed(1)}%`}
+          detail={delta}
+          loading={loading}
         />
       </div>
 
@@ -237,7 +238,7 @@ export function ReportsPage() {
           </div>
         </div>
         {loading ? (
-          <p className="mt-6 text-sm text-slate-500">Loading report…</p>
+          <TrendSkeleton />
         ) : trend.length === 0 ? (
           <p className="mt-6 text-sm text-slate-500">No test runs found for the selected filters.</p>
         ) : (
@@ -274,7 +275,9 @@ export function ReportsPage() {
             </tr>
           </thead>
           <tbody>
-            {suiteRows.length === 0 ? (
+            {loading ? (
+              <TableSkeletonRows columns={4} />
+            ) : suiteRows.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
                   No test runs found for the selected filters.
@@ -314,7 +317,7 @@ export function ReportsPage() {
             <p className="text-xs text-slate-500">Failed runs in the current filters</p>
           </div>
           <span className="rounded-lg bg-red-100 px-2 py-1 text-xs text-red-700">
-            {failures.length} Failure{failures.length === 1 ? "" : "s"}
+            {loading ? "Loading" : `${failures.length} Failure${failures.length === 1 ? "" : "s"}`}
           </span>
         </div>
         <table className="mt-4 w-full text-sm">
@@ -328,7 +331,9 @@ export function ReportsPage() {
             </tr>
           </thead>
           <tbody>
-            {failures.length === 0 ? (
+            {loading ? (
+              <TableSkeletonRows columns={5} />
+            ) : failures.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
                   No failed runs for the selected filters.
@@ -377,19 +382,55 @@ function StatCard({
   value,
   detail,
   tone,
+  loading = false,
 }: {
   label: string;
   value: string;
   detail: string;
   tone?: "pass" | "fail";
+  loading?: boolean;
 }) {
   const color = tone === "pass" ? "text-teal-700" : tone === "fail" ? "text-red-600" : "";
   return (
     <div className="rounded-lg bg-white p-5 shadow-sm">
       <p className="text-xs font-semibold text-slate-500">{label}</p>
-      <p className={`mt-4 text-3xl font-bold ${color}`}>{value}</p>
-      <p className="mt-1 text-xs text-slate-500">{detail}</p>
+      <div className="mt-4">{loading ? <Skeleton className="h-9 w-16" /> : <p className={`text-3xl font-bold ${color}`}>{value}</p>}</div>
+      {loading ? <Skeleton className="mt-2 h-3 w-32" /> : <p className="mt-1 text-xs text-slate-500">{detail}</p>}
     </div>
+  );
+}
+
+function Skeleton({ className = "" }: { className?: string }) {
+  return <span aria-hidden="true" className={`block animate-pulse rounded bg-slate-200 ${className}`} />;
+}
+
+function TrendSkeleton() {
+  return (
+    <div className="mt-6 flex h-48 items-end gap-3 border-b border-dashed">
+      {[45, 75, 55, 90, 65, 105, 80].map((height, index) => (
+        <div key={index} className="flex h-full min-w-0 flex-1 flex-col justify-end items-center">
+          <Skeleton className="w-10" />
+          <div aria-hidden="true" className="w-10 animate-pulse rounded-t bg-slate-200" style={{ height: `${height}px` }} />
+          <Skeleton className="mt-2 h-3 w-14" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TableSkeletonRows({ columns }: { columns: number }) {
+  return (
+    <>
+      {[0, 1, 2].map((row) => (
+        <tr key={row} className="border-t">
+          {Array.from({ length: columns }).map((_, column) => (
+            <td key={column} className="px-4 py-4">
+              <Skeleton className={column === 0 ? "h-4 w-40" : "h-4 w-20"} />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
   );
 }
 

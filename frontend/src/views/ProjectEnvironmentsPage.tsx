@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Link, useParams } from "@/lib/navigation";
@@ -104,7 +105,7 @@ export function ProjectEnvironmentsPage() {
       <div className="mt-6 rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
         <h2 className="font-semibold">ENVIRONMENTS</h2>
         {loading ? (
-          <p className="mt-4 text-sm text-slate-500">Loading environments...</p>
+          <LoadingSpinner label="Loading environments…" compact className="mt-4" />
         ) : environments.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500">No environments configured.</p>
         ) : (
