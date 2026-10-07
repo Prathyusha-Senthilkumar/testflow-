@@ -1,5 +1,4 @@
 import json
-import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -521,20 +520,11 @@ class ExecutionService:
             run_by = (str(payload["runById"]), str(payload.get("runBy") or ""))
         environment_base_url = payload.get("environmentBaseUrl")
 
-        pending = [
-            entry
-            for entry in payload.get("cases") or []
-            if entry.get("dispatchPending") and not entry.get("jobId")
-        ]
-
-        save_lock = threading.Lock()
-
-        def launch(entry: dict) -> None:
+        for entry in payload.get("cases") or []:
             if payload.get("cancelled"):
-                with save_lock:
-                    entry["dispatchPending"] = False
-                    _save_batch(payload)
-                return
+                break
+            if not entry.get("dispatchPending") or entry.get("jobId"):
+                continue
             try:
                 started = self.start(
                     StartExecutionRequest(
@@ -551,16 +541,8 @@ class ExecutionService:
                 detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
                 entry["enqueueError"] = _public_reason(detail) or "Could not start this test"
             finally:
-                with save_lock:
-                    entry["dispatchPending"] = False
-                    _save_batch(payload)
-
-        if pending:
-            from concurrent.futures import ThreadPoolExecutor
-
-            workers = min(4, len(pending))
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                list(pool.map(launch, pending))
+                entry["dispatchPending"] = False
+                _save_batch(payload)
 
         payload["dispatchState"] = "cancelled" if payload.get("cancelled") else "completed"
         _save_batch(payload)
