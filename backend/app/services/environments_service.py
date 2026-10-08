@@ -48,8 +48,7 @@ class EnvironmentsService:
         self.projects = project_repository
 
     def list_for_project(self, project_id: str) -> List[EnvironmentSummary]:
-        project = self.projects.find_base(project_id)
-        self.environments.ensure_default(project_id, project.baseUrl)
+        self.projects.find_base(project_id)
         return self.environments.list_by_project(project_id)
 
     def create(self, project_id: str, input_dto: CreateEnvironmentDto) -> EnvironmentSummary:
@@ -133,6 +132,7 @@ class EnvironmentsService:
             env = self.environments.find_by_id(project_id, environment_id)
             base_url = env.baseUrl
         else:
-            env = self.environments.get_default(project_id, project.baseUrl)
-            base_url = env.baseUrl
+            # No environment chosen: the project default, or the project URL when it has none.
+            env = self.environments.get_default(project_id)
+            base_url = env.baseUrl if env else project.baseUrl
         return resolve_start_url(base_url, start_path)

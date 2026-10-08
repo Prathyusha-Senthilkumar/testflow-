@@ -29,11 +29,6 @@ def _is_missing_column(exc: Exception) -> bool:
     )
 
 
-_LAST_ENVIRONMENT_MESSAGE = (
-    "A project needs at least one environment. Add another one before deleting this one."
-)
-
-
 class EnvironmentRepository:
     def __init__(self):
         self.demo_environments: Dict[str, List[EnvironmentSummary]] = {
@@ -79,10 +74,7 @@ class EnvironmentRepository:
     # ---- CRUD -------------------------------------------------------------
     def list_by_project(self, project_id: str) -> List[EnvironmentSummary]:
         if not self.db:
-            self.ensure_default(project_id, None)
             return list(self.demo_environments.get(project_id, []))
-
-        self.ensure_default(project_id, None)
         res = (
             self.db.from_("environments")
             .select("*")
@@ -93,15 +85,16 @@ class EnvironmentRepository:
         return [self._map_row(row) for row in (res.data or [])]
 
     def find_by_id(self, project_id: str, environment_id: str) -> EnvironmentSummary:
+        if not environment_id or environment_id == DEFAULT_ENVIRONMENT_ID:
+            default = self.get_default(project_id)
+            if default is None:
+                raise HTTPException(status_code=404, detail="No environment configured for project")
+            return default
         if not self.db:
-            self.ensure_default(project_id, None)
             for env in self.demo_environments.get(project_id, []):
                 if env.id == environment_id:
                     return env
             raise HTTPException(status_code=404, detail="Environment not found")
-
-        if not environment_id or environment_id == DEFAULT_ENVIRONMENT_ID:
-            return self.get_default(project_id)
 
         res = (
             self.db.from_("environments")
@@ -114,67 +107,16 @@ class EnvironmentRepository:
             raise HTTPException(status_code=404, detail="Environment not found")
         return self._map_row(res.data[0])
 
-    def get_default(self, project_id: str, fallback_base_url: str | None = None) -> EnvironmentSummary:
+    def get_default(self, project_id: str) -> EnvironmentSummary | None:
+        """The project's default environment (flagged, else the oldest), or None when it has none.
+        Environments are never created implicitly: the first one a user adds becomes the default."""
         if not self.db:
-            self.ensure_default(project_id, fallback_base_url)
             environments = self.demo_environments.get(project_id, [])
-            for env in environments:
-                if env.id == DEFAULT_ENVIRONMENT_ID:
-                    return env
-            if environments:
-                return environments[0]
-            raise HTTPException(status_code=404, detail="No environment configured for project")
-
-        default = self.ensure_default(project_id, fallback_base_url)
-        return default
-
-    def ensure_default(self, project_id: str, base_url: str | None) -> EnvironmentSummary:
-        """Return the project's default environment, creating one named "Default" only when the
-        project has no environments at all. The name is just a starting label: it can be renamed
-        or deleted like any other environment once another exists."""
-        if not self.db:
-            existing = self.demo_environments.get(project_id, [])
-            if existing and not any(env.id == DEFAULT_ENVIRONMENT_ID for env in existing):
-                return next((env for env in existing if env.isDefault), existing[0])
-            for env in existing:
-                if env.id == DEFAULT_ENVIRONMENT_ID:
-                    if base_url and env.baseUrl != base_url:
-                        updated = env.model_copy(update={"baseUrl": base_url})
-                        self._replace(project_id, env.id, updated)
-                        return updated
-                    return env
-            resolved_base = base_url or "https://example.com"
-            default_env = EnvironmentSummary(
-                id=DEFAULT_ENVIRONMENT_ID,
-                projectId=project_id,
-                name=DEFAULT_ENVIRONMENT_NAME,
-                baseUrl=resolved_base,
-            )
-            self.demo_environments.setdefault(project_id, []).insert(0, default_env)
-            return default_env
-
-        existing = self._db_default(project_id)
-        if existing:
-            return existing
-        resolved_base = base_url or "https://example.com"
-        res = (
-            self.db.from_("environments")
-            .insert(
-                {
-                    "project_id": project_id,
-                    "name": DEFAULT_ENVIRONMENT_NAME,
-                    "base_url": resolved_base,
-                }
-            )
-            .execute()
-        )
-        if not res.data:
-            raise HTTPException(status_code=500, detail="Could not create default environment")
-        return self._map_row(res.data[0])
+            return next((env for env in environments if env.isDefault), environments[0] if environments else None)
+        return self._db_default(project_id)
 
     def create(self, project_id: str, input_dto: CreateEnvironmentDto) -> EnvironmentSummary:
         if not self.db:
-            self.ensure_default(project_id, None)
             new_id = f"env-{int(time.time() * 1000)}"
             env = EnvironmentSummary(
                 id=new_id,
@@ -228,8 +170,6 @@ class EnvironmentRepository:
     def delete(self, project_id: str, environment_id: str) -> None:
         if not self.db:
             environments = self.demo_environments.get(project_id, [])
-            if len(environments) <= 1 and any(env.id == environment_id for env in environments):
-                raise HTTPException(status_code=400, detail=_LAST_ENVIRONMENT_MESSAGE)
             next_list = [env for env in environments if env.id != environment_id]
             if len(next_list) == len(environments):
                 raise HTTPException(status_code=404, detail="Environment not found")
@@ -237,14 +177,6 @@ class EnvironmentRepository:
             return
 
         self.find_by_id(project_id, environment_id)
-        count = (
-            self.db.from_("environments")
-            .select("id", count="exact")
-            .eq("project_id", project_id)
-            .execute()
-        ).count
-        if (count or 0) <= 1:
-            raise HTTPException(status_code=400, detail=_LAST_ENVIRONMENT_MESSAGE)
         self.db.from_("environments").delete().eq("project_id", project_id).eq(
             "id", environment_id
         ).execute()

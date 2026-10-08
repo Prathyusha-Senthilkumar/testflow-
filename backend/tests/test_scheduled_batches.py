@@ -34,9 +34,12 @@ def _project_with_suite(name: str = "Schedule Project"):
     res = client.post("/api/projects", json={"name": name, "baseUrl": "https://example.com"})
     assert res.status_code == 200, res.text
     project_id = res.json()["id"]
-    envs = client.get(f"/api/projects/{project_id}/environments")
-    assert envs.status_code == 200, envs.text
-    environment_id = envs.json()[0]["id"]
+    env = client.post(
+        f"/api/projects/{project_id}/environments",
+        json={"name": "QA", "baseUrl": "https://qa.example.com"},
+    )
+    assert env.status_code == 200, env.text
+    environment_id = env.json()["id"]
     suite = client.post(f"/api/projects/{project_id}/test-suites", json={"name": "Nightly", "category": "smoke"})
     assert suite.status_code == 200, suite.text
     return project_id, suite.json()["id"], environment_id

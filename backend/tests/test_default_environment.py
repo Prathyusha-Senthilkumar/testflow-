@@ -43,14 +43,14 @@ def _defaults(envs):
     return [env["id"] for env in envs if env["isDefault"]]
 
 
-def test_new_project_flags_its_first_environment():
+def test_new_project_has_no_environment_and_the_first_added_is_default():
     project_id = _project()
-    envs = _envs(project_id)
-    assert len(envs) == 1
-    assert _defaults(envs) == [envs[0]["id"]]
+    assert _envs(project_id) == []
+    qa = _create_env(project_id, "QA")
+    assert qa["isDefault"] is True
     staging = _create_env(project_id, "Staging")
     assert staging["isDefault"] is False
-    assert _defaults(_envs(project_id)) == [envs[0]["id"]]
+    assert _defaults(_envs(project_id)) == [qa["id"]]
 
 
 def test_set_default_switches_and_returns_the_list():
@@ -127,22 +127,13 @@ def test_without_migration_reads_work_and_setting_is_a_clear_409():
     assert "20261009_default_environment.sql" in exc.value.detail
 
 
-def test_environment_named_default_can_be_deleted_when_another_exists():
+def test_any_environment_can_be_deleted_and_nothing_is_recreated():
     project_id = _project()
-    named_default = _envs(project_id)[0]
-    assert named_default["name"] == "Default"
+    qa = _create_env(project_id, "QA")
     staging = _create_env(project_id, "Staging")
-    res = client.delete(f"/api/projects/{project_id}/environments/{named_default['id']}")
-    assert res.status_code in (200, 204), res.text
+    assert client.delete(f"/api/projects/{project_id}/environments/{qa['id']}").status_code == 204
     envs = _envs(project_id)
-    # Not recreated by the next list, and the remaining one becomes the default.
     assert [env["id"] for env in envs] == [staging["id"]]
     assert _defaults(envs) == [staging["id"]]
-
-
-def test_last_environment_cannot_be_deleted():
-    project_id = _project()
-    only = _envs(project_id)[0]
-    res = client.delete(f"/api/projects/{project_id}/environments/{only['id']}")
-    assert res.status_code == 400
-    assert "at least one environment" in res.json()["message"]
+    assert client.delete(f"/api/projects/{project_id}/environments/{staging['id']}").status_code == 204
+    assert _envs(project_id) == []
