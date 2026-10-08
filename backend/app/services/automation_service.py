@@ -1,9 +1,7 @@
 import json
 import os
 import re
-import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -26,7 +24,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 from automation.framework.config_loader import load_framework_config
 from automation.framework.recorder import PlaywrightRecorder
-from automation.framework.runner import TestRunner
 
 _SEGMENT_RE = re.compile(r"^[\w\-]+$")
 
@@ -241,59 +238,3 @@ def record_auth_profile_login(login_url: str, save_path: Path) -> None:
             status_code=400,
             detail="Login recording finished but no session file was saved.",
         )
-
-
-def run_test_case_script(
-    test_file: str, storage_state_path: str | None = None
-) -> tuple[str, float, str | None]:
-    started = time.perf_counter()
-    try:
-        settings = load_framework_config(_REPO_ROOT)
-        test_path = _script_path_from_test_file(test_file)
-
-        if not test_path.is_file():
-            raise HTTPException(status_code=400, detail="Recorded test script file was not found")
-
-        harness_path = (_REPO_ROOT / "automation" / "framework" / "testflow_harness.py").resolve()
-        if not harness_path.is_file():
-            raise HTTPException(status_code=500, detail="TestFlow harness file is missing")
-
-        runner = TestRunner(_REPO_ROOT, settings)
-        # Phase 1 playback: always headless (no visible browser during Run Test).
-        command = runner._build_command(harness_path, effective_headed=False)
-        timeout_seconds = max(1, int(settings.get("execution_timeout_seconds", 300)))
-        case_dir = test_path.parent
-        env = {**os.environ, "TESTFLOW_CASE_DIR": str(case_dir)}
-        if storage_state_path:
-            env["TESTFLOW_STORAGE_STATE"] = storage_state_path
-
-        result = subprocess.run(
-            command,
-            cwd=_REPO_ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_seconds,
-            shell=False,
-            env=env,
-        )
-    except HTTPException:
-        raise
-    except subprocess.TimeoutExpired:
-        duration = time.perf_counter() - started
-        return "Failed", duration, f"Test exceeded the execution limit of {timeout_seconds} seconds."
-    except OSError as exc:
-        duration = time.perf_counter() - started
-        return "Failed", duration, str(exc)
-    except Exception as exc:
-        duration = time.perf_counter() - started
-        return "Failed", duration, str(exc)
-
-    duration = time.perf_counter() - started
-    if result.returncode == 0:
-        return "Passed", duration, None
-
-    combined = (result.stderr or "") + ("\n" + result.stdout if result.stdout else "")
-    snippet = combined.strip()[-2000:] if combined.strip() else "Test execution failed."
-    return "Failed", duration, snippet

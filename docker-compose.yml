@@ -29,6 +29,13 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       # Encrypts Auth Profile credentials at rest. Never commit this value.
       TESTFLOW_SECRET_KEY: ${TESTFLOW_SECRET_KEY:-}
+      # API auth: verify Supabase access tokens (HS256 secret, or JWKS when empty).
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
+      # Dev-only bypass; ignored unless USE_DEMO_DATA=true.
+      AUTH_DISABLED: ${AUTH_DISABLED:-false}
+      STUCK_RUN_AFTER_MINUTES: ${STUCK_RUN_AFTER_MINUTES:-60}
+      # Must match the worker's heartbeat period; used to flag stale workers on the Workers page.
+      WORKER_STATUS_INTERVAL_MS: ${WORKER_STATUS_INTERVAL_MS:-5000}
       # Headed Playwright codegen runs on the Windows host (host_recorder_main.py).
       RECORDING_DELEGATE_URL: ${RECORDING_DELEGATE_URL:-http://host.docker.internal:8765}
     extra_hosts:
@@ -52,6 +59,22 @@ services:
       USE_DEMO_DATA: ${USE_DEMO_DATA:-true}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      # Decrypts Auth Profile sessions in memory and saves refreshed sessions back.
+      TESTFLOW_SECRET_KEY: ${TESTFLOW_SECRET_KEY:-}
+      TEST_TIMEOUT_MS: ${TEST_TIMEOUT_MS:-300000}
+      STEP_TIMEOUT_MS: ${STEP_TIMEOUT_MS:-30000}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-60}
+      # Workers page heartbeat (testflow:worker:<id>) and the build shown as the worker version.
+      WORKER_STATUS_INTERVAL_MS: ${WORKER_STATUS_INTERVAL_MS:-5000}
+      GIT_SHA: ${GIT_SHA:-}
+      # Warm runners: blank contexts kept ready, and when Chromium is recycled.
+      WARM_CONTEXTS: ${WARM_CONTEXTS:-1}
+      BROWSER_RECYCLE_AFTER_TESTS: ${BROWSER_RECYCLE_AFTER_TESTS:-200}
+      BROWSER_RECYCLE_RSS_MB: ${BROWSER_RECYCLE_RSS_MB:-1500}
+    # Keep at least one warm worker up at all times.
+    restart: unless-stopped
+    # Let in-flight tests finish or be requeued on `docker compose stop`.
+    stop_grace_period: 60s
     volumes:
       - ./automation:/app/automation
       - ./tests:/app/tests

@@ -1,12 +1,8 @@
 from functools import lru_cache
-from typing import Optional
 
 from redis import Redis
-from rq import Queue
 
 from app.config import settings
-
-TEST_EXECUTION_QUEUE_NAME = "testflow-test-execution"
 
 
 def _require_redis_url() -> str:
@@ -24,8 +20,6 @@ def get_redis_connection() -> Redis:
 
 
 @lru_cache
-def get_test_execution_queue() -> Queue:
-    return Queue(
-        TEST_EXECUTION_QUEUE_NAME,
-        connection=get_redis_connection(),
-    )
+def get_status_redis_connection() -> Redis:
+    """Short timeouts for read-only status endpoints, so a dead Redis fails fast instead of hanging."""
+    return Redis.from_url(_require_redis_url(), socket_connect_timeout=2, socket_timeout=2)

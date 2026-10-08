@@ -13,6 +13,9 @@ from app.schemas.account import (
 )
 from app.services import account_service
 
+# Public: no access token yet (sign-in, sign-up, refresh, password reset).
+public_router = APIRouter(prefix="/auth", tags=["account"])
+# Signed in: mounted under the authenticated api_router.
 router = APIRouter(prefix="/auth", tags=["account"])
 
 
@@ -25,34 +28,29 @@ def _bearer(authorization: str | None) -> str:
     return token
 
 
-@router.post("/login", response_model=AccountResponse)
+@public_router.post("/login", response_model=AccountResponse)
 def login(body: LoginDto) -> AccountResponse:
     return account_service.login(body.email, body.password)
 
 
-@router.post("/signup", response_model=AccountResponse)
+@public_router.post("/signup", response_model=AccountResponse)
 def signup(body: SignupDto) -> AccountResponse:
     return account_service.signup(body.email, body.password, body.name)
 
 
-@router.post("/forgot-password", response_model=MessageResponse)
+@public_router.post("/forgot-password", response_model=MessageResponse)
 def forgot_password(body: ForgotPasswordDto) -> MessageResponse:
-    reset_link = account_service.request_password_reset(body.email)
-    if reset_link:
-        return MessageResponse(
-            message="The reset email could not be sent. Use this link to choose a new password.",
-            resetLink=reset_link,
-        )
+    account_service.request_password_reset(body.email)
     return MessageResponse(message="If an account exists for that email, a reset link has been sent.")
 
 
-@router.post("/reset-password", response_model=MessageResponse)
+@public_router.post("/reset-password", response_model=MessageResponse)
 def reset_password(body: ResetPasswordDto) -> MessageResponse:
     account_service.reset_password(body.accessToken, body.password)
     return MessageResponse(message="Password updated. Sign in with your new password.")
 
 
-@router.post("/refresh", response_model=AccountResponse)
+@public_router.post("/refresh", response_model=AccountResponse)
 def refresh(body: RefreshDto) -> AccountResponse:
     return account_service.refresh(body.refreshToken)
 

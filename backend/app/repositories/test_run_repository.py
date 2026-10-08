@@ -6,6 +6,8 @@ from typing import Optional
 from app.database import get_supabase_client
 
 _SCHEDULE_TTL_SECONDS = 60 * 60 * 24 * 30
+# Non-terminal statuses. Terminal: Passed, Failed, Not Run (cancel = Not Run + "Cancelled").
+ACTIVE_STATUSES = ("Queued", "Running")
 
 
 class TestRunRepository:
@@ -378,9 +380,14 @@ class TestRunRepository:
         }
 
     def mark_running(self, job_id: str) -> None:
+        """Queued -> Running only. Never resurrects a finished or cancelled run."""
         if not self.db:
             return
-        self.db.from_("test_runs").update({"status": "Running"}).eq("job_id", job_id).execute()
+        from datetime import datetime, timezone
+
+        self.db.from_("test_runs").update(
+            {"status": "Running", "started_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("job_id", job_id).in_("status", ["Queued"]).execute()
 
     def mark_result(
         self,
@@ -389,6 +396,7 @@ class TestRunRepository:
         duration_ms: Optional[int],
         error_message: Optional[str],
     ) -> None:
+        """Write a terminal result only while the run is still active (Queued/Running)."""
         if not self.db:
             return
         from datetime import datetime, timezone
@@ -400,7 +408,44 @@ class TestRunRepository:
                 "error_message": error_message,
                 "completed_at": datetime.now(timezone.utc).isoformat(),
             }
-        ).eq("job_id", job_id).execute()
+        ).eq("job_id", job_id).in_("status", list(ACTIVE_STATUSES)).execute()
+
+    def find_stale_active(self, started_before: str, limit: int = 200) -> list[dict]:
+        """Queued/Running rows whose started_at is older than `started_before` (ISO time)."""
+        if not self.db:
+            return []
+        return (
+            self.db.from_("test_runs")
+            .select("id,job_id,status,started_at")
+            .in_("status", list(ACTIVE_STATUSES))
+            .lt("started_at", started_before)
+            .order("started_at")
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+
+    def fail_if_active(self, run_ids: list[str], error_message: str) -> int:
+        """Mark the given runs Failed, skipping any that finished meanwhile. Returns rows changed."""
+        if not self.db or not run_ids:
+            return 0
+        from datetime import datetime, timezone
+
+        res = (
+            self.db.from_("test_runs")
+            .update(
+                {
+                    "status": "Failed",
+                    "error_message": error_message,
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            .in_("id", run_ids)
+            .in_("status", list(ACTIVE_STATUSES))
+            .execute()
+        )
+        return len(res.data or [])
 
     def mark_cancelled(self, job_id: str) -> None:
         """Record a cancel without a new status value. Passed and Failed rows stay as they are."""

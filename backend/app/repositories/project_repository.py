@@ -1,4 +1,5 @@
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from fastapi import HTTPException
@@ -124,6 +125,34 @@ class ProjectRepository:
             if pid:
                 cases_by_project.setdefault(pid, []).append(str(case["id"]))
         return [self._project_summary_from_base(row, cases_by_project, suite_counts, latest_runs, run_by_names) for row in projects]
+
+    def find_base(self, id: str) -> ProjectSummary:
+        """Project row only, without suite/case/run aggregates (one query).
+
+        Use this for existence checks and base-URL lookups. ``find_by_id`` runs
+        the full dashboard aggregation (5 queries) and is only for the detail view.
+        """
+        if not self.db:
+            project = self.demo_projects.get(id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            return project
+
+        res = (
+            self.db.from_("projects")
+            .select("*")
+            .eq("id", id)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Project not found")
+        row = res.data[0]
+        return ProjectSummary(
+            id=str(row.get("id")),
+            name=str(row.get("name")),
+            baseUrl=str(row.get("base_url")),
+            description=row.get("description"),
+        )
 
     def find_by_id(self, id: str) -> ProjectDetail:
         if not self.db:

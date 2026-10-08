@@ -1,7 +1,14 @@
 from datetime import datetime
 from typing import Optional
 
-from app.queue.job_store import TestJob, cancel_scheduled, scheduled_jobs, scheduled_time, submit_job
+from app.queue.job_store import (
+    TestJob,
+    cancel_scheduled,
+    new_job_id,
+    scheduled_jobs,
+    scheduled_time,
+    submit_job,
+)
 
 
 class QueueService:
@@ -18,8 +25,10 @@ class QueueService:
         time_zone: Optional[str],
         run_at: Optional[datetime],
         environment_base_url: Optional[str] = None,
+        job_id: Optional[str] = None,
     ) -> TestJob:
         return submit_job(
+            job_id=job_id,
             config_path=config_path,
             project_id=project_id,
             test_case_code=test_case_code,
@@ -29,6 +38,9 @@ class QueueService:
             run_at=run_at,
             environment_base_url=environment_base_url,
         )
+
+    def new_job_id(self) -> str:
+        return new_job_id()
 
     def scheduled_jobs(self) -> list[TestJob]:
         return scheduled_jobs()

@@ -37,7 +37,6 @@ class MessageResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
     message: str
-    resetLink: Optional[str] = Field(default=None, alias="resetLink")
 
 
 class RefreshDto(BaseModel):

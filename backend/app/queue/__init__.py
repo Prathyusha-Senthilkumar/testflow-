@@ -1,11 +1,3 @@
-from app.queue.connection import (
-    TEST_EXECUTION_QUEUE_NAME,
-    get_redis_connection,
-    get_test_execution_queue,
-)
+from app.queue.connection import get_redis_connection
 
-__all__ = [
-    "TEST_EXECUTION_QUEUE_NAME",
-    "get_redis_connection",
-    "get_test_execution_queue",
-]
+__all__ = ["get_redis_connection"]

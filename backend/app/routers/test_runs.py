@@ -1,16 +1,54 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 
-from app.services.account_service import actor_from_authorization
+from app.dependencies.auth import current_actor
 
 from app.repositories.test_run_repository import test_run_repository
 from app.schemas.execution import ExecutionStatusResponse
 from app.schemas.test_run import GroupedRun, LatestCaseRun, ReportRun, RunScreenshot, TestRunHistoryItem
+from app.services import signed_urls
 from app.services.execution_service import get_execution_service
 
 router = APIRouter(prefix="/test-runs", tags=["test-runs"])
+# Image endpoints: no bearer token (loaded by <img src>), authorised by a signed, expiring URL.
+signed_router = APIRouter(prefix="/test-runs", tags=["test-runs"])
+
+
+def _require_signature(request: Request, expires: Optional[int], sig: Optional[str]) -> None:
+    path = request.url.path.removeprefix("/api")
+    if not signed_urls.verify(path, expires, sig):
+        raise HTTPException(status_code=401, detail="This image link has expired. Reload the page.")
+
+
+@signed_router.get("/{run_id}/screenshots/{file_name}")
+def get_run_screenshot_file(
+    request: Request,
+    run_id: str,
+    file_name: str,
+    expires: Optional[int] = Query(None),
+    sig: Optional[str] = Query(None),
+):
+    _require_signature(request, expires, sig)
+    file_path = test_run_repository.screenshot_named(run_id, file_name)
+    if file_path is None:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return FileResponse(file_path, media_type="image/png", filename=file_name)
+
+
+@signed_router.get("/{run_id}/screenshot")
+def get_run_screenshot(
+    request: Request,
+    run_id: str,
+    expires: Optional[int] = Query(None),
+    sig: Optional[str] = Query(None),
+):
+    _require_signature(request, expires, sig)
+    file_path = test_run_repository.screenshot_file(run_id)
+    if file_path is None:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return FileResponse(file_path, media_type="image/png", filename="final-screenshot.png")
 
 
 @router.get("", response_model=List[TestRunHistoryItem])
@@ -50,29 +88,26 @@ def cancel_test_run(run_id: str):
 
 
 @router.post("/{run_id}/rerun", response_model=ExecutionStatusResponse)
-def rerun_test_run(run_id: str, authorization: str | None = Header(default=None)):
-    return get_execution_service().rerun_test_run(run_id, run_by=actor_from_authorization(authorization))
+def rerun_test_run(run_id: str, actor: Optional[tuple[str, str]] = Depends(current_actor)):
+    return get_execution_service().rerun_test_run(run_id, run_by=actor)
 
 
 @router.get("/{run_id}/screenshots", response_model=List[RunScreenshot])
 def list_run_screenshots(run_id: str):
-    return test_run_repository.screenshot_steps(run_id)
+    """Step images with short-lived signed URLs that <img src> can load without a bearer token."""
+    items = []
+    for entry in test_run_repository.screenshot_steps(run_id):
+        path = f"/test-runs/{run_id}/screenshots/{entry['file']}"
+        items.append({**entry, "url": signed_urls.sign_path(path)})
+    return items
 
 
-@router.get("/{run_id}/screenshots/{file_name}")
-def get_run_screenshot_file(run_id: str, file_name: str):
-    file_path = test_run_repository.screenshot_named(run_id, file_name)
-    if file_path is None:
+@router.get("/{run_id}/screenshot-url")
+def get_run_screenshot_url(run_id: str):
+    """Signed URL for the final screenshot."""
+    if test_run_repository.screenshot_file(run_id) is None:
         raise HTTPException(status_code=404, detail="Screenshot not found")
-    return FileResponse(file_path, media_type="image/png", filename=file_name)
-
-
-@router.get("/{run_id}/screenshot")
-def get_run_screenshot(run_id: str):
-    file_path = test_run_repository.screenshot_file(run_id)
-    if file_path is None:
-        raise HTTPException(status_code=404, detail="Screenshot not found")
-    return FileResponse(file_path, media_type="image/png", filename="final-screenshot.png")
+    return {"url": signed_urls.sign_path(f"/test-runs/{run_id}/screenshot")}
 
 
 @router.get("/{run_id}", response_model=ReportRun)
