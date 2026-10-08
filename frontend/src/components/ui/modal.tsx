@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,8 @@ type ModalProps = {
   footer?: ReactNode;
   className?: string;
   panelClassName?: string;
+  closeOnBackdrop?: boolean;
+  closeOnEscape?: boolean;
 };
 
 export function Modal({
@@ -22,7 +24,18 @@ export function Modal({
   footer,
   className,
   panelClassName,
+  closeOnBackdrop = false,
+  closeOnEscape = false,
 }: ModalProps) {
+  useEffect(() => {
+    if (!open || !closeOnEscape) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, closeOnEscape, onClose]);
+
   if (!open) return null;
 
   return (
@@ -31,8 +44,12 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="testflow-modal-title"
+      onClick={closeOnBackdrop ? onClose : undefined}
     >
-      <div className={cn("w-full max-w-lg rounded-2xl bg-white shadow-xl", panelClassName)}>
+      <div
+        className={cn("w-full max-w-lg rounded-2xl bg-white shadow-xl", panelClassName)}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
           <div>
             <h2 id="testflow-modal-title" className="text-lg font-semibold text-slate-900">

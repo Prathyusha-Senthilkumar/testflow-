@@ -1,10 +1,12 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "@/lib/navigation";
 import { api, type ReportRun, type RunScreenshot } from "@/lib/api";
 import { StepScreenshots } from "@/components/runs/StepScreenshots";
 import { formatDuration, formatExecutedAt } from "@/lib/reportCsv";
+import { downloadRunReport, splitFailure } from "@/lib/runReport";
 import { TestResultPage } from "@/views/TestResultPage";
 
 export function RunResultPage() {
@@ -16,9 +18,13 @@ export function RunResultPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [screenshots, setScreenshots] = useState<RunScreenshot[]>([]);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState("");
 
   useEffect(() => {
     if (!runId) return;
+    const status = run?.status;
+    if (status && status !== "Queued" && status !== "Running") return;
     let cancelled = false;
     const load = () => {
       api
@@ -38,7 +44,7 @@ export function RunResultPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [runId]);
+  }, [runId, run?.status]);
 
   useEffect(() => {
     const status = run?.status;
@@ -67,7 +73,7 @@ export function RunResultPage() {
   if (!run) {
     return (
       <div className="p-6 lg:p-8">
-        <div className="rounded-lg bg-white p-6 text-sm text-slate-500 shadow-sm">Loading result…</div>
+        <div className="rounded-lg bg-white shadow-sm"><LoadingSpinner label="Loading result…" /></div>
       </div>
     );
   }
@@ -140,6 +146,37 @@ export function RunResultPage() {
                 Rerun
               </button>
             )}
+            {!active && (
+              <button
+                type="button"
+                disabled={reportBusy}
+                onClick={async () => {
+                  setReportError("");
+                  setReportBusy(true);
+                  try {
+                    await downloadRunReport({
+                      testName: run.testName || "Test run",
+                      projectName: run.projectName,
+                      suiteName: run.suiteName,
+                      runId: run.id,
+                      executedAt: formatExecutedAt(run.completedAt || run.startedAt),
+                      environment: null,
+                      status: cancelled ? "Cancelled" : run.status,
+                      duration: formatDuration(run.durationMs),
+                      errorMessage: run.errorMessage,
+                      steps: screenshots,
+                    });
+                  } catch (err) {
+                    setReportError(err instanceof Error ? err.message : "Could not download this report");
+                  } finally {
+                    setReportBusy(false);
+                  }
+                }}
+                className="rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-60"
+              >
+                {reportBusy ? "Generating report..." : "Download Report"}
+              </button>
+            )}
             {fromRuns && run.testCaseId ? (
               <Link
                 to={`/projects/${projectId || run.projectId}/test-cases/${run.testCaseId}`}
@@ -164,18 +201,24 @@ export function RunResultPage() {
           <Row label="Duration" value={formatDuration(run.durationMs) || "—"} />
           <Row label="Run by" value={run.runBy || "—"} />
         </dl>
-        {run.errorMessage && (
+        {run.errorMessage && screenshots.length === 0 && (
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             <p className="font-semibold">{cancelled ? "Reason" : "Failure reason"}</p>
-            <p className="mt-2 whitespace-pre-wrap">{run.errorMessage}</p>
+            <p className="mt-2 whitespace-pre-wrap">{splitFailure(run.errorMessage).summary}</p>
           </div>
         )}
+        {reportError ? <p className="mt-3 text-sm text-red-600">{reportError}</p> : null}
       </div>
 
       {screenshots.length > 0 && !active && (
         <div className="mt-5 rounded-lg bg-white p-5 shadow-sm">
           <h2 className="font-semibold">Screenshots</h2>
-          <StepScreenshots runId={run.id} steps={screenshots} />
+          <StepScreenshots
+            runId={run.id}
+            steps={screenshots}
+            status={run.status}
+            errorMessage={run.status === "Failed" ? run.errorMessage : null}
+          />
         </div>
       )}
     </div>

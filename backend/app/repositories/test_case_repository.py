@@ -398,6 +398,7 @@ class TestCaseRepository:
             testFile=test_file,
             startPath=str(row.get("start_path") or "/"),
             environmentId=row.get("environment_id") or DEFAULT_ENVIRONMENT_ID,
+            suiteId=row.get("suite_id") or row.get("suiteId"),
             authProfileId=row.get("auth_profile_id") or row.get("authProfileId"),
             expectedResult=expected_result,
             isDraft=bool(row.get("is_draft", True)),

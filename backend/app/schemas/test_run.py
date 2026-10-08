@@ -5,12 +5,27 @@ from pydantic import BaseModel, ConfigDict, Field
 class RunScreenshot(BaseModel):
     file: str
     label: str
+    failed: bool = False
+    error: Optional[str] = None
 
 
 class TestRunResult(BaseModel):
     status: Literal["Passed", "Failed"]
     duration: float
     error: Optional[str] = None
+
+
+class LatestCaseRun(BaseModel):
+    """Latest persisted result for one test case. No script, cookies, or job payload."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    testCaseId: str = Field(alias="testCaseId")
+    projectId: Optional[str] = Field(None, alias="projectId")
+    status: str
+    startedAt: Optional[str] = Field(None, alias="startedAt")
+    completedAt: Optional[str] = Field(None, alias="completedAt")
+    runBy: Optional[str] = Field(None, alias="runBy")
 
 
 class ReportRun(BaseModel):

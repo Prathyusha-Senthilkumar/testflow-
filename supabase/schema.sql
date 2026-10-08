@@ -122,3 +122,18 @@ left join lateral (
 ) lr on true
 left join profiles pr on pr.id=lr.run_by
 group by s.id;
+
+-- Auth profiles. Sensitive fields are Fernet ciphertext produced by the API.
+-- id stays text so existing auth-<timestamp> ids keep working.
+create table if not exists public.auth_profiles (
+  id text primary key,
+  project_id uuid not null references public.projects(id) on delete cascade,
+  name text not null,
+  login_url text not null default '',
+  refresh jsonb,
+  credentials_enc text,
+  storage_state_enc text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.auth_profiles enable row level security;

@@ -209,6 +209,59 @@ class TestRunRepository:
             )
         return items
 
+    def list_latest_for_project(self, project_id: str) -> list[dict]:
+        """One latest run per test case in a project. Skips report name lookups."""
+        if not self.db:
+            return []
+        suites = (
+            self.db.from_("test_suites")
+            .select("id")
+            .eq("project_id", project_id)
+            .execute()
+            .data
+            or []
+        )
+        suite_ids = [str(row["id"]) for row in suites if row.get("id")]
+        if not suite_ids:
+            return []
+        cases = (
+            self.db.from_("test_cases")
+            .select("id")
+            .in_("suite_id", suite_ids)
+            .execute()
+            .data
+            or []
+        )
+        case_ids = [str(row["id"]) for row in cases if row.get("id")]
+        if not case_ids:
+            return []
+        runs = (
+            self.db.from_("test_runs")
+            .select("test_case_id,status,started_at,completed_at,run_by")
+            .in_("test_case_id", case_ids)
+            .order("started_at", desc=True)
+            .execute()
+            .data
+            or []
+        )
+        latest: dict[str, dict] = {}
+        for run in runs:
+            case_id = str(run.get("test_case_id") or "")
+            if case_id and case_id not in latest:
+                latest[case_id] = run
+        names = self.profile_names([str(run.get("run_by") or "") for run in latest.values()])
+        return [
+            {
+                "testCaseId": case_id,
+                "projectId": project_id,
+                "status": str(run.get("status") or ""),
+                "startedAt": run.get("started_at"),
+                "completedAt": run.get("completed_at"),
+                "runBy": names.get(str(run.get("run_by") or "")) or None,
+            }
+            for case_id, run in latest.items()
+        ]
+
     def list_report(self, limit: int = 500) -> list[dict]:
         """Persisted runs with project and suite names. Does not return job ids."""
         if not self.db:
@@ -431,7 +484,11 @@ class TestRunRepository:
                         continue
                     if not (directory / file_name).is_file():
                         continue
-                    entries.append({"file": file_name, "label": str(item.get("label") or file_name)[:160]})
+                    entry = {"file": file_name, "label": str(item.get("label") or file_name)[:160]}
+                    if item.get("failed") is True:
+                        entry["failed"] = True
+                        entry["error"] = str(item.get("error") or "")[:800]
+                    entries.append(entry)
         if not entries and final.is_file():
             entries.append({"file": "final-screenshot.png", "label": "Final screenshot"})
         return entries

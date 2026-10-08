@@ -81,6 +81,17 @@ class AuthProfileRepository:
     def __init__(self, root: Path | None = None):
         self.root = Path(root) if root else _PROFILES_ROOT
 
+    def _client(self):
+        """Supabase client when persistence is configured. File storage remains the demo path."""
+        if self.root != _PROFILES_ROOT:
+            return None
+        try:
+            from app.database import get_supabase_client
+
+            return get_supabase_client()
+        except Exception:
+            return None
+
     def validate_project_id(self, project_id: str) -> None:
         _validate_segment(project_id, "project id")
 
@@ -88,6 +99,17 @@ class AuthProfileRepository:
         _validate_segment(profile_id, "auth profile id")
 
     def list_by_project(self, project_id: str) -> List[AuthProfileSummary]:
+        client = self._client()
+        if client is not None:
+            rows = (
+                client.from_("auth_profiles")
+                .select("id,project_id,name,login_url,refresh,credentials_enc,storage_state_enc,created_at")
+                .eq("project_id", project_id)
+                .execute()
+                .data
+                or []
+            )
+            return [self._from_row(row) for row in rows]
         project_dir = self._project_dir(project_id)
         if not project_dir.is_dir():
             return []
@@ -98,6 +120,12 @@ class AuthProfileRepository:
         return profiles
 
     def find_by_id(self, project_id: str, profile_id: str) -> AuthProfileSummary:
+        client = self._client()
+        if client is not None:
+            row = self._row(client, project_id, profile_id)
+            if row is None:
+                raise HTTPException(status_code=404, detail="Auth profile not found")
+            return self._from_row(row)
         profile_dir = self._profile_dir(project_id, profile_id)
         meta_path = profile_dir / _META_FILENAME
         if not meta_path.is_file():
@@ -106,6 +134,19 @@ class AuthProfileRepository:
 
     def create(self, project_id: str, input_dto: CreateAuthProfileDto) -> AuthProfileSummary:
         profile_id = f"auth-{int(time.time() * 1000)}"
+        client = self._client()
+        if client is not None:
+            created_at = datetime.now(timezone.utc).isoformat()
+            client.from_("auth_profiles").insert(
+                {
+                    "id": profile_id,
+                    "project_id": project_id,
+                    "name": input_dto.name.strip(),
+                    "login_url": input_dto.loginUrl,
+                    "created_at": created_at,
+                }
+            ).execute()
+            return self.find_by_id(project_id, profile_id)
         profile_dir = self._profile_dir(project_id, profile_id)
         profile_dir.mkdir(parents=True, exist_ok=True)
         created_at = datetime.now(timezone.utc).isoformat()
@@ -123,6 +164,13 @@ class AuthProfileRepository:
         return self._read(project_id, profile_id, profile_dir)
 
     def delete(self, project_id: str, profile_id: str) -> None:
+        client = self._client()
+        if client is not None:
+            row = self._row(client, project_id, profile_id)
+            if row is None:
+                raise HTTPException(status_code=404, detail="Auth profile not found")
+            client.from_("auth_profiles").delete().eq("id", profile_id).eq("project_id", project_id).execute()
+            return
         profile_dir = self._profile_dir(project_id, profile_id)
         if not (profile_dir / _META_FILENAME).is_file():
             raise HTTPException(status_code=404, detail="Auth profile not found")
@@ -140,23 +188,41 @@ class AuthProfileRepository:
     ) -> None:
         from app.services.secret_store import SecretUnavailableError, encrypt_mapping
 
-        profile_dir = self._profile_dir(project_id, profile_id)
-        if not (profile_dir / _META_FILENAME).is_file():
-            raise HTTPException(status_code=404, detail="Auth profile not found")
+        client = self._client()
+        if client is None:
+            profile_dir = self._profile_dir(project_id, profile_id)
+            if not (profile_dir / _META_FILENAME).is_file():
+                raise HTTPException(status_code=404, detail="Auth profile not found")
         try:
             token = encrypt_mapping({"username": username, "password": password})
         except SecretUnavailableError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        client = self._client()
+        if client is not None:
+            if self._row(client, project_id, profile_id) is None:
+                raise HTTPException(status_code=404, detail="Auth profile not found")
+            client.from_("auth_profiles").update({"credentials_enc": token}).eq("id", profile_id).eq(
+                "project_id", project_id
+            ).execute()
+            return
         self.credentials_path(project_id, profile_id).write_text(token, encoding="utf-8")
 
     def read_credentials(self, project_id: str, profile_id: str) -> Optional[dict]:
         """Decrypted {username, password}. Callers must never log or return this."""
         from app.services.secret_store import decrypt_mapping
 
-        path = self.credentials_path(project_id, profile_id)
-        if not path.is_file():
+        client = self._client()
+        token = ""
+        if client is not None:
+            row = self._row(client, project_id, profile_id)
+            token = str((row or {}).get("credentials_enc") or "")
+        else:
+            path = self.credentials_path(project_id, profile_id)
+            if path.is_file():
+                token = path.read_text(encoding="utf-8").strip()
+        if not token:
             return None
-        payload = decrypt_mapping(path.read_text(encoding="utf-8").strip())
+        payload = decrypt_mapping(token)
         if not payload or not payload.get("username"):
             return None
         return payload
@@ -164,7 +230,16 @@ class AuthProfileRepository:
     def save_refresh(
         self, project_id: str, profile_id: str, refresh: Optional[AuthRefreshConfig]
     ) -> None:
-        """Store non-secret refresh settings on profile.json. Credentials stay encrypted."""
+        """Store non-secret refresh settings. Credentials stay encrypted."""
+        client = self._client()
+        if client is not None:
+            if self._row(client, project_id, profile_id) is None:
+                raise HTTPException(status_code=404, detail="Auth profile not found")
+            stored = None if refresh is None else _public_refresh(refresh)
+            client.from_("auth_profiles").update({"refresh": stored}).eq("id", profile_id).eq(
+                "project_id", project_id
+            ).execute()
+            return
         profile_dir = self._profile_dir(project_id, profile_id)
         meta_path = profile_dir / _META_FILENAME
         if not meta_path.is_file():
@@ -263,6 +338,153 @@ class AuthProfileRepository:
             refresh=_refresh_from_payload(payload.get("refresh")),
             createdAt=str(payload.get("createdAt") or ""),
         )
+
+
+    def ensure_storage_file(self, project_id: str, profile_id: str) -> Path:
+        """Write the Playwright session file from Supabase when the worker needs a path."""
+        path = self.storage_state_path(project_id, profile_id)
+        client = self._client()
+        if client is None:
+            return path
+        row = self._row(client, project_id, profile_id)
+        token = str((row or {}).get("storage_state_enc") or "")
+        if not token:
+            return path
+        from app.services.secret_store import decrypt_mapping
+
+        payload = decrypt_mapping(token)
+        if not isinstance(payload, dict):
+            return path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def persist_storage_file(self, project_id: str, profile_id: str) -> None:
+        """Encrypt a recorded session file into Supabase. The file is left in place."""
+        client = self._client()
+        if client is None:
+            return
+        path = self.storage_state_path(project_id, profile_id)
+        if not path.is_file():
+            return
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        from app.services.secret_store import SecretUnavailableError, encrypt_mapping
+
+        try:
+            token = encrypt_mapping(payload)
+        except SecretUnavailableError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        client.from_("auth_profiles").update({"storage_state_enc": token}).eq("id", profile_id).eq(
+            "project_id", project_id
+        ).execute()
+
+    def _row(self, client, project_id: str, profile_id: str) -> Optional[dict]:
+        rows = (
+            client.from_("auth_profiles")
+            .select("id,project_id,name,login_url,refresh,credentials_enc,storage_state_enc,created_at")
+            .eq("id", profile_id)
+            .eq("project_id", project_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+
+    def _from_row(self, row: dict) -> AuthProfileSummary:
+        from app.services.secret_store import decrypt_mapping
+
+        storage = decrypt_mapping(str(row.get("storage_state_enc") or ""))
+        status, recorded_at, expires_at = self._session_from_payload(storage, str(row.get("created_at") or None))
+        credentials = decrypt_mapping(str(row.get("credentials_enc") or ""))
+        username = credentials.get("username") if isinstance(credentials, dict) else None
+        return AuthProfileSummary(
+            id=str(row.get("id")),
+            projectId=str(row.get("project_id")),
+            name=str(row.get("name") or "Untitled"),
+            loginUrl=str(row.get("login_url") or ""),
+            hasStorageState=status != "none",
+            sessionStatus=status,
+            sessionRecordedAt=recorded_at,
+            sessionExpiresAt=expires_at,
+            needsRenewal=status in ("expiring", "expired"),
+            hasCredentials=bool(username),
+            username=username,
+            refresh=_refresh_from_payload(row.get("refresh")),
+            createdAt=str(row.get("created_at") or ""),
+        )
+
+    def _session_from_payload(self, payload: Optional[dict], created_at: Optional[str]):
+        if not isinstance(payload, dict):
+            return "none", None, None
+        now = datetime.now(timezone.utc)
+        recorded_at = created_at
+        expiry = _latest_cookie_expiry(payload)
+        if expiry is None:
+            return "active", recorded_at, None
+        if expiry <= now:
+            status = "expired"
+        elif expiry <= now + _EXPIRING_WINDOW:
+            status = "expiring"
+        else:
+            status = "active"
+        return status, recorded_at, expiry.isoformat()
+
+    def _import_local(self, client, project_id: str) -> None:
+        """Copy file profiles into Supabase once. Local files are not deleted."""
+        project_dir = self._project_dir(project_id)
+        if not project_dir.is_dir():
+            return
+        existing = {
+            str(row.get("id"))
+            for row in (
+                client.from_("auth_profiles").select("id").eq("project_id", project_id).execute().data or []
+            )
+        }
+        from app.services.secret_store import encrypt_mapping
+
+        for child in project_dir.iterdir():
+            if not child.is_dir() or not (child / _META_FILENAME).is_file():
+                continue
+            if child.name in existing:
+                continue
+            try:
+                meta = json.loads((child / _META_FILENAME).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            credentials_enc = None
+            cred_path = child / _CREDENTIALS_FILENAME
+            if cred_path.is_file():
+                credentials_enc = cred_path.read_text(encoding="utf-8").strip() or None
+            storage_enc = None
+            storage_path = child / _STORAGE_FILENAME
+            if storage_path.is_file():
+                try:
+                    storage = json.loads(storage_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    storage = None
+                if isinstance(storage, dict):
+                    try:
+                        storage_enc = encrypt_mapping(storage)
+                    except Exception:
+                        storage_enc = None
+            client.from_("auth_profiles").insert(
+                {
+                    "id": str(meta.get("id") or child.name),
+                    "project_id": project_id,
+                    "name": str(meta.get("name") or "Untitled"),
+                    "login_url": str(meta.get("loginUrl") or ""),
+                    "refresh": meta.get("refresh"),
+                    "credentials_enc": credentials_enc,
+                    "storage_state_enc": storage_enc,
+                    "created_at": meta.get("createdAt") or datetime.now(timezone.utc).isoformat(),
+                }
+            ).execute()
 
 
 auth_profile_repository = AuthProfileRepository()

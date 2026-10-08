@@ -66,15 +66,34 @@ class TestSuiteRepository:
             raise HTTPException(status_code=500, detail="Could not create Unassigned suite")
         return str(created.data[0]["id"])
 
-    def _map_row(self, row: dict) -> TestSuiteSummary:
+    def _case_counts(self, suite_ids: List[str]) -> Dict[str, int]:
+        if not suite_ids:
+            return {}
+        rows = (
+            self.db.from_("test_cases")
+            .select("suite_id")
+            .in_("suite_id", suite_ids)
+            .execute()
+            .data
+            or []
+        )
+        counts: Dict[str, int] = {}
+        for row in rows:
+            suite_id = str(row.get("suite_id") or "")
+            if suite_id:
+                counts[suite_id] = counts.get(suite_id, 0) + 1
+        return counts
+
+    def _map_row(self, row: dict, case_count: int | None = None) -> TestSuiteSummary:
+        suite_id = str(row.get("id"))
         return TestSuiteSummary(
-            id=str(row.get("id")),
+            id=suite_id,
             projectId=str(row.get("project_id")),
             name=str(row.get("name")),
             description=row.get("description"),
             category=parse_suite_categories(row)[0],
             categories=parse_suite_categories(row),
-            caseCount=self._count_cases(str(row.get("id"))),
+            caseCount=self._count_cases(suite_id) if case_count is None else case_count,
             createdAt=row.get("created_at"),
         )
 
@@ -91,7 +110,9 @@ class TestSuiteRepository:
             .order("created_at", desc=True)
             .execute()
         )
-        return [self._map_row(row) for row in (res.data or [])]
+        rows = res.data or []
+        counts = self._case_counts([str(row.get("id")) for row in rows])
+        return [self._map_row(row, counts.get(str(row.get("id")), 0)) for row in rows]
 
     def find_by_id(self, project_id: str, suite_id: str) -> TestSuiteSummary:
         if not self.db:

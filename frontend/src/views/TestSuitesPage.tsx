@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useState, type MouseEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
@@ -75,7 +76,7 @@ export function TestSuitesPage() {
 
       <div className="mt-6 overflow-hidden rounded-lg bg-white shadow-sm">
         {loading ? (
-          <div className="px-5 py-12 text-center text-sm text-slate-500">Loading suites…</div>
+          <LoadingSpinner label="Loading suites…" />
         ) : suites.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-slate-500">
             No test suites yet. Create one to group test cases.

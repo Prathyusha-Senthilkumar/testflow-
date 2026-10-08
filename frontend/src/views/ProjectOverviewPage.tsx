@@ -22,7 +22,7 @@ export function ProjectOverviewPage() {
   const [error, setError] = useState("");
   const [startingProject, setStartingProject] = useState(false);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
-  const [suiteCategory, setSuiteCategory] = useState<SuiteCategory>("smoke");
+  const [suiteCategory, setSuiteCategory] = useState<"all" | SuiteCategory>("all");
   const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
   const [environmentId, setEnvironmentId] = useState("");
   const [suiteDialogId, setSuiteDialogId] = useState<string | null>(null);
@@ -41,7 +41,11 @@ export function ProjectOverviewPage() {
     setStartingProject(true);
     setError("");
     try {
-      const started = await api.startProjectRun(projectId, suiteCategory, environmentId);
+      const started = await api.startProjectRun(
+        projectId,
+        suiteCategory === "all" ? undefined : suiteCategory,
+        environmentId
+      );
       setProjectDialogOpen(false);
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
@@ -321,12 +325,13 @@ export function ProjectOverviewPage() {
         }
       >
         <label className="block text-sm font-medium text-slate-700">
-          Suite Category
+          Category
           <select
             className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
             value={suiteCategory}
-            onChange={(event) => setSuiteCategory(event.target.value as SuiteCategory)}
+            onChange={(event) => setSuiteCategory(event.target.value as "all" | SuiteCategory)}
           >
+            <option value="all">All Categories</option>
             {SUITE_CATEGORIES.map((category) => (
               <option key={category} value={category}>
                 {SUITE_CATEGORY_LABELS[category]}

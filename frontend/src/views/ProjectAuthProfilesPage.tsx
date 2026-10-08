@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useState } from "react";
 import { AlertTriangle, Mic, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Link, useParams } from "@/lib/navigation";
@@ -250,7 +251,7 @@ export function ProjectAuthProfilesPage() {
       <div className="mt-6 rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
         <h2 className="font-semibold">AUTH PROFILES</h2>
         {loading ? (
-          <p className="mt-4 text-sm text-slate-500">Loading auth profiles...</p>
+          <LoadingSpinner label="Loading auth profiles…" compact className="mt-4" />
         ) : profiles.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500">No auth profiles configured.</p>
         ) : (

@@ -4,52 +4,29 @@ import { useState } from "react";
 import { Download } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { testRunStepUrl, type RunScreenshot } from "@/lib/api";
+import { downloadRunReport, splitFailure, type RunReportInput } from "@/lib/runReport";
+import { friendlyStepLabel } from "@/lib/stepLabel";
 
-export function friendlyStepLabel(raw: string): string {
-  const line = raw.replace(/^await\s+/, "").replace(/;$/, "").trim();
-  if (!line || /^final screenshot$/i.test(line)) return "Final screenshot";
-
-  const opened = line.match(/page\.goto\(\s*["']([^"']+)["']/);
-  if (opened) {
-    try {
-      const url = new URL(opened[1]);
-      const path = url.pathname === "/" ? "" : url.pathname;
-      return `Open ${url.host}${path}`;
-    } catch {
-      return `Open ${opened[1]}`;
-    }
+function StepPreview({ src, alt, large = false }: { src: string; alt: string; large?: boolean }) {
+  const [broken, setBroken] = useState(false);
+  if (!src || broken) {
+    return (
+      <div
+        className={`grid w-full place-items-center rounded-lg bg-slate-50 px-3 text-center text-sm text-slate-400 ${large ? "h-64" : "h-44 text-xs"}`}
+      >
+        Screenshot unavailable
+      </div>
+    );
   }
-
-  const role = line.match(/getByRole\(\s*["']([^"']+)["']\s*,\s*\{\s*name:\s*["']([^"']+)["']/);
-  const byText = line.match(/getByText\(\s*["']([^"']+)["']/);
-  const byLabel = line.match(/getByLabel\(\s*["']([^"']+)["']/);
-  const byPlaceholder = line.match(/getByPlaceholder\(\s*["']([^"']+)["']/);
-  const byLocator = line.match(/locator\(\s*["']([^"']+)["']/);
-  const target = role
-    ? `the ${role[2]} ${role[1]}`
-    : byText?.[1] || byLabel?.[1] || byPlaceholder?.[1] || byLocator?.[1];
-
-  if (/\.click\(/.test(line) && target) return `Click ${target}`;
-  if (/\.dblclick\(/.test(line) && target) return `Double-click ${target}`;
-  if (/\.hover\(/.test(line) && target) return `Hover over ${target}`;
-  if (/\.check\(/.test(line) && target) return `Check ${target}`;
-  if (/\.uncheck\(/.test(line) && target) return `Uncheck ${target}`;
-  if (/\.fill\(/.test(line)) {
-    const value = line.match(/\.fill\(\s*["']([^"']*)["']/);
-    if (target && value) return `Enter "${value[1]}" in ${target}`;
-    if (target) return `Type into ${target}`;
-  }
-  if (/\.press\(/.test(line)) {
-    const key = line.match(/\.press\(\s*["']([^"']+)["']/);
-    return key && target ? `Press ${key[1]} in ${target}` : key ? `Press ${key[1]}` : "Press a key";
-  }
-  if (/\.selectOption\(/.test(line) && target) return `Choose an option in ${target}`;
-  if (/toHaveTitle\(/.test(line)) {
-    const title = line.match(/toHaveTitle\(\s*["']([^"']+)["']/);
-    return title ? `Check the page title is "${title[1]}"` : "Check the page title";
-  }
-  if (line.length <= 90 && !/page\.|getBy|locator\(/.test(line)) return line;
-  return "Complete the next action";
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setBroken(true)}
+      className={large ? "mx-auto h-auto w-full object-contain" : "h-44 w-full object-contain"}
+    />
+  );
 }
 
 function screenshotFileName(index: number, label: string): string {
@@ -62,25 +39,10 @@ function screenshotFileName(index: number, label: string): string {
   return slug ? `step-${step}-${slug}.png` : `step-${step}.png`;
 }
 
-/** Keep a normal 16:9 screen. Older captures are full-page and very tall. */
-async function screenShotBlob(blob: Blob): Promise<Blob> {
-  const bitmap = await createImageBitmap(blob);
-  const screenHeight = Math.round(bitmap.width * 9 / 16);
-  if (bitmap.height <= screenHeight + 2) return blob;
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = screenHeight;
-  const context = canvas.getContext("2d");
-  if (!context) return blob;
-  context.drawImage(bitmap, 0, 0, bitmap.width, screenHeight, 0, 0, bitmap.width, screenHeight);
-  const cropped = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  return cropped ?? blob;
-}
-
 async function downloadScreenshot(url: string, filename: string): Promise<void> {
   const response = await fetch(url);
   if (!response.ok) throw new Error("Could not download this screenshot");
-  const blob = await screenShotBlob(await response.blob());
+  const blob = await response.blob();
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = objectUrl;
@@ -91,18 +53,35 @@ async function downloadScreenshot(url: string, filename: string): Promise<void> 
   URL.revokeObjectURL(objectUrl);
 }
 
-export function StepScreenshots({ runId, steps }: { runId: string; steps: RunScreenshot[] }) {
+export function StepScreenshots({
+  runId,
+  steps,
+  status,
+  errorMessage,
+  report,
+}: {
+  runId: string;
+  steps: RunScreenshot[];
+  status?: string | null;
+  errorMessage?: string | null;
+  report?: Omit<RunReportInput, "steps" | "runId" | "errorMessage" | "status"> | null;
+}) {
   const [selected, setSelected] = useState<number | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState("");
+  const [reportBusy, setReportBusy] = useState(false);
   if (steps.length === 0) return null;
   const current = selected == null ? null : steps[selected];
   const title = current ? friendlyStepLabel(current.label) : "";
+  const markedFailure = steps.some((step) => step.failed);
+  const runLevelFailure =
+    status === "Failed" && !markedFailure && errorMessage?.trim() ? splitFailure(errorMessage) : null;
+  const selectedFailed = status === "Failed" && current?.failed === true;
+  const selectedFailure = selectedFailed ? splitFailure(current?.error?.trim() || "") : null;
 
   async function save(index: number, step: RunScreenshot) {
-    const key = step.file;
     setDownloadError("");
-    setDownloading(key);
+    setDownloading(step.file);
     try {
       await downloadScreenshot(testRunStepUrl(runId, step.file), screenshotFileName(index, step.label));
     } catch (err) {
@@ -112,25 +91,84 @@ export function StepScreenshots({ runId, steps }: { runId: string; steps: RunScr
     }
   }
 
+  async function saveReport() {
+    if (!report) return;
+    setDownloadError("");
+    setReportBusy(true);
+    try {
+      await downloadRunReport({
+        ...report,
+        runId,
+        status: status || "Completed",
+        errorMessage,
+        steps,
+      });
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Could not download this report");
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
   return (
     <>
-      <ol className="mt-4 space-y-2">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-slate-500">{steps.length} screenshot{steps.length === 1 ? "" : "s"}</p>
+        {report ? (
+          <button
+            type="button"
+            onClick={saveReport}
+            disabled={reportBusy}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            <Download size={15} />
+            {reportBusy ? "Preparing report..." : "Download Report"}
+          </button>
+        ) : null}
+      </div>
+      {runLevelFailure ? (
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p className="font-medium">Failure reason</p>
+          <p className="mt-1 whitespace-pre-wrap">{runLevelFailure.summary}</p>
+        </div>
+      ) : null}
+      <ol className="mt-3 grid grid-cols-1 items-start gap-4 md:grid-cols-2">
         {steps.map((step, index) => {
           const name = friendlyStepLabel(step.label);
-          const src = testRunStepUrl(runId, step.file);
+          const src = step.file ? testRunStepUrl(runId, step.file) : "";
+          const failed = status === "Failed" && step.failed === true;
+          const failure = failed ? splitFailure(step.error?.trim() || "Step failed, but no failure details were provided.") : null;
+          const alt = `Screenshot after Step ${index + 1}: ${name}`;
           return (
-            <li key={step.file}>
+            <li
+              key={`${step.file || "missing"}-${index}`}
+              className={`min-w-0 rounded-xl border bg-white p-3 ${failed ? "border-red-200" : "border-slate-200"}`}
+            >
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-900">Step {index + 1}</p>
+                {failed ? <span className="text-xs font-semibold text-red-700">Failed</span> : null}
+              </div>
+              <p className="mb-2 line-clamp-2 text-sm text-slate-600">{name}</p>
               <button
                 type="button"
                 onClick={() => setSelected(index)}
-                className="flex w-full items-center gap-3 rounded-lg border border-slate-200 p-2 text-left hover:bg-slate-50"
+                className="block w-full cursor-pointer overflow-hidden rounded-lg bg-slate-50 ring-slate-200 hover:opacity-90 hover:ring-2"
+                aria-label={`Open screenshot for step ${index + 1}: ${name}`}
               >
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-indigo-50 text-xs font-semibold text-indigo-700">
-                  {index + 1}
-                </span>
-                <span className="min-w-0 flex-1 text-sm font-medium text-slate-800">{name}</span>
-                <img src={src} alt="" className="h-12 w-20 shrink-0 rounded object-cover object-top" />
+                <StepPreview src={src} alt={alt} />
               </button>
+              {failed && failure ? (
+                <div className="mt-2 rounded-lg bg-red-50 p-2 text-sm text-red-800">
+                  <p className="font-medium">Failure reason</p>
+                  <p className="mt-1">{failure.summary}</p>
+                  {failure.details ? (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs font-medium">Technical details</summary>
+                      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs">{failure.details}</pre>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
             </li>
           );
         })}
@@ -139,9 +177,10 @@ export function StepScreenshots({ runId, steps }: { runId: string; steps: RunScr
       <Modal
         open={current != null}
         onClose={() => setSelected(null)}
-        title={selected == null ? "" : `Step ${selected + 1}`}
-        description={title}
-        panelClassName="max-w-4xl"
+        title={selected == null ? "" : `Step ${selected + 1} — ${title}`}
+        panelClassName="max-h-[90vh] max-w-5xl overflow-hidden"
+        closeOnBackdrop
+        closeOnEscape
         footer={
           current && selected != null ? (
             <button
@@ -156,13 +195,20 @@ export function StepScreenshots({ runId, steps }: { runId: string; steps: RunScr
           ) : null
         }
       >
-        {current ? (
-          <div className="aspect-video w-full overflow-hidden rounded-lg bg-slate-100">
-            <img
-              src={testRunStepUrl(runId, current.file)}
-              alt={title}
-              className="h-full w-full object-cover object-top"
+        {current && selected != null ? (
+          <div className="max-h-[70vh] overflow-auto">
+            <StepPreview
+              key={current.file}
+              src={current.file ? testRunStepUrl(runId, current.file) : ""}
+              alt={`Screenshot after Step ${selected + 1}: ${title}`}
+              large
             />
+            {selectedFailed && selectedFailure ? (
+              <p className="mt-3 text-sm text-red-800">
+                <span className="font-medium">Failed. </span>
+                {selectedFailure.summary}
+              </p>
+            ) : null}
           </div>
         ) : null}
       </Modal>

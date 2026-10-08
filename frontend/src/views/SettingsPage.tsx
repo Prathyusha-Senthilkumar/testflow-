@@ -103,11 +103,12 @@ export function SettingsPage() {
   if (!account) return null;
 
   return (
-    <div className="p-6 lg:p-8">
-      <h1 className="text-3xl font-bold">Settings</h1>
-      <p className="mt-1 text-sm text-slate-500">Your TestFlow account.</p>
+    <div className="mx-auto w-full max-w-2xl px-6 py-10">
+      <h1 className="text-3xl font-bold text-slate-900">Settings</h1>
+      <p className="mt-2 text-sm text-slate-500">Your TestFlow account.</p>
 
-      <form onSubmit={saveProfile} noValidate className="mt-6 max-w-xl rounded-xl bg-white p-6 shadow-sm">
+      <div className="mt-8 space-y-4">
+      <form onSubmit={saveProfile} noValidate className="rounded-xl bg-white p-6 shadow-sm">
         <h2 className="font-semibold">Profile</h2>
         <div className="mt-4 space-y-4">
           <Input label="Name" value={name} onChange={(event) => setName(event.target.value)} />
@@ -120,7 +121,7 @@ export function SettingsPage() {
         </Button>
       </form>
 
-      <form onSubmit={savePassword} noValidate className="mt-4 max-w-xl rounded-xl bg-white p-6 shadow-sm">
+      <form onSubmit={savePassword} noValidate className="rounded-xl bg-white p-6 shadow-sm">
         <h2 className="font-semibold">Password</h2>
         <p className="mt-1 text-sm text-slate-500">Choose a new password for this account.</p>
         <div className="mt-4 space-y-4">
@@ -146,12 +147,13 @@ export function SettingsPage() {
         </Button>
       </form>
 
-      <div className="mt-4 max-w-xl rounded-xl bg-white p-6 shadow-sm">
+      <div className="rounded-xl bg-white p-6 shadow-sm">
         <h2 className="font-semibold">Sign out</h2>
         <p className="mt-1 text-sm text-slate-500">End this session on this browser.</p>
         <Button type="button" variant="secondary" className="mt-4" onClick={signOut}>
           Sign out
         </Button>
+      </div>
       </div>
     </div>
   );
