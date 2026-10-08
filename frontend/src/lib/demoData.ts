@@ -33,12 +33,6 @@ export const recentRuns = [
   { id:"100", title:"International Students Flow", subtitle:"Admissions", status:"Passed" as DemoStatus, runBy:"Arun", duration:"2m 10s", executed:"Yesterday" },
 ];
 
-export const suggestedSuites = [
-  { id:"sg1", name:"Login & Authentication", description:"Validates session establishment, authentication tokens, password recovery pipelines, and brute-force lockouts.", cases:["TC-001","TC-002","TC-003"] },
-  { id:"sg2", name:"Smoke Testing", description:"High-priority healthcheck validations intended for staging deployment gates and pre-commit checks.", cases:["TC-001","TC-004"] },
-  { id:"sg3", name:"Admissions", description:"Tracks multi-step student admission application portals, document upload verifications, and status callbacks.", cases:["TC-006"] },
-];
-
 export const dashboardProjects = [
   { name:"SRM Website Testing", suites:4, tests:124, passRate:95, lastRun:"10 mins ago", runBy:"Priya", id:"demo-project" },
   { name:"Student Portal", suites:2, tests:68, passRate:100, lastRun:"2 hours ago", runBy:"Sarah", id:"student-portal" },

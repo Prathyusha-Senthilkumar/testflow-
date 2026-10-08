@@ -57,8 +57,7 @@ export function crumbsForPath(pathname: string, search?: URLSearchParams | null)
       break;
     case "suites":
       crumbs.push({ label: "Suites", to: `${base}/suites` });
-      if (child === "review") crumbs.push({ label: "Review suggestions", to: `${base}/suites/review` });
-      else if (child) crumbs.push({ entity: { kind: "suite", id: child, projectId: id }, to: `${base}/suites/${child}` });
+      if (child) crumbs.push({ entity: { kind: "suite", id: child, projectId: id }, to: `${base}/suites/${child}` });
       break;
     case "environments":
       crumbs.push({ label: "Environments", to: `${base}/environments` });

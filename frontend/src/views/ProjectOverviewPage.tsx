@@ -9,7 +9,6 @@ import {
   Layers,
   Pencil,
   Plus,
-  Sparkles,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -364,21 +363,6 @@ export function ProjectOverviewPage() {
         <Stat label="Passed" icon={CheckCircle2} value={project.passed} hint={`${project.passRate}% pass rate`} />
         <Stat label="Failed" icon={XCircle} value={project.failed} tone={project.failed > 0 ? "destructive" : "default"} />
       </StatGroup>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-info-soft text-brand-accent">
-            <Sparkles className="size-4" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <p className="text-[13px] font-medium text-foreground">Suite suggestions are ready for review</p>
-            <p className="text-xs text-muted-foreground">AI-detected coverage gaps can be reviewed before running tests.</p>
-          </div>
-        </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link to={`/projects/${project.id}/suites/review`}>Review suggestions</Link>
-        </Button>
-      </div>
 
       <ScheduledBatchList
         items={scheduled.items}
