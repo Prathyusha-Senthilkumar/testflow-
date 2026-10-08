@@ -23,6 +23,7 @@ version with the code.
 | [015](ADR-015-network-capability.md) | Network capability | Proposed |
 | [016](ADR-016-accessibility-capability.md) | Accessibility capability | Proposed |
 | [017](ADR-017-webhook-architecture.md) | Outbound webhook architecture | Proposed |
+| [018](ADR-018-auth-profile-sign-in.md) | How Auth Profiles sign in to the application under test | Proposed |
 
 See `../capability-roadmap.md` for every capability deferred out of the MVP and what each costs.
 
