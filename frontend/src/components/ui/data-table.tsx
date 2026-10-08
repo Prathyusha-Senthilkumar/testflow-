@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { controlClasses } from "@/components/ui/input";
+import { LIST_PAGE_SIZE, ListPagination, usePagedItems } from "@/components/ui/list-pagination";
 import { AttestLoader } from "@/components/brand/attest-loader";
 
 declare module "@tanstack/react-table" {
@@ -96,6 +97,8 @@ export type DataTableProps<TData extends RowData> = {
   rowClassName?: (row: TData) => string | undefined;
   /** Minimum table width before horizontal scroll kicks in. */
   minWidth?: number;
+  /** Rows per page. Lists that fit on one page hide the pager. Set to 0 to show every row. */
+  pageSize?: number;
   /**
    * Offset (px) for the sticky header when the table scrolls with the page,
    * e.g. the height of a sticky Toolbar above it. Ignored when
@@ -132,6 +135,7 @@ export function DataTable<TData extends RowData>({
   rowClassName,
   minWidth,
   stickyTop = 0,
+  pageSize = LIST_PAGE_SIZE,
 }: DataTableProps<TData>) {
   const [internalFilter, setInternalFilter] = React.useState("");
   const [sorting, setSorting] = React.useState<SortingState>(initialSorting);
@@ -159,6 +163,8 @@ export function DataTable<TData extends RowData>({
   });
 
   const rows = table.getRowModel().rows;
+  const paging = usePagedItems(rows, `${filter}|${sorting.map((item) => `${item.id}:${item.desc}`).join(",")}`, pageSize > 0 ? pageSize : Math.max(rows.length, 1));
+  const pageRows = paging.items;
   const headerGroups = table.getHeaderGroups();
   const columnCount = headerGroups[0]?.headers.length ?? columns.length;
   const showToolbar = searchable || toolbar;
@@ -252,7 +258,7 @@ export function DataTable<TData extends RowData>({
                   ))}
                 </TableRow>
               ))
-            ) : rows.length === 0 ? (
+            ) : pageRows.length === 0 ? (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={columnCount} className="h-auto whitespace-normal p-0">
                   {data.length > 0 && filter
@@ -263,7 +269,7 @@ export function DataTable<TData extends RowData>({
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((row) => {
+              pageRows.map((row) => {
                 const original = row.original;
                 const interactive = Boolean(onRowClick);
                 return (
@@ -311,6 +317,16 @@ export function DataTable<TData extends RowData>({
           </TableBody>
         </Table>
       </div>
+      {loading && data.length === 0 ? null : (
+        <ListPagination
+          page={paging.page}
+          pageCount={paging.pageCount}
+          total={paging.total}
+          pageSize={paging.pageSize}
+          onPageChange={paging.setPage}
+          className="px-1"
+        />
+      )}
     </div>
   );
 }

@@ -126,6 +126,7 @@ export function RecentRunsTable({ runs, projectNames, now, loading = false, onOp
       rowClassName={(row) => (["queued", "running"].includes(row.status.toLowerCase()) ? "bg-state-active" : undefined)}
       empty={<EmptyState icon={History} size="sm" title="No runs in this range" description="Runs appear here as soon as a test starts." />}
       containerClassName="overflow-x-auto"
+      pageSize={15}
     />
     </div>
   );

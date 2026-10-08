@@ -18,6 +18,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import { Toolbar } from "@/components/ui/toolbar";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PageContainer, PageHeader } from "@/components/layout/page-header";
+import { ListPagination, usePagedItems } from "@/components/ui/list-pagination";
 import { usePublishEntityName } from "@/components/layout/shell-context";
 
 const emptyForm: AuthProfileInput = { name: "", loginUrl: "", username: "", password: "" };
@@ -125,6 +126,7 @@ export function ProjectAuthProfilesPage() {
       return [profile.name, profile.loginUrl, profile.username].some((field) => field?.toLowerCase().includes(needle));
     });
   }, [profiles, search, sessionFilter]);
+  const pagedProfiles = usePagedItems(visibleProfiles, `${search}|${sessionFilter}`);
   function clearFilters() {
     setSearch("");
     setSessionFilter("");
@@ -360,8 +362,9 @@ export function ProjectAuthProfilesPage() {
               }
             />
           ) : (
+            <>
             <ul className="divide-y divide-border-subtle">
-              {visibleProfiles.map((profile) => {
+              {pagedProfiles.items.map((profile) => {
                 const badge = sessionBadge(profile.sessionStatus);
                 return (
                   <li
@@ -421,6 +424,15 @@ export function ProjectAuthProfilesPage() {
                 );
               })}
             </ul>
+            <ListPagination
+              page={pagedProfiles.page}
+              pageCount={pagedProfiles.pageCount}
+              total={pagedProfiles.total}
+              pageSize={pagedProfiles.pageSize}
+              onPageChange={pagedProfiles.setPage}
+              className="px-4 pb-3"
+            />
+            </>
           )}
         </div>
       </section>

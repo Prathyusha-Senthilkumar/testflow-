@@ -16,6 +16,7 @@ import { Alert } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PageContainer, PageHeader } from "@/components/layout/page-header";
+import { ListPagination, usePagedItems } from "@/components/ui/list-pagination";
 import { ProjectFormModal } from "@/components/projects/ProjectFormModal";
 
 function passRateVariant(project: ProjectSummary) {
@@ -114,6 +115,7 @@ export function ProjectsPage() {
     () => sortProjects(projects.filter((project) => matchesProject(project, search)), sort),
     [projects, search, sort]
   );
+  const paged = usePagedItems(visible, `${search}|${sort}`);
 
   useEffect(() => {
     api.projects().then(setProjects).catch((err: Error) => setError(err.message)).finally(() => setLoading(false));
@@ -212,11 +214,20 @@ export function ProjectsPage() {
               }
             />
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              {visible.map((project) => (
-                <ProjectTile key={project.id} project={project} />
-              ))}
-            </div>
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {paged.items.map((project) => (
+                  <ProjectTile key={project.id} project={project} />
+                ))}
+              </div>
+              <ListPagination
+                page={paged.page}
+                pageCount={paged.pageCount}
+                total={paged.total}
+                pageSize={paged.pageSize}
+                onPageChange={paged.setPage}
+              />
+            </>
           )}
         </>
       )}

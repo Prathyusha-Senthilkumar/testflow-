@@ -7,6 +7,7 @@ import { SUITE_CATEGORY_LABELS, type SuiteCategory } from "@/lib/suiteCategory";
 import { Link } from "@/lib/navigation";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/common/EmptyState";
+import { ListPagination, usePagedItems } from "@/components/ui/list-pagination";
 
 export type ScheduledRunRow =
   | { kind: "case"; item: ScheduledExecution }
@@ -56,6 +57,7 @@ export function ScheduledRuns({ cases, batches, onCancel }: ScheduledRunsProps) 
     ...cases.map((item) => ({ kind: "case" as const, item })),
     ...batches.map((item) => ({ kind: "batch" as const, item })),
   ].sort((a, b) => when(a) - when(b));
+  const paged = usePagedItems(rows, String(rows.length));
 
   if (rows.length === 0) {
     return (
@@ -68,8 +70,9 @@ export function ScheduledRuns({ cases, batches, onCancel }: ScheduledRunsProps) 
   }
 
   return (
+    <div>
     <ul className="divide-y divide-border-subtle overflow-hidden rounded-md border border-border bg-surface">
-      {rows.map((row) => {
+      {paged.items.map((row) => {
         const { icon: Icon, type, name, href } = describe(row);
         const key = row.kind === "case" ? `case-${row.item.jobId}` : `batch-${row.item.id}`;
         const environment = row.kind === "batch" ? row.item.environmentName : null;
@@ -108,5 +111,13 @@ export function ScheduledRuns({ cases, batches, onCancel }: ScheduledRunsProps) 
         );
       })}
     </ul>
+    <ListPagination
+      page={paged.page}
+      pageCount={paged.pageCount}
+      total={paged.total}
+      pageSize={paged.pageSize}
+      onPageChange={paged.setPage}
+    />
+    </div>
   );
 }
