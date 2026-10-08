@@ -76,7 +76,7 @@ export function GlobalHeader({ onToggleSidebar, onOpenMobileNav, sidebarCollapse
           <Menu />
         </Button>
         <Link to="/dashboard" aria-label="Attest home" className="shrink-0 md:hidden">
-          <AttestMark className="size-6" />
+          <AttestMark variant="tile" className="size-7" />
         </Link>
         <Tooltip>
           <TooltipTrigger asChild>

@@ -58,7 +58,7 @@ export function SidebarBrand({ collapsed }: { collapsed: boolean }) {
   return (
     <div className={cn("flex h-14 items-center bg-sidebar", collapsed ? "justify-center" : "px-4")}>
       <Link to="/dashboard" aria-label="Attest home" className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        {collapsed ? <AttestMark className="size-6" /> : <AttestLogo markClassName="size-6" />}
+        {collapsed ? <AttestMark variant="tile" className="size-7" /> : <AttestLogo variant="tile" markClassName="size-7" />}
       </Link>
     </div>
   );
