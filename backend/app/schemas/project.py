@@ -43,6 +43,8 @@ class CreateProjectDto(BaseModel):
     name: str
     baseUrl: str = Field(..., alias="baseUrl")
     description: Optional[str] = None
+    # First environment, on the project's base URL. Blank means "Default".
+    environmentName: Optional[str] = Field(None, alias="environmentName", max_length=100)
 
 
 class UpdateProjectDto(BaseModel):

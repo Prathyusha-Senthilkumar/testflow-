@@ -232,6 +232,8 @@ export type ProjectInput = {
   name: string;
   baseUrl: string;
   description?: string;
+  /** Create only: name of the first environment (on the base URL). Blank means "Default". */
+  environmentName?: string;
 };
 
 export type ExecutionState = "queued" | "running" | "completed" | "failed" | "scheduled" | "cancelled";

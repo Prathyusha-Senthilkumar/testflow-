@@ -43,14 +43,25 @@ def _defaults(envs):
     return [env["id"] for env in envs if env["isDefault"]]
 
 
-def test_new_project_has_no_environment_and_the_first_added_is_default():
+def test_new_project_gets_its_first_environment_as_default():
     project_id = _project()
-    assert _envs(project_id) == []
-    qa = _create_env(project_id, "QA")
-    assert qa["isDefault"] is True
+    envs = _envs(project_id)
+    assert [(env["name"], env["baseUrl"], env["isDefault"]) for env in envs] == [
+        ("Default", "https://example.com", True)
+    ]
     staging = _create_env(project_id, "Staging")
     assert staging["isDefault"] is False
-    assert _defaults(_envs(project_id)) == [qa["id"]]
+    assert _defaults(_envs(project_id)) == [envs[0]["id"]]
+
+
+def test_new_project_environment_name_can_be_chosen():
+    res = client.post(
+        "/api/projects",
+        json={"name": "Named Env", "baseUrl": "https://example.com", "environmentName": "  QA  "},
+    )
+    assert res.status_code == 200, res.text
+    envs = _envs(res.json()["id"])
+    assert [(env["name"], env["isDefault"]) for env in envs] == [("QA", True)]
 
 
 def test_set_default_switches_and_returns_the_list():
@@ -129,9 +140,9 @@ def test_without_migration_reads_work_and_setting_is_a_clear_409():
 
 def test_any_environment_can_be_deleted_and_nothing_is_recreated():
     project_id = _project()
-    qa = _create_env(project_id, "QA")
+    first = _envs(project_id)[0]
     staging = _create_env(project_id, "Staging")
-    assert client.delete(f"/api/projects/{project_id}/environments/{qa['id']}").status_code == 204
+    assert client.delete(f"/api/projects/{project_id}/environments/{first['id']}").status_code == 204
     envs = _envs(project_id)
     assert [env["id"] for env in envs] == [staging["id"]]
     assert _defaults(envs) == [staging["id"]]

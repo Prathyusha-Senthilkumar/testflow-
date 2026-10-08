@@ -29,8 +29,17 @@ class ProjectsService:
 
     def create(self, input_dto: CreateProjectDto) -> ProjectDetail:
         normalized = self._validate_and_normalize(input_dto)
-        # No environment is created here; the first one the user adds becomes the default.
-        return self.repository.create(normalized)
+        project = self.repository.create(normalized)
+        from app.schemas.environment import DEFAULT_ENVIRONMENT_NAME, CreateEnvironmentDto
+        from app.services.environments_service import EnvironmentsService
+
+        # The project's first environment uses its base URL and becomes the default.
+        # It is an ordinary environment: it can be renamed or deleted later.
+        environment_name = (input_dto.environmentName or "").strip() or DEFAULT_ENVIRONMENT_NAME
+        EnvironmentsService(environment_repository, self.repository).create(
+            project.id, CreateEnvironmentDto(name=environment_name, baseUrl=project.baseUrl)
+        )
+        return project
 
     def delete(self, id: str) -> None:
         self.repository.delete(id)
