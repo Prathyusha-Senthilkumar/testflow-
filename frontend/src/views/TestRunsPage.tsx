@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScheduledRuns, type ScheduledRunRow } from "@/components/runs/ScheduledRuns";
 import { useScheduledBatches } from "@/hooks/useScheduledBatches";
 import { formatInTimeZone } from "@/lib/scheduleTime";
-import { suiteCategoryLabel } from "@/lib/suiteCategory";
+import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS, suiteCategoryLabel } from "@/lib/suiteCategory";
 import { pollWhileVisible } from "@/hooks/useExecutionPolling";
 import { PageContainer, PageHeader } from "@/components/layout/page-header";
 import { DataTable, createDataTableColumns, type DataTableColumn } from "@/components/ui/data-table";
@@ -44,6 +44,37 @@ const TYPE_OPTIONS = [
   { value: "suite", label: "Suite" },
   { value: "project", label: "Project" },
 ];
+
+const STATUS_OPTIONS = [
+  { value: "all", label: "All statuses" },
+  { value: "Passed", label: "Passed" },
+  { value: "Failed", label: "Failed" },
+  { value: "Running", label: "Running" },
+  { value: "Queued", label: "Queued" },
+  { value: "Completed", label: "Completed" },
+  { value: "Cancelled", label: "Cancelled" },
+  { value: "Skipped", label: "Skipped" },
+];
+
+const DATE_OPTIONS = [
+  { value: "all", label: "All dates" },
+  { value: "today", label: "Today" },
+  { value: "7", label: "Last 7 days" },
+  { value: "30", label: "Last 30 days" },
+] as const;
+
+type DatePreset = (typeof DATE_OPTIONS)[number]["value"];
+
+function matchesDate(value: string | null | undefined, preset: DatePreset): boolean {
+  if (preset === "all") return true;
+  if (!value) return false;
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return false;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  if (preset !== "today") start.setDate(start.getDate() - (preset === "7" ? 6 : 29));
+  return time >= start.getTime();
+}
 
 function isLive(run: GroupedRun): boolean {
   return run.status === "Queued" || run.status === "Running";
@@ -281,6 +312,9 @@ export function TestRunsPage() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState<DatePreset>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -309,12 +343,15 @@ export function TestRunsPage() {
     const needle = query.trim().toLowerCase();
     return runs.filter((run) => {
       if (typeFilter !== "all" && run.runType !== typeFilter) return false;
+      if (statusFilter !== "all" && run.status !== statusFilter) return false;
+      if (categoryFilter !== "all" && run.suiteCategory !== categoryFilter) return false;
+      if (!matchesDate(run.startedAt, dateFilter)) return false;
       if (!needle) return true;
       return [TYPE_LABELS[run.runType], run.title, run.code, run.status, summary(run)]
         .filter(Boolean)
         .some((field) => String(field).toLowerCase().includes(needle));
     });
-  }, [runs, query, typeFilter]);
+  }, [runs, query, typeFilter, statusFilter, categoryFilter, dateFilter]);
 
   function openRun(run: GroupedRun) {
     if (run.runType === "individual") {
@@ -324,7 +361,16 @@ export function TestRunsPage() {
     navigate(`/runs/batches/${run.id}`);
   }
 
-  const filtered = query.trim() !== "" || typeFilter !== "all";
+  const filtered =
+    query.trim() !== "" || typeFilter !== "all" || statusFilter !== "all" || categoryFilter !== "all" || dateFilter !== "all";
+
+  function clearFilters() {
+    setQuery("");
+    setTypeFilter("all");
+    setStatusFilter("all");
+    setCategoryFilter("all");
+    setDateFilter("all");
+  }
 
   return (
     <PageContainer>
@@ -363,7 +409,29 @@ export function TestRunsPage() {
               bindShortcut
             />
           }
-          filters={<Select aria-label="Run type" value={typeFilter} onChange={setTypeFilter} options={TYPE_OPTIONS} />}
+          filters={
+            <>
+              <Select aria-label="Status" size="sm" value={statusFilter} onChange={setStatusFilter} options={STATUS_OPTIONS} />
+              <Select
+                aria-label="Category"
+                size="sm"
+                value={categoryFilter}
+                onChange={setCategoryFilter}
+                options={[
+                  { value: "all", label: "All categories" },
+                  ...SUITE_CATEGORIES.map((category) => ({ value: category, label: SUITE_CATEGORY_LABELS[category] })),
+                ]}
+              />
+              <Select
+                aria-label="Date"
+                size="sm"
+                value={dateFilter}
+                onChange={(value) => setDateFilter(value as DatePreset)}
+                options={DATE_OPTIONS.map(({ value, label }) => ({ value, label }))}
+              />
+              <Select aria-label="Run type" size="sm" value={typeFilter} onChange={setTypeFilter} options={TYPE_OPTIONS} />
+            </>
+          }
           actions={
             !loading && runs.length > 0 ? (
               <p className="text-xs text-muted-foreground tabular-nums">
@@ -399,10 +467,7 @@ export function TestRunsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        setQuery("");
-                        setTypeFilter("all");
-                      }}
+                      onClick={clearFilters}
                     >
                       Clear filters
                     </Button>

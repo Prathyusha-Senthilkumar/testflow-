@@ -20,15 +20,34 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { PageContainer, PageHeader } from "@/components/layout/page-header";
 import { usePublishEntityName } from "@/components/layout/shell-context";
 import { cn } from "@/lib/utils";
-import {
-  api,
-  TEST_CASE_CATEGORIES,
-  type TestCaseSummary,
-  type TestSuiteSummary,
-} from "@/lib/api";
+import { api, type TestCaseSummary, type TestSuiteSummary } from "@/lib/api";
+import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS } from "@/lib/suiteCategory";
 
 const caseColumns = createDataTableColumns<TestCaseSummary>();
 const STATUS_OPTIONS = ["Passed", "Failed", "Running", "Queued", "Untested"] as const;
+
+const DATE_OPTIONS = [
+  { value: "all", label: "All dates" },
+  { value: "today", label: "Today" },
+  { value: "7", label: "Last 7 days" },
+  { value: "30", label: "Last 30 days" },
+  { value: "never", label: "Not run yet" },
+] as const;
+
+type DatePreset = (typeof DATE_OPTIONS)[number]["value"];
+
+function matchesRunDate(run: { startedAt?: string | null; completedAt?: string | null } | undefined, preset: DatePreset): boolean {
+  if (preset === "all") return true;
+  const stamp = run?.completedAt || run?.startedAt;
+  if (preset === "never") return !stamp;
+  if (!stamp) return false;
+  const time = new Date(stamp).getTime();
+  if (Number.isNaN(time)) return false;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  if (preset !== "today") start.setDate(start.getDate() - (preset === "7" ? 6 : 29));
+  return time >= start.getTime();
+}
 
 export function TestCasesPage() {
   const { id: projectId = "" } = useParams();
@@ -42,6 +61,7 @@ export function TestCasesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [suiteFilter, setSuiteFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState<DatePreset>("all");
   const [suites, setSuites] = useState<TestSuiteSummary[]>([]);
   const [runs, setRuns] = useState<CaseRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,12 +99,13 @@ export function TestCasesPage() {
       const status = caseStatus(run);
       if (statusFilter !== "all" && status !== statusFilter) return false;
       if (suiteFilter !== "all" && (suite?.id ?? "unassigned") !== suiteFilter) return false;
-      if (typeFilter !== "all" && (testCase.category ?? "Functional") !== typeFilter) return false;
+      if (typeFilter !== "all" && !(testCase.categories ?? []).includes(typeFilter)) return false;
+      if (!matchesRunDate(run, dateFilter)) return false;
       return true;
     });
-  }, [cases, latestRunByCase, q, statusFilter, suiteByCase, suiteFilter, typeFilter]);
+  }, [cases, dateFilter, latestRunByCase, q, statusFilter, suiteByCase, suiteFilter, typeFilter]);
   const all = rows.length > 0 && selected.length === rows.length;
-  const filtersActive = q.trim() !== "" || statusFilter !== "all" || suiteFilter !== "all" || typeFilter !== "all";
+  const filtersActive = q.trim() !== "" || statusFilter !== "all" || suiteFilter !== "all" || typeFilter !== "all" || dateFilter !== "all";
 
   useEffect(() => {
     if (!projectId) return;
@@ -287,11 +308,21 @@ export function TestCasesPage() {
                 ]}
               />
               <Select
-                aria-label="Type"
+                aria-label="Category"
                 size="sm"
                 value={typeFilter}
                 onChange={setTypeFilter}
-                options={[{ value: "all", label: "All types" }, ...TEST_CASE_CATEGORIES.map((category) => ({ value: category, label: category }))]}
+                options={[
+                  { value: "all", label: "All categories" },
+                  ...SUITE_CATEGORIES.map((category) => ({ value: category, label: SUITE_CATEGORY_LABELS[category] })),
+                ]}
+              />
+              <Select
+                aria-label="Date"
+                size="sm"
+                value={dateFilter}
+                onChange={(value) => setDateFilter(value as DatePreset)}
+                options={DATE_OPTIONS.map(({ value, label }) => ({ value, label }))}
               />
             </>
           }
@@ -359,6 +390,7 @@ export function TestCasesPage() {
                         setStatusFilter("all");
                         setSuiteFilter("all");
                         setTypeFilter("all");
+                        setDateFilter("all");
                       }}
                     >
                       Clear filters
