@@ -36,5 +36,13 @@ export default defineConfig([globalIgnores([
     // changes. Moving that into a rewrite of every fetch effect would change
     // when loading and form resets run.
     "react-hooks/set-state-in-effect": "off",
+    // No native browser dialogs: use useConfirm() / toasts instead.
+    "no-alert": "error",
+    "no-restricted-globals": [
+      "error",
+      { name: "confirm", message: "Use useConfirm() from @/components/ui/confirm-dialog." },
+      { name: "alert", message: "Use a toast or an inline Alert." },
+      { name: "prompt", message: "Use an in-app dialog." },
+    ],
   },
 }, ...storybook.configs["flat/recommended"]])

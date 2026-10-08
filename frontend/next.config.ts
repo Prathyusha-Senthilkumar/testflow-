@@ -4,6 +4,8 @@ const internalApiUrl = (process.env.INTERNAL_API_URL || "http://127.0.0.1:8000/a
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Keep the dev badge clear of the sidebar account menu (bottom-left).
+  devIndicators: { position: "bottom-right" },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${internalApiUrl}/:path*` }];
   },

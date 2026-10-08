@@ -1,9 +1,16 @@
 "use client";
 
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import { ArrowLeft } from "lucide-react";
 import { Link, useParams } from "@/lib/navigation";
 import { useExecutionPolling } from "@/hooks/useExecutionPolling";
 import { testCases } from "@/lib/demoData";
+import { DetailLayout, PageContainer, PageHeader } from "@/components/layout/page-header";
+import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function TestResultPage() {
   const { id = "demo-project", runId } = useParams();
@@ -15,95 +22,118 @@ export function TestResultPage() {
 
   if (error) {
     return (
-      <div className="p-6 lg:p-8">
-        <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">{error}</div>
-      </div>
+      <PageContainer width="detail">
+        <Alert variant="error" title="Could not load this execution">
+          {error}
+        </Alert>
+      </PageContainer>
     );
   }
 
   if (!execution) {
     return (
-      <div className="p-6 lg:p-8">
-        <div className="rounded-xl bg-white shadow-sm"><LoadingSpinner label="Loading execution result…" /></div>
-      </div>
+      <PageContainer width="detail">
+        <div className="space-y-2" role="status" aria-busy="true">
+          <span className="sr-only">Loading execution result…</span>
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-7 w-72 max-w-full" />
+        </div>
+        <DetailLayout main={<Skeleton className="h-56 w-full" />} aside={<Skeleton className="h-40 w-full" />} />
+      </PageContainer>
     );
   }
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="rounded-xl bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-center gap-3">
-          <span
-            className={`rounded-lg-full px-3 py-1 text-xs font-semibold text-white ${
-              failed ? "bg-red-600" : "bg-teal-700"
-            }`}
-          >
-            {failed ? "● FAILED" : "✓ PASSED"}
-          </span>
-          <span className="text-xs text-slate-500">State: {execution.state}</span>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
-          <h1 className="text-3xl font-bold">{title}</h1>
-          <Link
-            to={`/projects/${id}/test-cases/${execution.testCaseCode ?? "TC-001"}`}
-            className="rounded-lg-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
-          >
-            ← Back to Test Case
-          </Link>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-3 font-mono text-xs text-slate-600">
-          {result?.configPath && <span className="rounded-lg-lg bg-indigo-50 px-2 py-1">Config: {result.configPath}</span>}
-          {result?.testFileLocation && (
-            <span className="rounded-lg-lg bg-indigo-50 px-2 py-1">Script: {result.testFileLocation}</span>
-          )}
-          {result != null && (
-            <span className="rounded-lg-lg bg-indigo-50 px-2 py-1">pytest exit: {result.pytestReturnCode}</span>
-          )}
-        </div>
-      </div>
+    <PageContainer width="detail">
+      <PageHeader
+        title={title}
+        meta={
+          <>
+            <RunStatusBadge status={failed ? "failed" : "passed"} />
+            <Badge variant="outline">State: {execution.state}</Badge>
+          </>
+        }
+        actions={
+          <Button variant="outline" asChild>
+            <Link to={`/projects/${id}/test-cases/${execution.testCaseCode ?? "TC-001"}`}>
+              <ArrowLeft aria-hidden />
+              Back to test case
+            </Link>
+          </Button>
+        }
+      />
 
-      <div className="mt-5 rounded-xl bg-white p-5 shadow-sm">
-        <h2 className="font-semibold">Execution result</h2>
-        {result ? (
-          <dl className="mt-4 space-y-2 text-sm">
-            <div className="flex gap-2">
-              <dt className="text-slate-500">Runner status</dt>
-              <dd className="font-medium">{result.status}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="text-slate-500">Success</dt>
-              <dd className="font-medium">{result.success ? "Yes" : "No"}</dd>
-            </div>
-            {result.testCaseLocation && (
-              <div className="flex gap-2">
-                <dt className="text-slate-500">Test case file</dt>
-                <dd className="font-mono text-xs">{result.testCaseLocation}</dd>
-              </div>
-            )}
-          </dl>
-        ) : (
-          <p className="mt-3 text-sm text-slate-500">No result payload yet.</p>
-        )}
-
-        {execution.error && (
-          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            <p className="font-semibold">Error</p>
-            <p className="mt-2">{execution.error}</p>
-          </div>
-        )}
-
-        {result?.validationErrors && result.validationErrors.length > 0 && (
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
-            <p className="font-semibold text-amber-900">Validation errors</p>
-            <ul className="mt-2 list-disc pl-5">
-              {result.validationErrors.map((msg) => (
-                <li key={msg}>{msg}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </div>
+      <DetailLayout
+        main={
+          <>
+            {execution.error ? (
+              <Alert variant="error" title="Error">
+                {execution.error}
+              </Alert>
+            ) : null}
+            {result?.validationErrors && result.validationErrors.length > 0 ? (
+              <Alert variant="warning" title="Validation errors">
+                <ul className="list-disc space-y-0.5 pl-4">
+                  {result.validationErrors.map((msg) => (
+                    <li key={msg}>{msg}</li>
+                  ))}
+                </ul>
+              </Alert>
+            ) : null}
+            <Card>
+              <CardHeader>
+                <CardTitle>Execution result</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {result ? (
+                  <dl className="space-y-2.5 text-[13px]">
+                    <div className="flex gap-3">
+                      <dt className="w-32 shrink-0 text-muted-foreground">Runner status</dt>
+                      <dd className="font-medium">{result.status}</dd>
+                    </div>
+                    <div className="flex gap-3">
+                      <dt className="w-32 shrink-0 text-muted-foreground">Success</dt>
+                      <dd className="font-medium">{result.success ? "Yes" : "No"}</dd>
+                    </div>
+                    {result.testCaseLocation ? (
+                      <div className="flex gap-3">
+                        <dt className="w-32 shrink-0 text-muted-foreground">Test case file</dt>
+                        <dd className="min-w-0 font-mono text-xs break-all">{result.testCaseLocation}</dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                ) : (
+                  <p className="text-[13px] text-muted-foreground">No result payload yet.</p>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        }
+        aside={
+          <Card>
+            <CardHeader>
+              <CardTitle>Details for administrators</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="space-y-2.5 font-mono text-xs">
+                <div>
+                  <dt className="font-sans text-[13px] text-muted-foreground">Configuration file</dt>
+                  <dd className="mt-0.5 break-all">{result?.configPath || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="font-sans text-[13px] text-muted-foreground">Script file</dt>
+                  <dd className="mt-0.5 break-all">{result?.testFileLocation || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="font-sans text-[13px] text-muted-foreground">Runner exit code</dt>
+                  <dd className="mt-0.5 tabular-nums">{result != null ? result.pytestReturnCode : "—"}</dd>
+                </div>
+              </dl>
+            </CardContent>
+          </Card>
+        }
+      />
+    </PageContainer>
   );
 }
 

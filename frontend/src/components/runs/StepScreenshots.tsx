@@ -1,18 +1,35 @@
 "use client";
 
-import { useState } from "react";
-import { Download } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { testRunStepUrl, type RunScreenshot } from "@/lib/api";
+import { api, stepScreenshotSrc, type RunScreenshot } from "@/lib/api";
 import { downloadRunReport, splitFailure, type RunReportInput } from "@/lib/runReport";
 import { friendlyStepLabel } from "@/lib/stepLabel";
 
-function StepPreview({ src, alt, large = false }: { src: string; alt: string; large?: boolean }) {
+function StepPreview({
+  src,
+  alt,
+  large = false,
+  onFailed,
+}: {
+  src: string;
+  alt: string;
+  large?: boolean;
+  /** Called when the image fails; return true if a refresh was started (keep waiting instead of showing "unavailable"). */
+  onFailed?: () => boolean;
+}) {
   const [broken, setBroken] = useState(false);
   if (!src || broken) {
     return (
       <div
-        className={`grid w-full place-items-center rounded-lg bg-slate-50 px-3 text-center text-sm text-slate-400 ${large ? "h-64" : "h-44 text-xs"}`}
+        className={cn(
+          "grid w-full place-items-center rounded-md bg-elevated px-3 text-center text-muted-foreground",
+          large ? "h-64 text-[13px]" : "h-44 text-xs"
+        )}
       >
         Screenshot unavailable
       </div>
@@ -23,8 +40,10 @@ function StepPreview({ src, alt, large = false }: { src: string; alt: string; la
       src={src}
       alt={alt}
       loading="lazy"
-      onError={() => setBroken(true)}
-      className={large ? "mx-auto h-auto w-full object-contain" : "h-44 w-full object-contain"}
+      onError={() => {
+        if (!onFailed?.()) setBroken(true);
+      }}
+      className={large ? "mx-auto h-auto w-full object-contain" : "h-44 w-full bg-elevated object-contain"}
     />
   );
 }
@@ -68,24 +87,50 @@ export function StepScreenshots({
 }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
-  const [downloadError, setDownloadError] = useState("");
   const [reportBusy, setReportBusy] = useState(false);
-  if (steps.length === 0) return null;
-  const current = selected == null ? null : steps[selected];
+  // Signed screenshot URLs expire (~15 min, or on backend restart): refetch the list once on an image error.
+  const [freshSteps, setFreshSteps] = useState<RunScreenshot[] | null>(null);
+  const refreshed = useRef(false);
+  const list = freshSteps ?? steps;
+  function refreshExpired(): boolean {
+    if (refreshed.current || !list.some((step) => step.url)) return false;
+    refreshed.current = true;
+    api
+      .runScreenshots(runId)
+      .then(setFreshSteps)
+      .catch(() => setFreshSteps(list.map((step) => ({ ...step }))));
+    return true;
+  }
+  const total = list.length;
+  useEffect(() => {
+    if (selected == null) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.altKey || event.metaKey || event.ctrlKey) return;
+      if (event.key === "ArrowLeft") setSelected((index) => (index != null && index > 0 ? index - 1 : index));
+      else if (event.key === "ArrowRight") setSelected((index) => (index != null && index < total - 1 ? index + 1 : index));
+      else if (event.key === "Home") setSelected(0);
+      else if (event.key === "End") setSelected(total - 1);
+      else return;
+      event.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected, total]);
+  if (list.length === 0) return null;
+  const current = selected == null ? null : list[selected];
   const title = current ? friendlyStepLabel(current.label) : "";
-  const markedFailure = steps.some((step) => step.failed);
+  const markedFailure = list.some((step) => step.failed);
   const runLevelFailure =
     status === "Failed" && !markedFailure && errorMessage?.trim() ? splitFailure(errorMessage) : null;
   const selectedFailed = status === "Failed" && current?.failed === true;
   const selectedFailure = selectedFailed ? splitFailure(current?.error?.trim() || "") : null;
 
   async function save(index: number, step: RunScreenshot) {
-    setDownloadError("");
     setDownloading(step.file);
     try {
-      await downloadScreenshot(testRunStepUrl(runId, step.file), screenshotFileName(index, step.label));
+      await downloadScreenshot(stepScreenshotSrc(runId, step), screenshotFileName(index, step.label));
     } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : "Could not download this screenshot");
+      toast.error(err instanceof Error ? err.message : "Could not download this screenshot");
     } finally {
       setDownloading(null);
     }
@@ -93,7 +138,6 @@ export function StepScreenshots({
 
   async function saveReport() {
     if (!report) return;
-    setDownloadError("");
     setReportBusy(true);
     try {
       await downloadRunReport({
@@ -101,10 +145,10 @@ export function StepScreenshots({
         runId,
         status: status || "Completed",
         errorMessage,
-        steps,
+        steps: list,
       });
     } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : "Could not download this report");
+      toast.error(err instanceof Error ? err.message : "Could not download this report");
     } finally {
       setReportBusy(false);
     }
@@ -112,59 +156,62 @@ export function StepScreenshots({
 
   return (
     <>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-slate-500">{steps.length} screenshot{steps.length === 1 ? "" : "s"}</p>
+      <div className="@container">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[13px] text-muted-foreground tabular-nums">
+          {steps.length} screenshot{steps.length === 1 ? "" : "s"}
+        </p>
         {report ? (
-          <button
-            type="button"
-            onClick={saveReport}
-            disabled={reportBusy}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-          >
-            <Download size={15} />
-            {reportBusy ? "Preparing report..." : "Download Report"}
-          </button>
+          <Button type="button" variant="secondary" size="sm" onClick={saveReport} loading={reportBusy}>
+            {!reportBusy ? <Download aria-hidden /> : null}
+            {reportBusy ? "Preparing report…" : "Download report"}
+          </Button>
         ) : null}
       </div>
       {runLevelFailure ? (
-        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-          <p className="font-medium">Failure reason</p>
+        <div role="alert" className="mt-3 rounded-md border border-destructive/30 bg-destructive-soft p-3 text-[13px] text-foreground">
+          <p className="font-medium text-destructive">Failure reason</p>
           <p className="mt-1 whitespace-pre-wrap">{runLevelFailure.summary}</p>
         </div>
       ) : null}
-      <ol className="mt-3 grid grid-cols-1 items-start gap-4 md:grid-cols-2">
-        {steps.map((step, index) => {
+      <ol className="mt-3 grid grid-cols-1 items-start gap-3 @lg:grid-cols-2 @4xl:grid-cols-3">
+        {list.map((step, index) => {
           const name = friendlyStepLabel(step.label);
-          const src = step.file ? testRunStepUrl(runId, step.file) : "";
+          const src = stepScreenshotSrc(runId, step);
           const failed = status === "Failed" && step.failed === true;
           const failure = failed ? splitFailure(step.error?.trim() || "Step failed, but no failure details were provided.") : null;
           const alt = `Screenshot after Step ${index + 1}: ${name}`;
           return (
             <li
               key={`${step.file || "missing"}-${index}`}
-              className={`min-w-0 rounded-xl border bg-white p-3 ${failed ? "border-red-200" : "border-slate-200"}`}
+              className={cn(
+                "min-w-0 rounded-md border bg-surface p-2.5",
+                failed ? "border-destructive/40" : "border-border"
+              )}
             >
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-slate-900">Step {index + 1}</p>
-                {failed ? <span className="text-xs font-semibold text-red-700">Failed</span> : null}
+              <div className="mb-0.5 flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-muted-foreground tabular-nums">Step {index + 1}</p>
+                {failed ? <span className="text-xs font-medium text-destructive">Failed</span> : null}
               </div>
-              <p className="mb-2 line-clamp-2 text-sm text-slate-600">{name}</p>
+              <p className="mb-2 line-clamp-2 text-[13px] text-foreground">{name}</p>
               <button
                 type="button"
                 onClick={() => setSelected(index)}
-                className="block w-full cursor-pointer overflow-hidden rounded-lg bg-slate-50 ring-slate-200 hover:opacity-90 hover:ring-2"
+                className="block w-full cursor-zoom-in overflow-hidden rounded-md border border-border-subtle bg-elevated transition-[border-color,opacity] duration-150 hover:border-input hover:opacity-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                 aria-label={`Open screenshot for step ${index + 1}: ${name}`}
               >
-                <StepPreview src={src} alt={alt} />
+                <StepPreview key={src} src={src} alt={alt} onFailed={refreshExpired} />
               </button>
               {failed && failure ? (
-                <div className="mt-2 rounded-lg bg-red-50 p-2 text-sm text-red-800">
-                  <p className="font-medium">Failure reason</p>
+                <div className="mt-2 rounded-md bg-destructive-soft p-2 text-[13px] text-foreground">
+                  <p className="font-medium text-destructive">Failure reason</p>
                   <p className="mt-1">{failure.summary}</p>
                   {failure.details ? (
                     <details className="mt-2">
-                      <summary className="cursor-pointer text-xs font-medium">Technical details</summary>
-                      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs">{failure.details}</pre>
+                      <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                        Technical details
+                      </summary>
+                      <pre className="mt-2 max-h-40 overflow-auto font-mono text-[11px] whitespace-pre-wrap">{failure.details}</pre>
                     </details>
                   ) : null}
                 </div>
@@ -173,39 +220,88 @@ export function StepScreenshots({
           );
         })}
       </ol>
-      {downloadError ? <p className="mt-2 text-sm text-red-600">{downloadError}</p> : null}
+      </div>
       <Modal
         open={current != null}
         onClose={() => setSelected(null)}
-        title={selected == null ? "" : `Step ${selected + 1} — ${title}`}
-        panelClassName="max-h-[90vh] max-w-5xl overflow-hidden"
+        title={selected == null ? "" : `Step ${selected + 1} of ${total} — ${title}`}
+        panelClassName="sm:max-w-5xl"
         closeOnBackdrop
         closeOnEscape
         footer={
           current && selected != null ? (
-            <button
-              type="button"
-              onClick={() => save(selected, current)}
-              disabled={downloading === current.file}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-            >
-              <Download size={16} />
-              {downloading === current.file ? "Downloading..." : "Download screenshot"}
-            </button>
+            <div className="flex w-full flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSelected(selected - 1)}
+                  disabled={selected === 0}
+                  aria-label="Previous step"
+                >
+                  <ChevronLeft aria-hidden />
+                  Previous
+                </Button>
+                <span className="px-1 text-[13px] text-muted-foreground tabular-nums">
+                  {selected + 1} / {total}
+                </span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setSelected(selected + 1)}
+                  disabled={selected === total - 1}
+                  aria-label="Next step"
+                >
+                  Next
+                  <ChevronRight aria-hidden />
+                </Button>
+              </div>
+              <Button type="button" onClick={() => save(selected, current)} loading={downloading === current.file}>
+                {downloading !== current.file ? <Download aria-hidden /> : null}
+                {downloading === current.file ? "Downloading…" : "Download screenshot"}
+              </Button>
+            </div>
           ) : null
         }
       >
         {current && selected != null ? (
-          <div className="max-h-[70vh] overflow-auto">
+          <div>
+            <div className="group relative">
             <StepPreview
-              key={current.file}
-              src={current.file ? testRunStepUrl(runId, current.file) : ""}
+              key={stepScreenshotSrc(runId, current)}
+              src={stepScreenshotSrc(runId, current)}
+              onFailed={refreshExpired}
               alt={`Screenshot after Step ${selected + 1}: ${title}`}
               large
             />
+            {selected > 0 ? (
+              <button
+                type="button"
+                onClick={() => setSelected(selected - 1)}
+                aria-label="Previous step"
+                title="Previous step (←)"
+                className="absolute top-1/2 left-2 grid size-10 -translate-y-1/2 place-items-center rounded-full border border-border bg-popover/85 text-foreground shadow-md backdrop-blur transition-[opacity,background-color] duration-150 hover:bg-state-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <ChevronLeft className="size-5" aria-hidden />
+              </button>
+            ) : null}
+            {selected < total - 1 ? (
+              <button
+                type="button"
+                onClick={() => setSelected(selected + 1)}
+                aria-label="Next step"
+                title="Next step (→)"
+                className="absolute top-1/2 right-2 grid size-10 -translate-y-1/2 place-items-center rounded-full border border-border bg-popover/85 text-foreground shadow-md backdrop-blur transition-[opacity,background-color] duration-150 hover:bg-state-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <ChevronRight className="size-5" aria-hidden />
+              </button>
+            ) : null}
+            </div>
             {selectedFailed && selectedFailure ? (
-              <p className="mt-3 text-sm text-red-800">
-                <span className="font-medium">Failed. </span>
+              <p className="mt-3 text-[13px] text-foreground">
+                <span className="font-medium text-destructive">Failed. </span>
                 {selectedFailure.summary}
               </p>
             ) : null}

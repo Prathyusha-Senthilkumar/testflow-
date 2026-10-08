@@ -1,5 +1,5 @@
 import { friendlyStepLabel } from "@/lib/stepLabel";
-import { testRunStepUrl, type RunScreenshot } from "@/lib/api";
+import { stepScreenshotSrc, type RunScreenshot } from "@/lib/api";
 
 export type RunReportInput = {
   testName: string;
@@ -23,7 +23,7 @@ export function splitFailure(message: string): { summary: string; details: strin
 }
 
 export async function downloadRunReport(input: RunReportInput): Promise<void> {
-  const images = await Promise.all(input.steps.map((step) => imageDataUrl(testRunStepUrl(input.runId, step.file))));
+  const images = await Promise.all(input.steps.map((step) => imageDataUrl(stepScreenshotSrc(input.runId, step))));
   const html = renderReport(input, images);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -42,7 +42,7 @@ function reportFileName(input: RunReportInput): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 40);
-  return `TestFlow_${slug || "run"}_${input.runId.slice(0, 8)}.html`;
+  return `Attest_${slug || "run"}_${input.runId.slice(0, 8)}.html`;
 }
 
 async function imageDataUrl(url: string): Promise<string | null> {
@@ -90,7 +90,7 @@ function renderReport(input: RunReportInput, images: (string | null)[]): string 
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(input.testName)} — TestFlow report</title>
+  <title>${escapeHtml(input.testName)} — Attest report</title>
   <style>
     body { font-family: Segoe UI, sans-serif; color: #0f172a; margin: 32px auto; max-width: 880px; line-height: 1.45; }
     table { border-collapse: collapse; width: 100%; margin: 16px 0 28px; }

@@ -1,9 +1,479 @@
+/*
+ * Attest (TestFlow) design tokens: "Dawn blue x charcoal".
+ *
+ * Charcoal surfaces with a dawn-blue (hue 226°) primary. Run results use the
+ * brand blue for Passed and a desaturated coral for Failed; green is reserved
+ * for generic success (toasts). Tokens follow shadcn naming (tweakcn-style) plus
+ * TestFlow layer tokens (--bg-ground / --bg-surface / --bg-elevated) and status
+ * tokens with -foreground and -soft variants. Everything is exposed through
+ * `@theme inline`, so utilities like `bg-surface`, `bg-elevated`, `text-success`,
+ * `bg-success-soft`, `text-brand-accent` work.
+ *
+ * Theme switching: next-themes writes `data-theme="light|dark"` on <html>.
+ */
+@layer properties, theme, base, components, utilities;
+
 @import "tailwindcss";
-:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:#0f172a; background:#f5f7fb; font-synthesis:none; text-rendering:optimizeLegibility; }
-* { box-sizing:border-box; border-color: #e2e8f0; }
-html { min-width:320px; min-height:100%; background:#f5f7fb; }
-body { margin:0; min-width:320px; min-height:100vh; background:#f5f7fb; }
-button,input,select,textarea { font:inherit; }
-button { cursor:pointer; }
-a { text-decoration:none; }
-::selection { background:#bfdbfe; color:#0f172a; }
+@import "tw-animate-css";
+
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* ---------------------------------------------------------------- light */
+:root {
+  color-scheme: light;
+  --radius: 0.5rem;
+
+  /* Layers: chrome (sidebar/header) < canvas (main) < surface (cards, tables) < elevated (table head, hover). */
+  --bg-chrome: #f3f4f7;
+  --bg-canvas: #fafafb;
+  --bg-ground: var(--bg-chrome);
+  --bg-surface: #ffffff;
+  --bg-elevated: #f2f3f7;
+  --border-subtle: #eceef4;
+  --border-strong: #cfd2dc;
+  --bg-nav: #f7f7f9;
+
+  /* Interaction states */
+  --state-hover: #eef0f5;
+  --state-pressed: #e5e8ef;
+  --state-active: color-mix(in oklab, var(--primary) 8%, var(--bg-surface));
+  --card-hover-shadow: 0 2px 8px rgb(0 0 0 / 0.06);
+  /* Border of the floating main canvas panel (unused since the flat layout). */
+  --border-panel: #e1e3ea;
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.04);
+  --text-primary: #0a0b14;
+  --text-muted: #5b6080;
+  --text-faint: #6e7391;
+
+  /* shadcn */
+  --background: var(--bg-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--bg-surface);
+  --card-foreground: var(--text-primary);
+  --popover: #ffffff;
+  --popover-foreground: var(--text-primary);
+  /* Dawn blue (hue 226°): primary is the exact swatch. */
+  --primary: #07184f;
+  --primary-foreground: #ffffff;
+  --primary-hover: #0c2270;
+  --primary-pressed: #051140;
+  --secondary: #f2f3f7;
+  --secondary-foreground: #0a0b14;
+  --muted: var(--bg-elevated);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--state-active);
+  --accent-foreground: #0a0b14;
+  --border: #dfe2ea;
+  --input: #d9dce8;
+  --ring: #3552c9;
+  /* Brand-coloured text (links, active labels); AA on surfaces. */
+  --brand: #07184f;
+  /* Links, highlights, active icons, the logo tick. */
+  --brand-accent: #2f4fc4;
+
+  /* Status */
+  --success: #15803d;
+  --success-foreground: #ffffff;
+  --warning: #b45309;
+  --warning-foreground: #ffffff;
+  --info: #2f4fc4;
+  --info-foreground: #ffffff;
+  /* Desaturated coral: failures and destructive actions (never a saturated red). */
+  --destructive: #c2415a;
+  --destructive-foreground: #ffffff;
+  --success-soft: color-mix(in oklab, var(--success) 10%, var(--bg-surface));
+  --warning-soft: color-mix(in oklab, var(--warning) 10%, var(--bg-surface));
+  --info-soft: color-mix(in oklab, var(--info) 10%, var(--bg-surface));
+  --destructive-soft: color-mix(in oklab, var(--destructive) 7%, var(--bg-surface));
+
+  /* Live/health states (session active, runner online, browser ready, enabled): muted green. */
+  --state-ok: #15803d;
+  --state-ok-soft: color-mix(in oklab, var(--state-ok) 7%, var(--bg-surface));
+
+  /* Run results: Passed uses the brand blue family (green is reserved for generic success). */
+  --pass: var(--brand-accent);
+  --pass-soft: color-mix(in oklab, var(--brand-accent) 10%, var(--bg-surface));
+  --chart-pass: color-mix(in oklab, #2f4fc4 85%, transparent);
+  --chart-fail: #c2415a;
+  --chart-other: color-mix(in oklab, var(--text-muted) 40%, transparent);
+
+  /* Charts: series built on hue 226 (navy, mid blue, periwinkle, slate) + amber. */
+  --chart-1: #07184f;
+  --chart-2: #2f4fc4;
+  --chart-3: #8b9cf0;
+  --chart-4: #64748b;
+  --chart-5: #b45309;
+
+  /* Sidebar */
+  --sidebar: var(--bg-chrome);
+  --sidebar-foreground: var(--text-muted);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--bg-elevated);
+  --sidebar-accent-foreground: var(--text-primary);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  --shadow-float: 0 8px 24px -6px rgb(10 11 20 / 0.14), 0 2px 6px -2px rgb(10 11 20 / 0.08);
+}
+
+/* ----------------------------------------------------------------- dark */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Charcoal layers (Modal-like): chrome < nav < canvas < surface < elevated. */
+  --bg-chrome: #141416;
+  --bg-nav: #17181b;
+  --bg-canvas: #1b1c20;
+  --bg-ground: var(--bg-chrome);
+  --bg-surface: #202126;
+  --bg-elevated: #26272d;
+  --border-subtle: #232429;
+  --border-strong: #3a3c46;
+  --border-panel: #2c2d33;
+  --shadow-panel: none;
+  --text-primary: #ececf0;
+  --text-muted: #9a9ba6;
+  --text-faint: #8b8c97;
+
+  /* Interaction states */
+  --state-hover: #26272d;
+  --state-pressed: #2e2f36;
+  /* Deep navy selection with a primary left bar. */
+  --state-active: color-mix(in oklab, #07184f 60%, var(--bg-surface));
+  --card-hover-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+
+  --background: var(--bg-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--bg-surface);
+  --card-foreground: var(--text-primary);
+  --popover: #26272d;
+  --popover-foreground: var(--text-primary);
+  /* Dawn blue lifted for charcoal (white text ≈ 6.9:1). */
+  --primary: #2f4fc4;
+  --primary-foreground: #ffffff;
+  --primary-hover: #3a5bd4;
+  --primary-pressed: #2843ad;
+  --secondary: #26272d;
+  --secondary-foreground: #ececf0;
+  --muted: var(--bg-elevated);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--state-active);
+  --accent-foreground: #ececf0;
+  --border: #2b2d3a;
+  --input: #383a42;
+  --ring: #6f86ef;
+  /* Deep fill (logo tile, tinted surfaces); text uses --brand-accent. */
+  --brand: #07184f;
+  --brand-accent: #8ea2f0;
+
+  --success: #4ade80;
+  --success-foreground: #04120a;
+  --warning: #fbbf24;
+  --warning-foreground: #140d00;
+  --info: #8ea2f0;
+  --info-foreground: #050507;
+  --destructive: #e8728a;
+  --destructive-foreground: #ffffff;
+  --success-soft: color-mix(in oklab, var(--success) 11%, var(--bg-surface));
+  --warning-soft: color-mix(in oklab, var(--warning) 11%, var(--bg-surface));
+  --info-soft: color-mix(in oklab, var(--info) 12%, var(--bg-surface));
+  --destructive-soft: color-mix(in oklab, var(--destructive) 10%, var(--bg-surface));
+
+  --state-ok: #5fd08a;
+  --state-ok-soft: color-mix(in oklab, var(--state-ok) 10%, var(--bg-surface));
+
+  --pass: var(--brand-accent);
+  --pass-soft: color-mix(in oklab, var(--brand-accent) 12%, var(--bg-surface));
+  --chart-pass: #5b76e0;
+  --chart-fail: color-mix(in oklab, #e0607a 85%, transparent);
+  --chart-other: color-mix(in oklab, var(--text-muted) 40%, transparent);
+
+  --chart-1: #5b76e0;
+  --chart-2: #8ea2f0;
+  --chart-3: #2f4fc4;
+  --chart-4: #8a8fa3;
+  --chart-5: #fbbf24;
+
+  --sidebar: var(--bg-chrome);
+  --sidebar-foreground: var(--text-muted);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--bg-elevated);
+  --sidebar-accent-foreground: var(--text-primary);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  --shadow-float: 0 12px 32px -8px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.03);
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans, ui-sans-serif), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono, ui-monospace), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-ground: var(--bg-ground);
+  --color-chrome: var(--bg-chrome);
+  --color-nav: var(--bg-nav);
+  --color-state-hover: var(--state-hover);
+  --color-state-pressed: var(--state-pressed);
+  --color-state-active: var(--state-active);
+  --color-border-strong: var(--border-strong);
+  --color-canvas: var(--bg-canvas);
+  --color-surface: var(--bg-surface);
+  --color-elevated: var(--bg-elevated);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-panel: var(--border-panel);
+  --color-text-primary: var(--text-primary);
+  --color-text-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-brand: var(--brand);
+  --color-brand-accent: var(--brand-accent);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-pressed: var(--primary-pressed);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-soft: var(--info-soft);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-ok: var(--state-ok);
+  --color-ok-soft: var(--state-ok-soft);
+  --color-pass: var(--pass);
+  --color-pass-soft: var(--pass-soft);
+  --color-chart-pass: var(--chart-pass);
+  --color-chart-fail: var(--chart-fail);
+  --color-chart-other: var(--chart-other);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --shadow-float: var(--shadow-float);
+  --shadow-panel: var(--shadow-panel);
+  --shadow-card-hover: var(--card-hover-shadow);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-border);
+  }
+  html {
+    min-width: 320px;
+    background: var(--background);
+  }
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100dvh;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 35%, transparent);
+    color: var(--foreground);
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  /* Quiet scrollbars that follow the theme. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  /*
+   * Clickable card: border brightens, fill goes to hover, title turns
+   * brand-accent and a [data-card-arrow] icon fades in. No scale/translate.
+   * Mark the title with [data-card-title].
+   */
+  .card-interactive {
+    position: relative;
+    cursor: pointer;
+    transition:
+      border-color 150ms ease,
+      background-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+  .card-interactive :where([data-card-title]) {
+    transition: color 150ms ease;
+  }
+  .card-interactive :where([data-card-arrow]) {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+  .card-interactive:hover,
+  .card-interactive:has(:focus-visible),
+  .card-interactive:focus-visible {
+    border-color: var(--border-strong);
+    background-color: var(--state-hover);
+    box-shadow: var(--card-hover-shadow);
+  }
+  .card-interactive:hover :where([data-card-title]),
+  .card-interactive:focus-visible :where([data-card-title]),
+  .card-interactive:has(:focus-visible) :where([data-card-title]) {
+    color: var(--brand-accent);
+  }
+  .card-interactive:hover :where([data-card-arrow]),
+  .card-interactive:focus-visible :where([data-card-arrow]),
+  .card-interactive:has(:focus-visible) :where([data-card-arrow]) {
+    opacity: 1;
+  }
+  .card-interactive:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .card-interactive[data-selected="true"] {
+    border-color: color-mix(in oklab, var(--primary) 55%, var(--border));
+    background-color: var(--state-active);
+  }
+  /* Row actions that appear on hover/focus of their row or card. */
+  .reveal-on-hover {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  :where(tr, li, [data-slot="card"], .group):hover .reveal-on-hover,
+  :where(tr, li, [data-slot="card"], .group):focus-within .reveal-on-hover {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    .reveal-on-hover {
+      opacity: 1;
+    }
+  }
+}
+
+/* ------------------------------------------------------------ Attest loader */
+@keyframes attest-draw-legs {
+  0% { stroke-dashoffset: 100; opacity: 1; }
+  33% { stroke-dashoffset: 0; }
+  80% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes attest-draw-tick {
+  0%, 33% { stroke-dashoffset: 36; opacity: 1; }
+  55% { stroke-dashoffset: 0; }
+  80% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes attest-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes attest-fade-out {
+  to { opacity: 0; visibility: hidden; }
+}
+
+@layer components {
+  .attest-loader [data-part="legs"] {
+    stroke-dasharray: 100;
+    animation: attest-draw-legs 1.8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+  .attest-loader [data-part="tick"] {
+    stroke-dasharray: 36;
+    animation: attest-draw-tick 1.8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+  /* Route loading: a centred loader over the skeleton for the first ~300ms only. */
+  .attest-loader-intro {
+    animation: attest-fade-out 160ms ease-out 300ms forwards;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .attest-loader [data-part] {
+    animation: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+  .attest-loader {
+    animation: attest-pulse 2s ease-in-out infinite !important;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,22 +1,59 @@
 "use client";
 
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { useEffect, useState, type MouseEvent } from "react";
-import { Plus, Trash2 } from "lucide-react";
-import { Link, useNavigate, useParams } from "@/lib/navigation";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { Layers, Plus, SearchX, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useNavigate, useParams } from "@/lib/navigation";
 import { api, type TestSuiteSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { SearchInput } from "@/components/ui/search-input";
+import { Toolbar } from "@/components/ui/toolbar";
+import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS } from "@/lib/suiteCategory";
+import { Alert } from "@/components/ui/alert";
+import { DataTable, createDataTableColumns } from "@/components/ui/data-table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageContainer, PageHeader } from "@/components/layout/page-header";
 import { CreateSuiteModal } from "@/components/suites/CreateSuiteModal";
 import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
 
+const column = createDataTableColumns<TestSuiteSummary>();
+
+const CATEGORY_FILTER_OPTIONS = [
+  { value: "", label: "All categories" },
+  ...SUITE_CATEGORIES.map((item) => ({ value: item, label: SUITE_CATEGORY_LABELS[item] })),
+];
+
+function suiteCategories(suite: TestSuiteSummary): string[] {
+  return suite.categories?.length ? suite.categories : suite.category ? [suite.category] : [];
+}
+
 export function TestSuitesPage() {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const { id: projectId = "" } = useParams();
   const [suites, setSuites] = useState<TestSuiteSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const filtering = Boolean(search.trim() || category);
+  const visibleSuites = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return suites.filter((suite) => {
+      if (category && !suiteCategories(suite).includes(category)) return false;
+      if (!needle) return true;
+      return [suite.name, suite.description].some((field) => field?.toLowerCase().includes(needle));
+    });
+  }, [suites, search, category]);
+  function clearFilters() {
+    setSearch("");
+    setCategory("");
+  }
 
   useEffect(() => {
     if (!projectId) return;
@@ -31,14 +68,21 @@ export function TestSuitesPage() {
   async function handleDelete(event: MouseEvent, suiteId: string, name: string) {
     event.stopPropagation();
     if (!projectId) return;
-    if (!window.confirm(`Delete test suite “${name}”? Test cases will not be deleted.`)) return;
     setError("");
-    try {
-      await api.deleteTestSuite(projectId, suiteId);
-      setSuites((current) => current.filter((suite) => suite.id !== suiteId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete suite");
-    }
+    const deleted = await confirm({
+      title: "Delete suite?",
+      tone: "danger",
+      confirmLabel: "Delete suite",
+      description: (
+        <p>
+          The suite <strong>{name}</strong> will be deleted. Test cases in this suite are kept.
+        </p>
+      ),
+      onConfirm: () => api.deleteTestSuite(projectId, suiteId),
+    });
+    if (!deleted) return;
+    setSuites((current) => current.filter((suite) => suite.id !== suiteId));
+    toast.success("Suite deleted");
   }
 
   async function handleCreate(input: { name: string; description?: string; category?: string }) {
@@ -49,88 +93,149 @@ export function TestSuitesPage() {
       const created = await api.createTestSuite(projectId, input);
       setSuites((current) => [created, ...current]);
       setCreateOpen(false);
+      toast.success(`Created “${created.name}”`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create suite");
+      toast.error(err instanceof Error ? err.message : "Could not create suite");
     } finally {
       setCreating(false);
     }
   }
 
-  return (
-    <div className="p-6 lg:p-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <Link to={`/projects/${projectId}`} className="text-sm text-indigo-600 hover:underline">
-            ← Project
-          </Link>
-          <h1 className="mt-2 text-2xl font-bold">Test Suites</h1>
-          <p className="mt-1 text-sm text-slate-500">Group test cases into reusable suites.</p>
-        </div>
-        <Button type="button" onClick={() => setCreateOpen(true)}>
-          <Plus size={15} className="mr-1 inline" />
-          New Test Suite
-        </Button>
-      </div>
-
-      {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
-
-      <div className="mt-6 overflow-hidden rounded-lg bg-white shadow-sm">
-        {loading ? (
-          <LoadingSpinner label="Loading suites…" />
-        ) : suites.length === 0 ? (
-          <div className="px-5 py-12 text-center text-sm text-slate-500">
-            No test suites yet. Create one to group test cases.
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-indigo-50 text-xs uppercase tracking-wide text-slate-600">
-              <tr>
-                <th className="px-5 py-3 text-left">Name</th>
-                <th className="px-5 py-3 text-left">Category</th>
-                <th className="px-5 py-3 text-left">Description</th>
-                <th className="px-5 py-3 text-left">Test Cases</th>
-                <th className="w-12 px-5 py-3 text-right"><span className="sr-only">Delete</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {suites.map((suite) => (
-                <tr
-                  key={suite.id}
-                  className="cursor-pointer border-t hover:bg-slate-50"
-                  tabIndex={0}
-                  aria-label={`Open ${suite.name}`}
-                  onClick={() => navigate(`/projects/${projectId}/suites/${suite.id}`)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      navigate(`/projects/${projectId}/suites/${suite.id}`);
-                    }
-                  }}
+  // handleDelete closes over projectId only; columns rebuild when it changes.
+  const columns = useMemo(
+    () => [
+      column.accessor("name", {
+        header: "Name",
+        cell: (info) => <span className="font-medium text-foreground">{info.getValue()}</span>,
+      }),
+      column.accessor((suite) => (suite.categories?.length ? suite.categories : suite.category ? [suite.category] : []).join(", "), {
+        id: "category",
+        header: "Category",
+        cell: (info) => <SuiteCategoryBadges categories={info.row.original.categories} category={info.row.original.category} />,
+      }),
+      column.accessor((suite) => suite.description ?? "", {
+        id: "description",
+        header: "Description",
+        enableSorting: false,
+        meta: { className: "max-w-md whitespace-normal" },
+        cell: (info) => <span className="line-clamp-2 text-muted-foreground">{info.getValue() || "—"}</span>,
+      }),
+      column.accessor("caseCount", {
+        header: "Test cases",
+        meta: { align: "right" },
+        cell: (info) => <span className="text-muted-foreground">{info.getValue()}</span>,
+      }),
+      column.display({
+        id: "actions",
+        header: () => <span className="sr-only">Actions</span>,
+        meta: { align: "right", className: "w-12" },
+        cell: (info) => {
+          const suite = info.row.original;
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Delete ${suite.name}`}
+                  className="reveal-on-hover hover:bg-destructive-soft hover:text-destructive"
+                  onClick={(event) => handleDelete(event, suite.id, suite.name)}
+                  onKeyDown={(event) => event.stopPropagation()}
                 >
-                  <td className="px-5 py-4 font-medium text-indigo-600">{suite.name}</td>
-                  <td className="px-5 py-4">
-                    <SuiteCategoryBadges categories={suite.categories} category={suite.category} />
-                  </td>
-                  <td className="px-5 py-4 text-slate-600">{suite.description || "—"}</td>
-                  <td className="px-5 py-4 text-slate-700">
-                    {suite.caseCount} Test Case{suite.caseCount === 1 ? "" : "s"}
-                  </td>
-                  <td className="px-5 py-4 text-right" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                    <button
-                      type="button"
-                      aria-label={`Delete ${suite.name}`}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                      onClick={(event) => handleDelete(event, suite.id, suite.name)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+                  <Trash2 />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Delete suite</TooltipContent>
+            </Tooltip>
+          );
+        },
+      }),
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleDelete is recreated each render but only reads projectId
+    [projectId]
+  );
+
+  return (
+    <PageContainer>
+      <PageHeader
+        title="Test Suites"
+        description="Group test cases into reusable suites."
+        actions={
+          // Empty project: the empty state carries the only "New suite" CTA.
+          !loading && !error && suites.length === 0 ? undefined : (
+            <>
+              <Button onClick={() => setCreateOpen(true)}>
+                <Plus />
+                New suite
+              </Button>
+            </>
+          )
+        }
+      />
+
+      {error ? <Alert variant="error" title="Could not load suites">{error}</Alert> : null}
+
+      {!loading && suites.length > 0 ? (
+        <Toolbar
+          sticky
+          search={
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search suites by name or description…"
+              shortcut="/"
+              bindShortcut
+            />
+          }
+          filters={<Select aria-label="Filter by category" value={category} onChange={setCategory} options={CATEGORY_FILTER_OPTIONS} />}
+          actions={
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {filtering ? `${visibleSuites.length} of ${suites.length}` : `${suites.length} suites`}
+            </span>
+          }
+        />
+      ) : null}
+
+      <DataTable
+        columns={columns}
+        data={visibleSuites}
+        loading={loading}
+        loadingLabel="Loading suites…"
+        getRowId={(suite) => suite.id}
+        initialSorting={[]}
+        stickyTop={52}
+        onRowClick={(suite) => navigate(`/projects/${projectId}/suites/${suite.id}`)}
+        rowLabel={(suite) => `Open ${suite.name}`}
+        minWidth={720}
+        empty={
+          suites.length > 0 ? (
+            <EmptyState
+              icon={SearchX}
+              size="sm"
+              title={search.trim() ? `No suites match “${search.trim()}”` : "No suites in this category"}
+              action={
+                <Button size="sm" variant="outline" onClick={clearFilters}>
+                  Clear
+                </Button>
+              }
+            />
+          ) : (
+          <EmptyState
+            icon={Layers}
+            title="No test suites yet"
+            description="Create a suite to group related test cases and run them together."
+            action={
+              <>
+                <Button size="sm" onClick={() => setCreateOpen(true)}>
+                  <Plus />
+                  New suite
+                </Button>
+              </>
+            }
+          />
+          )
+        }
+      />
 
       <CreateSuiteModal
         open={createOpen}
@@ -138,7 +243,7 @@ export function TestSuitesPage() {
         onClose={() => setCreateOpen(false)}
         onSubmit={handleCreate}
       />
-    </div>
+    </PageContainer>
   );
 }
 

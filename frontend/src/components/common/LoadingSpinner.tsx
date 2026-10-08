@@ -1,6 +1,7 @@
 "use client";
 
-import { LoaderCircle } from "lucide-react";
+import { AttestLoader } from "@/components/brand/attest-loader";
+import { cn } from "@/lib/utils";
 
 type LoadingSpinnerProps = {
   label?: string;
@@ -13,9 +14,9 @@ export function LoadingSpinner({ label = "Loading…", compact = false, classNam
     <div
       role="status"
       aria-live="polite"
-      className={`flex items-center ${compact ? "gap-2" : "justify-center gap-3 py-10"} text-sm text-slate-500 ${className}`}
+      className={cn("flex items-center text-[13px] text-muted-foreground", compact ? "gap-2" : "justify-center gap-2.5 py-10", className)}
     >
-      <LoaderCircle className="h-5 w-5 animate-spin text-indigo-600" aria-hidden="true" />
+      <AttestLoader size={compact ? "sm" : "md"} decorative />
       <span>{label}</span>
     </div>
   );

@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Eye, EyeOff, TerminalSquare } from "lucide-react";
 import { Link, useNavigate } from "@/lib/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Alert } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AuthLayout, PasswordVisibilityToggle } from "@/components/layout/auth-layout";
 import { accountApi } from "@/lib/api";
 
 function readRecoveryToken(): { token: string; error: string } {
@@ -57,57 +59,54 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center bg-[#f7f9fc] px-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-7 shadow-xl shadow-slate-200/60">
-        <div className="mb-6 text-center">
-          <span className="mx-auto grid h-11 w-11 place-items-center rounded-lg bg-indigo-600 text-white">
-            <TerminalSquare size={22} />
-          </span>
-          <h1 className="mt-3 text-lg font-bold">Choose a new password</h1>
-          <p className="mt-1 text-sm text-slate-500">This replaces the password for your TestFlow account.</p>
-        </div>
-        {!ready ? null : token ? (
-          <form onSubmit={submit} className="space-y-4">
-            <div className="relative">
-              <Input
-                label="New password"
-                type={show ? "text" : "password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                minLength={6}
-                required
-                className="pr-10"
-              />
-              <button
-                type="button"
-                aria-label={show ? "Hide password" : "Show password"}
-                onClick={() => setShow((current) => !current)}
-                className="absolute bottom-2.5 right-3 text-slate-400"
-              >
-                {show ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-            <Input
-              label="Confirm password"
-              type={show ? "text" : "password"}
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              minLength={6}
-              required
-            />
-            {error ? <p className="text-sm text-red-600">{error}</p> : null}
-            <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700" disabled={loading} loading={loading}>
-              Update password
-            </Button>
-          </form>
-        ) : (
-          <p className="text-sm text-red-600">{error || "This reset link is invalid or has expired."}</p>
-        )}
-        <Link to="/forgot-password" className="mt-4 block text-center text-sm text-indigo-700 hover:underline">
+    <AuthLayout
+      title="Choose a new password"
+      description="This replaces the password for your Attest account."
+      footer={
+        <Link to="/forgot-password" className="font-medium text-brand-accent underline-offset-4 hover:underline">
           Request a new reset link
         </Link>
-      </div>
-    </div>
+      }
+    >
+      {!ready ? (
+        <div className="space-y-4" aria-busy="true">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+      ) : token ? (
+        <form onSubmit={submit} className="space-y-4">
+          <div className="relative">
+            <Input
+              label="New password"
+              type={show ? "text" : "password"}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="new-password"
+              minLength={6}
+              required
+              className="pr-9"
+            />
+            <PasswordVisibilityToggle shown={show} onToggle={() => setShow((current) => !current)} />
+          </div>
+          <Input
+            label="Confirm password"
+            type={show ? "text" : "password"}
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            autoComplete="new-password"
+            minLength={6}
+            required
+          />
+          {error ? <Alert variant="error">{error}</Alert> : null}
+          <Button type="submit" className="w-full" disabled={loading} loading={loading}>
+            Update password
+          </Button>
+        </form>
+      ) : (
+        <Alert variant="error">{error || "This reset link is invalid or has expired."}</Alert>
+      )}
+    </AuthLayout>
   );
 }
 

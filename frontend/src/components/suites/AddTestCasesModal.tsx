@@ -3,6 +3,9 @@ import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import type { TestCaseSummary } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
+import { controlClasses } from "@/components/ui/input";
 
 type Props = {
   open: boolean;
@@ -64,59 +67,79 @@ export function AddTestCasesModal({
             Cancel
           </Button>
           <Button type="button" onClick={submit} loading={loading} disabled={loading || selected.length === 0}>
-            Add Selected ({selected.length})
+            Add selected <span className="tabular-nums">({selected.length})</span>
           </Button>
         </>
       }
     >
       <div className="space-y-3">
         <div className="relative">
-          <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+          <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" />
           <input
+            type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search test cases…"
-            className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm"
+            aria-label="Search test cases"
+            className={cn(controlClasses, "pl-8")}
           />
         </div>
-        <div className="max-h-72 overflow-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
+        <div className="max-h-72 overflow-auto rounded-md border border-border">
+          <table className="w-full text-[13px]">
+            <thead className="sticky top-0 z-10 bg-surface text-xs text-muted-foreground shadow-[inset_0_-1px_0_var(--color-border)]">
               <tr>
-                <th className="w-10 p-3" />
-                <th className="p-3 text-left">Test case</th>
-                <th className="p-3 text-left">Classification</th>
+                <th className="w-10 px-3 py-2">
+                  <span className="sr-only">Select</span>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">Test case</th>
+                <th className="px-3 py-2 text-left font-medium">Classification</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((testCase) => {
-                const disabled = alreadyInSuite.has(testCase.id);
-                const checked = disabled || selected.includes(testCase.id);
-                return (
-                  <tr key={testCase.id} className="border-t">
-                    <td className="p-3">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={() => toggle(testCase.id, disabled)}
-                      />
-                    </td>
-                    <td className="p-3">
-                      <span className="mr-2 rounded-lg bg-slate-100 px-1.5 py-0.5 font-mono text-xs">
-                        {testCase.code}
-                      </span>
-                      {testCase.name}
-                      {disabled ? (
-                        <span className="ml-2 text-xs text-slate-400">(already in suite)</span>
-                      ) : null}
-                    </td>
-                    <td className="p-3 text-xs text-slate-500">
-                      {testCase.category ?? "Functional"} · {testCase.scenario ?? "Happy Path"}
-                    </td>
-                  </tr>
-                );
-              })}
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="px-3 py-8 text-center text-muted-foreground">
+                    {query ? `No test cases match “${query}”.` : "This project has no test cases yet."}
+                  </td>
+                </tr>
+              ) : (
+                rows.map((testCase) => {
+                  const disabled = alreadyInSuite.has(testCase.id);
+                  const checked = disabled || selected.includes(testCase.id);
+                  const checkboxId = `add-case-${testCase.id}`;
+                  return (
+                    <tr
+                      key={testCase.id}
+                      className={cn(
+                        "border-t border-border-subtle transition-colors duration-150",
+                        disabled ? "text-muted-foreground" : "hover:bg-elevated/60",
+                        checked && !disabled && "bg-accent/60"
+                      )}
+                    >
+                      <td className="px-3 py-2">
+                        <Checkbox
+                          id={checkboxId}
+                          checked={checked}
+                          disabled={disabled}
+                          onCheckedChange={() => toggle(testCase.id, disabled)}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <label htmlFor={checkboxId} className={cn("flex items-center gap-2", !disabled && "cursor-pointer")}>
+                          <span className="rounded-sm bg-elevated px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                            {testCase.code}
+                          </span>
+                          <span className="truncate">{testCase.name}</span>
+                          {disabled ? <span className="shrink-0 text-xs text-faint">Already in suite</span> : null}
+                        </label>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        {testCase.category ?? "Functional"} · {testCase.scenario ?? "Happy Path"}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

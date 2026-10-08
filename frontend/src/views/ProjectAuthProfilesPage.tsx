@@ -1,13 +1,24 @@
 "use client";
 
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { useEffect, useState } from "react";
-import { AlertTriangle, Mic, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { Link, useParams } from "@/lib/navigation";
-import { api, type AuthProfileInput, type AuthProfileSummary, type AuthRefreshConfig } from "@/lib/api";
+import { LoadingArea } from "@/components/common/LoadingArea";
+import { useEffect, useMemo, useState } from "react";
+import { KeyRound, Mic, Plus, RefreshCw, SearchX, Settings2, ShieldCheck, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useParams } from "@/lib/navigation";
+import { api, type AuthProfileInput, type AuthProfileSummary, type AuthRefreshConfig, type AuthSessionStatus } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { SearchInput } from "@/components/ui/search-input";
+import { Toolbar } from "@/components/ui/toolbar";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageContainer, PageHeader } from "@/components/layout/page-header";
+import { usePublishEntityName } from "@/components/layout/shell-context";
 
 const emptyForm: AuthProfileInput = { name: "", loginUrl: "", username: "", password: "" };
 
@@ -75,37 +86,78 @@ function sessionLabel(profile: AuthProfileSummary): string {
   }
 }
 
-function sessionToneClass(status: AuthProfileSummary["sessionStatus"]): string {
-  if (status === "expired") return "text-red-600";
-  if (status === "expiring") return "text-amber-700";
-  if (status === "active") return "text-emerald-700";
-  return "text-slate-500";
+function sessionBadge(status: AuthProfileSummary["sessionStatus"]) {
+  if (status === "expired") return { variant: "error" as const, label: "Expired" };
+  if (status === "expiring") return { variant: "warning" as const, label: "Expiring" };
+  if (status === "active") return { variant: "ok" as const, label: "Active" };
+  return { variant: "default" as const, label: "No session" };
 }
+
+function sessionToneClass(status: AuthProfileSummary["sessionStatus"]): string {
+  if (status === "expired") return "text-destructive";
+  if (status === "expiring") return "text-warning";
+  return "text-muted-foreground";
+}
+
+type SessionFilter = "" | AuthSessionStatus | "renewal";
+const SESSION_FILTER_OPTIONS: { value: SessionFilter; label: string }[] = [
+  { value: "", label: "All sessions" },
+  { value: "active", label: "Active" },
+  { value: "expiring", label: "Expiring" },
+  { value: "expired", label: "Expired" },
+  { value: "none", label: "No session" },
+  { value: "renewal", label: "Needs renewal" },
+];
 
 export function ProjectAuthProfilesPage() {
   const { id: projectId = "" } = useParams();
-  const [projectName, setProjectName] = useState("Project");
+  const [projectName, setProjectName] = useState("");
   const [defaultLoginUrl, setDefaultLoginUrl] = useState("");
   const [profiles, setProfiles] = useState<AuthProfileSummary[]>([]);
+  const [search, setSearch] = useState("");
+  const [sessionFilter, setSessionFilter] = useState<SessionFilter>("");
+  const filtering = Boolean(search.trim() || sessionFilter);
+  const visibleProfiles = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return profiles.filter((profile) => {
+      if (sessionFilter === "renewal" ? !profile.needsRenewal : sessionFilter && profile.sessionStatus !== sessionFilter) return false;
+      if (!needle) return true;
+      return [profile.name, profile.loginUrl, profile.username].some((field) => field?.toLowerCase().includes(needle));
+    });
+  }, [profiles, search, sessionFilter]);
+  function clearFilters() {
+    setSearch("");
+    setSessionFilter("");
+  }
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
+  const [refreshError, setRefreshError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<AuthProfileInput>(emptyForm);
   const [refreshProfileId, setRefreshProfileId] = useState<string | null>(null);
   const [refreshForm, setRefreshForm] = useState<RefreshForm>(emptyRefresh);
   const [savingRefresh, setSavingRefresh] = useState(false);
 
+  usePublishEntityName("project", projectId, projectName);
+
   useEffect(() => {
     if (!projectId) return;
+     
     setLoading(true);
-    Promise.all([api.project(projectId), api.authProfiles(projectId)])
-      .then(([project, items]) => {
+    // Project data only supplies the name and default login URL; don't block the list on it.
+    api
+      .project(projectId)
+      .then((project) => {
         setProjectName(project.name);
         setDefaultLoginUrl(project.baseUrl);
-        setProfiles(items);
       })
+      .catch(() => undefined);
+    api
+      .authProfiles(projectId)
+      .then(setProfiles)
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [projectId]);
@@ -113,14 +165,14 @@ export function ProjectAuthProfilesPage() {
   function openCreate() {
     setForm({ name: "", loginUrl: defaultLoginUrl, username: "", password: "" });
     setFormOpen(true);
-    setError("");
+    setFormError("");
   }
 
   async function submitForm(event: React.FormEvent) {
     event.preventDefault();
     if (!projectId) return;
     setSaving(true);
-    setError("");
+    setFormError("");
     try {
       const created = await api.createAuthProfile(projectId, {
         name: form.name,
@@ -132,7 +184,7 @@ export function ProjectAuthProfilesPage() {
       setFormOpen(false);
       await recordLogin(created.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create auth profile");
+      setFormError(err instanceof Error ? err.message : "Could not create auth profile");
     } finally {
       setSaving(false);
     }
@@ -141,12 +193,12 @@ export function ProjectAuthProfilesPage() {
   async function recordLogin(profileId: string) {
     if (!projectId) return;
     setRecordingId(profileId);
-    setError("");
     try {
       const updated = await api.recordAuthProfileLogin(projectId, profileId);
       setProfiles((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success(`Session saved for “${updated.name}”`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login recording did not save a session");
+      toast.error(err instanceof Error ? err.message : "Login recording did not save a session");
     } finally {
       setRecordingId(null);
     }
@@ -155,14 +207,14 @@ export function ProjectAuthProfilesPage() {
   function openRefresh(profile: AuthProfileSummary) {
     setRefreshProfileId(profile.id);
     setRefreshForm(refreshToForm(profile.refresh));
-    setError("");
+    setRefreshError("");
   }
 
   async function submitRefresh(event: React.FormEvent) {
     event.preventDefault();
     if (!projectId || !refreshProfileId) return;
     setSavingRefresh(true);
-    setError("");
+    setRefreshError("");
     try {
       const refresh: AuthRefreshConfig | null =
         refreshForm.strategy === ""
@@ -185,8 +237,9 @@ export function ProjectAuthProfilesPage() {
       const updated = await api.setAuthProfileRefresh(projectId, refreshProfileId, refresh);
       setProfiles((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setRefreshProfileId(null);
+      toast.success("Refresh settings saved");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save refresh settings");
+      setRefreshError(err instanceof Error ? err.message : "Could not save refresh settings");
     } finally {
       setSavingRefresh(false);
     }
@@ -194,130 +247,195 @@ export function ProjectAuthProfilesPage() {
 
   async function removeProfile(profileId: string) {
     if (!projectId) return;
-    setError("");
     try {
       await api.deleteAuthProfile(projectId, profileId);
       setProfiles((current) => current.filter((item) => item.id !== profileId));
+      toast.success("Auth profile deleted");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete auth profile");
+      toast.error(err instanceof Error ? err.message : "Could not delete auth profile");
     }
   }
 
   const renewals = profiles.filter((profile) => profile.needsRenewal);
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-slate-500">
-            <Link to="/projects" className="text-indigo-600 hover:underline">Projects</Link>
-            <span className="mx-1">/</span>
-            <Link to={`/projects/${projectId}`} className="text-indigo-600 hover:underline">{projectName}</Link>
-            <span className="mx-1">/</span>
-            Auth Profiles
-          </p>
-          <h1 className="mt-2 text-3xl font-bold">Auth Profiles</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Record a login once. Playwright saves the session so later record and run start already logged in.
-          </p>
-        </div>
-        <Button type="button" onClick={openCreate} disabled={saving || recordingId !== null}>
-          <Plus size={16} className="mr-1 inline" />
-          Record Login
-        </Button>
-      </div>
+    <PageContainer>
+      <PageHeader
+        title="Auth Profiles"
+        description="Record a login once. Attest saves the session so later recordings and runs start already logged in."
+        actions={
+          // No profiles yet: the empty state carries the only "Record login" CTA.
+          !loading && !error && profiles.length === 0 ? undefined : (
+            <Button onClick={openCreate} disabled={saving || recordingId !== null}>
+              <Plus /> Record login
+            </Button>
+          )
+        }
+      />
 
-      {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-      {recordingId && (
-        <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
-          Playwright Codegen is open. Log in, then close the Inspector to save the session.
-        </div>
-      )}
-      {!loading && renewals.length > 0 && (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <p className="font-medium">
-            <AlertTriangle size={14} className="mr-1 inline" />
-            {renewals.length === 1
+      {error ? <Alert variant="error" title="Could not load auth profiles">{error}</Alert> : null}
+      {recordingId ? (
+        <Alert variant="info" title="A login browser is open">
+          Log in, then close the recorder window to save the session.
+        </Alert>
+      ) : null}
+      {!loading && renewals.length > 0 ? (
+        <Alert
+          variant="warning"
+          title={
+            renewals.length === 1
               ? "1 auth profile needs session renewal"
-              : `${renewals.length} auth profiles need session renewal`}
-          </p>
-          <p className="mt-1">
-            {renewals.map((profile) => profile.name).join(", ")} - use Renew session so recording and
-            test runs keep starting logged in.
-          </p>
-        </div>
-      )}
+              : `${renewals.length} auth profiles need session renewal`
+          }
+        >
+          {renewals.map((profile) => profile.name).join(", ")}: use Renew session so recording and test runs keep starting logged in.
+        </Alert>
+      ) : null}
 
-      <div className="mt-6 rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
-        <h2 className="font-semibold">AUTH PROFILES</h2>
-        {loading ? (
-          <LoadingSpinner label="Loading auth profiles…" compact className="mt-4" />
-        ) : profiles.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500">No auth profiles configured.</p>
-        ) : (
-          <ul className="mt-4 space-y-3">
-            {profiles.map((profile) => (
-              <li
-                key={profile.id}
-                className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
-                  profile.needsRenewal ? "border-amber-200 bg-amber-50/50" : "border-slate-100"
-                }`}
-              >
-                <div>
-                  <p className="font-medium">{profile.name}</p>
-                  <p className="font-mono text-xs text-slate-600">{profile.loginUrl}</p>
-                  <p className={`mt-1 text-xs ${sessionToneClass(profile.sessionStatus)}`}>
-                    {sessionLabel(profile)}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {profile.hasCredentials
-                      ? `Credentials configured${profile.username ? ` (${profile.username})` : ""} — TestFlow can sign in automatically`
-                      : "No credentials stored — automatic sign-in unavailable"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {profile.refresh
-                      ? `Refresh configured (${profile.refresh.strategy})`
-                      : "No refresh configured"}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => openRefresh(profile)}>
-                    Refresh
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={profile.needsRenewal ? "primary" : "outline"}
-                    size="sm"
-                    onClick={() => recordLogin(profile.id)}
-                    disabled={recordingId !== null}
-                    loading={recordingId === profile.id}
-                  >
-                    {profile.hasStorageState ? (
-                      <RefreshCw size={14} className="mr-1 inline" />
-                    ) : (
-                      <Mic size={14} className="mr-1 inline" />
+      <section className="space-y-3">
+        {!loading && profiles.length > 0 ? (
+          <Toolbar
+            search={
+              <SearchInput
+                value={search}
+                onChange={setSearch}
+                placeholder="Search profiles by name, login URL or username…"
+                shortcut="/"
+                bindShortcut
+              />
+            }
+            filters={
+              <Select
+                aria-label="Filter by session status"
+                value={sessionFilter}
+                onChange={(value) => setSessionFilter(value as SessionFilter)}
+                options={SESSION_FILTER_OPTIONS}
+              />
+            }
+            actions={
+              filtering ? (
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {visibleProfiles.length} of {profiles.length}
+                </span>
+              ) : null
+            }
+          />
+        ) : null}
+        <div className="overflow-hidden rounded-lg border border-border bg-surface">
+          {loading ? (
+            <LoadingArea
+              loading
+              label="Loading auth profiles…"
+              skeleton={
+                <ul className="divide-y divide-border-subtle">
+                  {[1, 2].map((item) => (
+                    <li key={item} className="space-y-2 px-4 py-3.5">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-3 w-64" />
+                      <Skeleton className="h-3 w-52" />
+                    </li>
+                  ))}
+                </ul>
+              }
+            />
+          ) : profiles.length === 0 ? (
+            <EmptyState
+              icon={ShieldCheck}
+              title="No auth profiles configured"
+              action={
+                <Button size="sm" onClick={openCreate} disabled={saving || recordingId !== null}>
+                  <Plus /> Record login
+                </Button>
+              }
+            />
+          ) : visibleProfiles.length === 0 ? (
+            <EmptyState
+              icon={SearchX}
+              size="sm"
+              title={search.trim() ? `No auth profiles match “${search.trim()}”` : "No auth profiles match this filter"}
+              action={
+                <Button size="sm" variant="outline" onClick={clearFilters}>
+                  Clear
+                </Button>
+              }
+            />
+          ) : (
+            <ul className="divide-y divide-border-subtle">
+              {visibleProfiles.map((profile) => {
+                const badge = sessionBadge(profile.sessionStatus);
+                return (
+                  <li
+                    key={profile.id}
+                    className={cn(
+                      "flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-4 py-3.5 transition-colors duration-150 hover:bg-state-hover",
+                      profile.needsRenewal && "bg-warning-soft/60"
                     )}
-                    {profile.hasStorageState ? "Renew session" : "Record login"}
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => removeProfile(profile.id)}>
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+                  >
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-foreground">{profile.name}</p>
+                        <Badge variant={badge.variant} dot>
+                          {badge.label}
+                        </Badge>
+                      </div>
+                      <p className="truncate font-mono text-xs text-muted-foreground">{profile.loginUrl}</p>
+                      <p className={cn("text-xs", sessionToneClass(profile.sessionStatus))}>{sessionLabel(profile)}</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 pt-0.5 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <KeyRound className="size-3" aria-hidden />
+                          {profile.hasCredentials
+                            ? `Credentials configured${profile.username ? ` (${profile.username})` : ""}, Attest can sign in automatically`
+                            : "No credentials stored, automatic sign-in unavailable"}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <RefreshCw className="size-3" aria-hidden />
+                          {profile.refresh ? `Refresh configured (${profile.refresh.strategy})` : "No refresh configured"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Button variant="outline" size="sm" onClick={() => openRefresh(profile)}>
+                        <Settings2 /> Refresh
+                      </Button>
+                      <Button
+                        variant={profile.needsRenewal ? "primary" : "outline"}
+                        size="sm"
+                        onClick={() => recordLogin(profile.id)}
+                        disabled={recordingId !== null}
+                        loading={recordingId === profile.id}
+                      >
+                        {recordingId === profile.id ? null : profile.hasStorageState ? <RefreshCw /> : <Mic />}
+                        {profile.hasStorageState ? "Renew session" : "Record login"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="reveal-on-hover hover:text-destructive"
+                        aria-label={`Delete ${profile.name}`}
+                        onClick={() => removeProfile(profile.id)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </section>
 
       <Modal
         open={formOpen}
         onClose={() => setFormOpen(false)}
-        title="Record Login"
+        title="Record login"
         footer={
           <>
-            <Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setFormOpen(false)}>
+              Cancel
+            </Button>
             <Button type="submit" form="auth-profile-form" loading={saving} disabled={saving}>
-              Open Playwright
+              Open login browser
             </Button>
           </>
         }
@@ -334,6 +452,7 @@ export function ProjectAuthProfilesPage() {
             label="Login URL"
             required
             value={form.loginUrl}
+            className="font-mono text-[13px]"
             onChange={(e) => setForm((current) => ({ ...current, loginUrl: e.target.value }))}
             placeholder="https://example.com/login"
           />
@@ -350,14 +469,14 @@ export function ProjectAuthProfilesPage() {
             onChange={(e) => setForm((current) => ({ ...current, password: e.target.value }))}
             placeholder="••••••••"
           />
-          <p className="text-xs text-slate-500">
-            Credentials are encrypted before they are stored and are never shown again. TestFlow
-            uses them to sign in automatically when a saved session stops working, so Run Test
-            never needs you to log in manually.
-          </p>
-          <p className="text-xs text-slate-500">
-            Playwright will open the login URL. Log in, then close the Inspector to save cookies and storage.
-          </p>
+          <div className="space-y-1.5 rounded-md border border-border bg-elevated/50 px-3 py-2.5 text-xs text-muted-foreground">
+            <p>
+              Credentials are encrypted before they are stored and are never shown again. Attest uses them to sign in
+              automatically when a saved session stops working, so Run Test never needs you to log in manually.
+            </p>
+            <p>A browser window will open at the login page. Log in, then close the recorder window to save the session.</p>
+          </div>
+          {formError ? <Alert variant="error">{formError}</Alert> : null}
         </form>
       </Modal>
 
@@ -367,7 +486,9 @@ export function ProjectAuthProfilesPage() {
         title="Refresh settings"
         footer={
           <>
-            <Button type="button" variant="secondary" onClick={() => setRefreshProfileId(null)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setRefreshProfileId(null)}>
+              Cancel
+            </Button>
             <Button type="submit" form="auth-refresh-form" loading={savingRefresh} disabled={savingRefresh}>
               Save refresh
             </Button>
@@ -375,48 +496,45 @@ export function ProjectAuthProfilesPage() {
         }
       >
         <form id="auth-refresh-form" onSubmit={submitRefresh} className="space-y-4">
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium">Strategy</span>
-            <select
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-              value={refreshForm.strategy}
-              onChange={(e) =>
-                setRefreshForm((current) => ({
-                  ...current,
-                  strategy: e.target.value as RefreshForm["strategy"],
-                }))
-              }
-            >
-              <option value="">Off — use saved session, then credentials</option>
-              <option value="cookie">Cookie session</option>
-              <option value="localStorage">localStorage tokens</option>
-            </select>
-          </label>
+          <Select
+            label="Strategy"
+            value={refreshForm.strategy}
+            onChange={(value) =>
+              setRefreshForm((current) => ({
+                ...current,
+                strategy: value as RefreshForm["strategy"],
+              }))
+            }
+            options={[
+              { value: "", label: "Off: use saved session, then credentials" },
+              { value: "cookie", label: "Cookie session" },
+              { value: "localStorage", label: "localStorage tokens" },
+            ]}
+          />
           {refreshForm.strategy !== "" && (
             <>
               <Input
                 label="Refresh URL"
                 required
                 value={refreshForm.url}
+                className="font-mono text-[13px]"
                 onChange={(e) => setRefreshForm((current) => ({ ...current, url: e.target.value }))}
                 placeholder="https://example.com/api/auth/refresh"
               />
-              <label className="block text-sm">
-                <span className="mb-1 block font-medium">Method</span>
-                <select
-                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                  value={refreshForm.method}
-                  onChange={(e) =>
-                    setRefreshForm((current) => ({
-                      ...current,
-                      method: e.target.value === "GET" ? "GET" : "POST",
-                    }))
-                  }
-                >
-                  <option value="POST">POST</option>
-                  <option value="GET">GET</option>
-                </select>
-              </label>
+              <Select
+                label="Method"
+                value={refreshForm.method}
+                onChange={(value) =>
+                  setRefreshForm((current) => ({
+                    ...current,
+                    method: value === "GET" ? "GET" : "POST",
+                  }))
+                }
+                options={[
+                  { value: "POST", label: "POST" },
+                  { value: "GET", label: "GET" },
+                ]}
+              />
             </>
           )}
           {refreshForm.strategy === "localStorage" && (
@@ -424,66 +542,69 @@ export function ProjectAuthProfilesPage() {
               <Input
                 label="Origin"
                 value={refreshForm.origin}
+                className="font-mono text-[13px]"
                 onChange={(e) => setRefreshForm((current) => ({ ...current, origin: e.target.value }))}
                 placeholder="https://example.com"
               />
-              <Input
-                label="Access token key"
-                required
-                value={refreshForm.accessTokenKey}
-                onChange={(e) => setRefreshForm((current) => ({ ...current, accessTokenKey: e.target.value }))}
-                placeholder="Name of the localStorage key"
-              />
-              <Input
-                label="Refresh token key"
-                required
-                value={refreshForm.refreshTokenKey}
-                onChange={(e) => setRefreshForm((current) => ({ ...current, refreshTokenKey: e.target.value }))}
-                placeholder="Name of the localStorage key"
-              />
-              <label className="block text-sm">
-                <span className="mb-1 block font-medium">Send</span>
-                <select
-                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                  value={refreshForm.sendToken}
-                  onChange={(e) =>
-                    setRefreshForm((current) => ({
-                      ...current,
-                      sendToken: e.target.value === "accessToken" ? "accessToken" : "refreshToken",
-                    }))
-                  }
-                >
-                  <option value="refreshToken">Refresh token key</option>
-                  <option value="accessToken">Access token key</option>
-                </select>
-              </label>
-              <Input
-                label="Access token JSON path"
-                required
-                value={refreshForm.accessTokenJsonPath}
-                onChange={(e) =>
-                  setRefreshForm((current) => ({ ...current, accessTokenJsonPath: e.target.value }))
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Input
+                  label="Access token key"
+                  required
+                  value={refreshForm.accessTokenKey}
+                  className="font-mono text-[13px]"
+                  onChange={(e) => setRefreshForm((current) => ({ ...current, accessTokenKey: e.target.value }))}
+                  placeholder="Name of the localStorage key"
+                />
+                <Input
+                  label="Refresh token key"
+                  required
+                  value={refreshForm.refreshTokenKey}
+                  className="font-mono text-[13px]"
+                  onChange={(e) => setRefreshForm((current) => ({ ...current, refreshTokenKey: e.target.value }))}
+                  placeholder="Name of the localStorage key"
+                />
+              </div>
+              <Select
+                label="Send"
+                value={refreshForm.sendToken}
+                onChange={(value) =>
+                  setRefreshForm((current) => ({
+                    ...current,
+                    sendToken: value === "accessToken" ? "accessToken" : "refreshToken",
+                  }))
                 }
-                placeholder="accessToken"
+                options={[
+                  { value: "refreshToken", label: "Refresh token key" },
+                  { value: "accessToken", label: "Access token key" },
+                ]}
               />
-              <Input
-                label="Refresh token JSON path"
-                value={refreshForm.refreshTokenJsonPath}
-                onChange={(e) =>
-                  setRefreshForm((current) => ({ ...current, refreshTokenJsonPath: e.target.value }))
-                }
-                placeholder="refreshToken"
-              />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Input
+                  label="Access token JSON path"
+                  required
+                  value={refreshForm.accessTokenJsonPath}
+                  className="font-mono text-[13px]"
+                  onChange={(e) => setRefreshForm((current) => ({ ...current, accessTokenJsonPath: e.target.value }))}
+                  placeholder="accessToken"
+                />
+                <Input
+                  label="Refresh token JSON path"
+                  value={refreshForm.refreshTokenJsonPath}
+                  className="font-mono text-[13px]"
+                  onChange={(e) => setRefreshForm((current) => ({ ...current, refreshTokenJsonPath: e.target.value }))}
+                  placeholder="refreshToken"
+                />
+              </div>
             </>
           )}
-          <p className="text-xs text-slate-500">
-            These fields name the endpoint and the storage keys. Token values and passwords stay out of
-            this configuration. When a saved session fails, TestFlow calls this refresh, and only then
-            the encrypted credentials.
+          <p className="text-xs text-muted-foreground">
+            These fields name the endpoint and the storage keys. Token values and passwords stay out of this configuration.
+            When a saved session fails, Attest calls this refresh, and only then the encrypted credentials.
           </p>
+          {refreshError ? <Alert variant="error">{refreshError}</Alert> : null}
         </form>
       </Modal>
-    </div>
+    </PageContainer>
   );
 }
 

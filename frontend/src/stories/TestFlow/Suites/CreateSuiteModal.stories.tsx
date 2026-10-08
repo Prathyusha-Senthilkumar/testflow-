@@ -3,7 +3,7 @@ import { fn } from 'storybook/test';
 import { CreateSuiteModal } from '@/components/suites/CreateSuiteModal';
 
 const meta = {
-  title: 'TestFlow/Suites/CreateSuiteModal',
+  title: 'Attest/Suites/CreateSuiteModal',
   component: CreateSuiteModal,
   parameters: {
     layout: 'fullscreen',
