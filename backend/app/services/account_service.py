@@ -1,4 +1,5 @@
 import json
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -7,6 +8,8 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.schemas.account import AccountResponse
+
+logger = logging.getLogger("testflow.account")
 
 
 def _require_config() -> tuple[str, str]:
@@ -150,23 +153,6 @@ def display_names(user_ids: list[str]) -> dict[str, str]:
     return names
 
 
-def actor_from_authorization(authorization: str | None) -> tuple[str, str] | None:
-    """Signed-in user id and display name, or None when the request has no usable session."""
-    if not authorization or not authorization.lower().startswith("bearer "):
-        return None
-    token = authorization.split(" ", 1)[1].strip()
-    if not token:
-        return None
-    try:
-        account = current_user(token)
-    except HTTPException:
-        return None
-    user_id = str(account.userId or "").strip()
-    if not user_id:
-        return None
-    return user_id, account.name or account.email or "Account"
-
-
 def current_user(access_token: str) -> AccountResponse:
     user = _auth_request("GET", "/auth/v1/user", user_token=access_token)
     if not user.get("id"):
@@ -187,8 +173,13 @@ def update_profile(access_token: str, name: str) -> AccountResponse:
     return _from_user(user, access_token=access_token)
 
 
-def request_password_reset(email: str) -> str | None:
-    """Send a reset email. When the mailer fails, return a recovery link instead."""
+def request_password_reset(email: str) -> None:
+    """Ask Supabase to send a reset email.
+
+    The caller always returns the same generic message, whether or not the
+    account exists or the mailer worked. A recovery link is never generated
+    for an unauthenticated caller: that would hand out account takeover links.
+    """
     email = email.strip()
     if not email:
         raise HTTPException(status_code=400, detail="Email is required.")
@@ -200,23 +191,12 @@ def request_password_reset(email: str) -> str | None:
             {"email": email},
         )
     except HTTPException as exc:
-        if "sending recovery email" not in str(exc.detail).lower():
-            raise
-        return _recovery_link(email, redirect)
-    return None
-
-
-def _recovery_link(email: str, redirect: str) -> str:
-    payload = _auth_request(
-        "POST",
-        "/auth/v1/admin/generate_link",
-        {"type": "recovery", "email": email, "options": {"redirect_to": redirect}},
-    )
-    properties = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
-    link = payload.get("action_link") or properties.get("action_link")
-    if not link:
-        raise HTTPException(status_code=400, detail="Could not create a reset link.")
-    return str(link)
+        # Log the failure category only. Never the email body, a link or a token.
+        logger.warning(
+            "event=password_reset_send_failed status=%s reason=%s",
+            exc.status_code,
+            str(exc.detail)[:200],
+        )
 
 
 def reset_password(access_token: str, password: str) -> AccountResponse:

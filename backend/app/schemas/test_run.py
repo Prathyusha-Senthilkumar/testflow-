@@ -7,12 +7,8 @@ class RunScreenshot(BaseModel):
     label: str
     failed: bool = False
     error: Optional[str] = None
-
-
-class TestRunResult(BaseModel):
-    status: Literal["Passed", "Failed"]
-    duration: float
-    error: Optional[str] = None
+    # Signed, short-lived image URL relative to the API base (no /api prefix).
+    url: Optional[str] = None
 
 
 class LatestCaseRun(BaseModel):

@@ -5,12 +5,21 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from redis.exceptions import WatchError
+
 from app.queue.connection import get_redis_connection
 
 JOB_PREFIX = "testflow:job:"
 QUEUE_KEY = "testflow:queue"
 SCHEDULE_KEY = "testflow:scheduled"
 JOB_TTL_SECONDS = 60 * 60 * 48
+
+
+TERMINAL_STATES = ("completed", "failed", "cancelled")
+
+
+def new_job_id() -> str:
+    return str(uuid.uuid4())
 
 
 class TestJob:
@@ -40,8 +49,10 @@ def submit_job(
     time_zone: Optional[str],
     run_at: Optional[datetime],
     environment_base_url: Optional[str] = None,
+    job_id: Optional[str] = None,
 ) -> TestJob:
-    job_id = str(uuid.uuid4())
+    """Store the job record, then make it visible to the worker (queue or schedule)."""
+    job_id = job_id or new_job_id()
     scheduled_for = run_at.astimezone(timezone.utc).isoformat() if run_at else None
     payload: dict[str, Any] = {
         "id": job_id,
@@ -68,18 +79,20 @@ def submit_job(
 
 
 def fetch_job(job_id: str) -> Optional[TestJob]:
-    raw = get_redis_connection().get(JOB_PREFIX + job_id)
-    if not raw:
-        return None
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8")
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict) or not payload.get("id"):
-        return None
-    return TestJob(payload)
+    payload = _decode(get_redis_connection().get(JOB_PREFIX + job_id))
+    return TestJob(payload) if payload is not None else None
+
+
+def is_scheduled(job_ids: list[str]) -> set[str]:
+    """Job ids still waiting in the schedule (not yet due)."""
+    if not job_ids:
+        return set()
+    redis = get_redis_connection()
+    with redis.pipeline() as pipe:
+        for job_id in job_ids:
+            pipe.zscore(SCHEDULE_KEY, job_id)
+        scores = pipe.execute()
+    return {job_id for job_id, score in zip(job_ids, scores) if score is not None}
 
 
 def scheduled_jobs() -> list[TestJob]:
@@ -111,21 +124,49 @@ def scheduled_time(job: TestJob) -> Optional[datetime]:
 
 
 def request_cancel(job_id: str) -> str:
-    """Stop a job that has not finished. A running browser is asked to stop; it is not killed blindly."""
-    job = fetch_job(job_id)
-    if job is None:
-        return "missing"
-    state = str(job.payload.get("state") or "")
-    if state in ("completed", "failed", "cancelled"):
-        return state
+    """Stop a job that has not finished. A running browser is asked to stop; it is not killed blindly.
+
+    The job record is updated with WATCH/MULTI so a concurrent worker write (e.g. completed)
+    is never overwritten: whichever write lands first wins and the other retries/backs off.
+    """
     redis = get_redis_connection()
-    redis.lrem(QUEUE_KEY, 0, job_id)
-    redis.zrem(SCHEDULE_KEY, job_id)
-    payload = dict(job.payload)
-    payload["state"] = "cancelled"
-    payload["error"] = "Cancelled"
-    redis.set(JOB_PREFIX + job_id, json.dumps(payload), ex=JOB_TTL_SECONDS)
-    return "cancelled"
+    key = JOB_PREFIX + job_id
+    for _ in range(10):
+        with redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                raw = pipe.get(key)
+                payload = _decode(raw)
+                if payload is None:
+                    pipe.unwatch()
+                    return "missing"
+                state = str(payload.get("state") or "")
+                if state in TERMINAL_STATES:
+                    pipe.unwatch()
+                    return state
+                payload["state"] = "cancelled"
+                payload["error"] = "Cancelled"
+                pipe.multi()
+                pipe.lrem(QUEUE_KEY, 0, job_id)
+                pipe.zrem(SCHEDULE_KEY, job_id)
+                pipe.set(key, json.dumps(payload), ex=JOB_TTL_SECONDS)
+                pipe.execute()
+                return "cancelled"
+            except WatchError:
+                continue
+    raise RuntimeError("Could not cancel the job: it kept changing. Try again.")
+
+
+def _decode(raw) -> Optional[dict]:
+    if not raw:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) and payload.get("id") else None
 
 
 def cancel_scheduled(job_id: str) -> bool:

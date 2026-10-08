@@ -4,7 +4,7 @@ export const project = {
   id: "demo-project",
   name: "SRM Website Testing",
   baseUrl: "https://srmist.edu.in",
-  description: "Automated Playwright coverage for the public SRM website and admissions journeys.",
+  description: "Automated browser coverage for the public SRM website and admissions journeys.",
 };
 
 export const suites = [

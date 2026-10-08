@@ -19,6 +19,11 @@ version with the code.
 | [011](ADR-011-electron-desktop-testing.md) | Electron desktop testing as a second run target | Proposed |
 | [012](ADR-012-cicd-and-run-api.md) | CI/CD through a public Run API and CLI | Proposed, supersedes ADR-006 when accepted |
 | [013](ADR-013-two-tier-execution.md) | Warm pool for interactive runs, containers for CI | Proposed |
+| [014](ADR-014-storage-and-cookies-capability.md) | Storage and Cookies capability | Proposed |
+| [015](ADR-015-network-capability.md) | Network capability | Proposed |
+| [016](ADR-016-accessibility-capability.md) | Accessibility capability | Proposed |
+| [017](ADR-017-webhook-architecture.md) | Outbound webhook architecture | Proposed |
+| [018](ADR-018-auth-profile-sign-in.md) | How Auth Profiles sign in to the application under test | Proposed |
 
 See `../capability-roadmap.md` for every capability deferred out of the MVP and what each costs.
 

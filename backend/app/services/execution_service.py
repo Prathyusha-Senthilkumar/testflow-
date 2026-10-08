@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -8,6 +9,8 @@ from fastapi import HTTPException
 from app.execution.config_path import resolve_runner_config_path
 from app.execution.runner_sidecar import ensure_runner_config_for_script
 from app.queue.connection import get_redis_connection
+
+_logger = logging.getLogger("testflow.execution")
 
 _BATCH_KEY_PREFIX = "testflow:batch:"
 _BATCH_TTL_SECONDS = 60 * 60 * 48
@@ -101,16 +104,53 @@ class ExecutionService:
             environment_base_url = _case_environment_base_url(request.project_id, request.test_case_id)
         queue_service = get_queue_service()
         run_at = self._validate_run_at(request.run_at)
-        job = queue_service.submit(
-            config_path=config_path,
-            project_id=request.project_id,
-            test_case_code=request.test_case_code,
-            test_case_id=request.test_case_id,
-            headed=request.headed,
-            time_zone=time_zone,
-            run_at=run_at,
-            environment_base_url=environment_base_url,
-        )
+        job_id = queue_service.new_job_id()
+
+        # Persist the run row BEFORE the job becomes visible to the worker, so the worker's
+        # Queued -> Running -> result updates always find their row.
+        test_run_id = None
+        if request.test_case_id:
+            run_by_id = None
+            if run_by:
+                test_run_repository.ensure_profile(run_by[0], run_by[1])
+                run_by_id = run_by[0]
+            try:
+                test_run_id = test_run_repository.create_queued(
+                    test_case_id=request.test_case_id,
+                    job_id=job_id,
+                    config_path=config_path,
+                    run_by=run_by_id,
+                )
+            except Exception as exc:
+                _logger.error(
+                    "event=run_row_create_failed job_id=%s error=%s", job_id, exc.__class__.__name__
+                )
+                raise HTTPException(
+                    status_code=503, detail="Could not record the test run. Try again."
+                ) from exc
+
+        try:
+            job = queue_service.submit(
+                job_id=job_id,
+                config_path=config_path,
+                project_id=request.project_id,
+                test_case_code=request.test_case_code,
+                test_case_id=request.test_case_id,
+                headed=request.headed,
+                time_zone=time_zone,
+                run_at=run_at,
+                environment_base_url=environment_base_url,
+            )
+        except Exception as exc:
+            _logger.error("event=enqueue_failed job_id=%s error=%s", job_id, exc.__class__.__name__)
+            if test_run_id:
+                try:
+                    test_run_repository.mark_result(
+                        job_id, "Failed", None, "Test not started: the run could not be queued."
+                    )
+                except Exception:
+                    _logger.error("event=run_row_close_failed job_id=%s", job_id)
+            raise HTTPException(status_code=503, detail="Could not queue the test run. Try again.") from exc
 
         if run_at is not None:
             remember_schedule(
@@ -119,27 +159,6 @@ class ExecutionService:
                 time_zone,
                 request.test_case_id,
             )
-
-        # Persist run history in Supabase when a real test-case id is provided.
-        test_run_id = None
-        if request.test_case_id:
-            try:
-                run_by_id = None
-                if run_by:
-                    test_run_repository.ensure_profile(run_by[0], run_by[1])
-                    run_by_id = run_by[0]
-                test_run_id = test_run_repository.create_queued(
-                    test_case_id=request.test_case_id,
-                    job_id=job.id,
-                    config_path=config_path,
-                    run_by=run_by_id,
-                )
-            except Exception as exc:  # pragma: no cover - persistence is best-effort at enqueue
-                import logging
-
-                logging.getLogger("testflow.execution").warning(
-                    "Could not persist queued test run: %s", exc
-                )
 
         return ExecutionStatusResponse(
             job_id=job.id,
@@ -235,7 +254,7 @@ class ExecutionService:
         from app.repositories.project_repository import project_repository
         from app.repositories.test_suite_repository import test_suite_repository
 
-        project_repository.find_by_id(project_id)
+        project_repository.find_base(project_id)
         environment = _require_project_environment(project_id, environment_id)
         test_suite_repository.find_by_id(project_id, suite_id)
         case_ids = test_suite_repository.list_case_ids(project_id, suite_id)
@@ -261,7 +280,7 @@ class ExecutionService:
         from app.schemas.test_case import EXECUTION_CATEGORIES
         from app.schemas.test_suite import SUITE_CATEGORY_LABELS
 
-        project_repository.find_by_id(project_id)
+        project_repository.find_base(project_id)
         environment = _require_project_environment(project_id, environment_id)
         project_cases = test_case_repository.list_by_project(project_id)
 
@@ -398,9 +417,13 @@ class ExecutionService:
         if str(row.get("status") or "") not in ("Queued", "Running"):
             raise HTTPException(status_code=409, detail="This run is no longer active")
         job_id = str(row.get("jobId") or "")
-        if not job_id or request_cancel(job_id) == "missing":
+        if not job_id:
             raise HTTPException(status_code=404, detail="Execution job not found")
-        test_run_repository.mark_cancelled(job_id)
+        outcome = request_cancel(job_id)
+        # "missing": the job record expired or was lost while the row still says active.
+        # Cancelling closes the row instead of leaving it stuck forever.
+        if outcome in ("cancelled", "missing"):
+            test_run_repository.mark_cancelled(job_id)
 
     def rerun_test_run(
         self, run_id: str, run_by: Optional[tuple[str, str]] = None

@@ -1,21 +1,26 @@
 "use client";
 
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { WaitingHint } from "@/components/runs/WaitingHint";
+import { friendlyRunError } from "@/lib/friendlyRunError";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { FileText, FolderKanban, Layers, Search } from "lucide-react";
+import { FileText, FolderKanban, History, Layers, RotateCcw, Search, Square } from "lucide-react";
+import { toast } from "sonner";
 import { useNavigate } from "@/lib/navigation";
 import { api, type GroupedRun } from "@/lib/api";
 import { suiteCategoryLabel } from "@/lib/suiteCategory";
+import { pollWhileVisible } from "@/hooks/useExecutionPolling";
+import { PageContainer, PageHeader } from "@/components/layout/page-header";
+import { DataTable, createDataTableColumns, type DataTableColumn } from "@/components/ui/data-table";
+import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { EmptyState } from "@/components/common/EmptyState";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { SearchInput } from "@/components/ui/search-input";
+import { Toolbar } from "@/components/ui/toolbar";
+import { Select } from "@/components/ui/select";
 
-const STATUS_BADGE: Record<string, string> = {
-  Passed: "bg-green-100 text-green-800",
-  Completed: "bg-indigo-100 text-indigo-800",
-  Running: "bg-blue-100 text-blue-800",
-  Queued: "bg-amber-100 text-amber-800",
-  Failed: "bg-red-100 text-red-800",
-  Skipped: "bg-slate-100 text-slate-600",
-  Cancelled: "bg-orange-100 text-orange-800",
-};
+const POLL_MS = 4000;
 
 const TYPE_ICON = {
   project: FolderKanban,
@@ -23,21 +28,22 @@ const TYPE_ICON = {
   individual: FileText,
 } as const;
 
-function StatusPill({ status }: { status: string }) {
-  const tone = STATUS_BADGE[status] ?? "bg-slate-100 text-slate-700";
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {status}
-    </span>
-  );
-}
-
 const TYPE_LABELS: Record<GroupedRun["runType"], string> = {
   individual: "Individual",
   suite: "Suite",
   project: "Project",
 };
+
+const TYPE_OPTIONS = [
+  { value: "all", label: "All runs" },
+  { value: "individual", label: "Individual" },
+  { value: "suite", label: "Suite" },
+  { value: "project", label: "Project" },
+];
+
+function isLive(run: GroupedRun): boolean {
+  return run.status === "Queued" || run.status === "Running";
+}
 
 function formatDuration(durationMs?: number | null): string {
   if (durationMs === null || durationMs === undefined) return "—";
@@ -52,7 +58,7 @@ function formatWhen(value?: string | null): string {
 }
 
 function summary(run: GroupedRun): string {
-  if (run.runType === "individual") return run.errorMessage || "—";
+  if (run.runType === "individual") return friendlyRunError(run.errorMessage) || "—";
   const parts = [
     `${run.passed ?? 0} Passed`,
     `${run.failed ?? 0} Failed`,
@@ -64,27 +70,35 @@ function summary(run: GroupedRun): string {
   return parts.join(" · ");
 }
 
-function TypeIcon({ type }: { type: GroupedRun["runType"] }) {
-  const Icon = TYPE_ICON[type];
-  return <Icon size={15} className="text-slate-500" aria-hidden />;
+function progress(run: GroupedRun): string {
+  if (run.runType === "individual" || run.total == null) return "—";
+  return `${run.completed ?? 0} / ${run.total}`;
 }
 
 function RunActions({ run }: { run: GroupedRun }) {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const active = run.status === "Queued" || run.status === "Running";
+  const active = isLive(run);
   const canRerun = ["Passed", "Failed", "Skipped", "Cancelled", "Completed"].includes(run.status);
 
   async function cancel(event: MouseEvent) {
     event.stopPropagation();
+    const ok = await confirm({
+      title: "Cancel this run?",
+      tone: "danger",
+      confirmLabel: "Cancel run",
+      cancelLabel: "Keep running",
+      description: <p>Tests that haven’t finished will stop. Results already recorded are kept.</p>,
+    });
+    if (!ok) return;
     setBusy(true);
-    setMessage("");
     try {
       if (run.runType === "individual") await api.cancelTestRun(run.id);
       else await api.cancelBatchRun(run.id);
+      toast.success("Cancellation requested", { description: run.title });
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not cancel this run");
+      toast.error(err instanceof Error ? err.message : "Could not cancel this run");
     } finally {
       setBusy(false);
     }
@@ -93,7 +107,6 @@ function RunActions({ run }: { run: GroupedRun }) {
   async function rerun(event: MouseEvent) {
     event.stopPropagation();
     setBusy(true);
-    setMessage("");
     try {
       if (run.runType === "individual") {
         const started = await api.rerunTestRun(run.id);
@@ -105,45 +118,126 @@ function RunActions({ run }: { run: GroupedRun }) {
       const started = await api.rerunBatch(run.id);
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not rerun");
+      toast.error(err instanceof Error ? err.message : "Could not rerun");
     } finally {
       setBusy(false);
     }
   }
 
+  if (!active && !canRerun) return null;
   return (
-    <div className="flex flex-col items-start gap-1">
-      <div className="flex gap-2">
-        {active && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={cancel}
-            className="rounded border px-2 py-1 text-xs font-medium text-orange-800 disabled:opacity-60"
-          >
-            Cancel
-          </button>
-        )}
-        {canRerun && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={rerun}
-            className="rounded border px-2 py-1 text-xs font-medium text-indigo-800 disabled:opacity-60"
-          >
-            Rerun
-          </button>
-        )}
-      </div>
-      {message && <span className="text-xs text-red-700">{message}</span>}
+    <div className="flex justify-end gap-1.5">
+      {active ? (
+        <Button variant="outline" size="sm" disabled={busy} onClick={cancel} aria-label={`Cancel run ${run.title}`}>
+          <Square className="size-3" aria-hidden />
+          Cancel
+        </Button>
+      ) : null}
+      {canRerun ? (
+        <Button variant="outline" size="sm" loading={busy} onClick={rerun} aria-label={`Rerun ${run.title}`}>
+          {busy ? null : <RotateCcw className="size-3.5" aria-hidden />}
+          Rerun
+        </Button>
+      ) : null}
     </div>
   );
 }
 
-function progress(run: GroupedRun): string {
-  if (run.runType === "individual" || run.total == null) return "—";
-  return `${run.completed ?? 0} / ${run.total}`;
-}
+const col = createDataTableColumns<GroupedRun>();
+
+const columns: DataTableColumn<GroupedRun>[] = [
+  col.accessor("runType", {
+    header: "Type",
+    cell: ({ row }) => {
+      const Icon = TYPE_ICON[row.original.runType];
+      return (
+        <span className="inline-flex items-center gap-2 text-muted-foreground">
+          <Icon className="size-3.5" aria-hidden />
+          {TYPE_LABELS[row.original.runType]}
+        </span>
+      );
+    },
+  }),
+  col.accessor("title", {
+    header: "Name",
+    meta: { className: "max-w-[22rem] whitespace-normal" },
+    cell: ({ row }) => {
+      const run = row.original;
+      return (
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate font-medium text-foreground">{run.title}</span>
+            {run.code ? <span className="shrink-0 font-mono text-xs text-muted-foreground">{run.code}</span> : null}
+          </div>
+          {(run.runType === "project" && run.suiteCategory) || run.environmentName ? (
+            <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+              {run.runType === "project" && run.suiteCategory ? (
+                <span>Category: {suiteCategoryLabel(run.suiteCategory)}</span>
+              ) : null}
+              {run.environmentName ? <span>Environment: {run.environmentName}</span> : null}
+            </div>
+          ) : null}
+        </div>
+      );
+    },
+  }),
+  col.accessor("status", {
+    header: "Status",
+    cell: ({ row, getValue }) => (
+      <span className="flex flex-wrap items-center gap-1.5">
+        <RunStatusBadge status={getValue()} />
+        <WaitingHint status={getValue()} since={row.original.startedAt} />
+      </span>
+    ),
+  }),
+  col.accessor((run) => (run.runType === "individual" || run.total == null ? -1 : (run.completed ?? 0)), {
+    id: "progress",
+    header: "Progress",
+    meta: { align: "right" },
+    cell: ({ row }) => <span className="text-muted-foreground">{progress(row.original)}</span>,
+  }),
+  col.accessor((run) => run.startedAt ?? "", {
+    id: "startedAt",
+    header: "Started",
+    cell: ({ row }) => <span className="text-muted-foreground tabular-nums">{formatWhen(row.original.startedAt)}</span>,
+  }),
+  col.accessor((run) => run.durationMs ?? -1, {
+    id: "duration",
+    header: "Duration",
+    meta: { align: "right" },
+    cell: ({ row }) => formatDuration(row.original.durationMs),
+  }),
+  col.display({
+    id: "summary",
+    header: "Summary",
+    meta: { className: "max-w-md whitespace-normal" },
+    cell: ({ row }) => {
+      const run = row.original;
+      if (run.runType === "individual" && run.errorMessage) {
+        return (
+          <span className="line-clamp-2 text-xs break-words text-destructive" title={run.errorMessage}>
+            {friendlyRunError(run.errorMessage)}
+          </span>
+        );
+      }
+      return (
+        <span className={run.runType === "individual" ? "text-faint" : "text-muted-foreground tabular-nums"}>
+          {summary(run)}
+        </span>
+      );
+    },
+  }),
+  col.display({
+    id: "actions",
+    header: () => <span className="sr-only">Actions</span>,
+    meta: { align: "right" },
+    cell: ({ row }) => (
+      <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+        <RunActions run={row.original} />
+      </div>
+    ),
+  }),
+];
 
 export function TestRunsPage() {
   const navigate = useNavigate();
@@ -155,33 +249,24 @@ export function TestRunsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    let inFlight = false;
-    const load = () => {
-      if (inFlight) return;
-      inFlight = true;
-      api
-        .groupedRuns()
-        .then((items) => {
-          if (!cancelled) {
-            setRuns(items);
-            setError("");
-            const live = items.some((item) => item.status === "Queued" || item.status === "Running");
-            if (!live) window.clearInterval(timer);
-          }
-        })
-        .catch((err: Error) => {
-          if (!cancelled) setError(err.message);
-        })
-        .finally(() => {
-          inFlight = false;
-          if (!cancelled) setLoading(false);
-        });
-    };
-    load();
-    const timer = window.setInterval(load, 4000);
+    // Poll only while some run is queued/running; pauses while the tab is hidden.
+    const stop = pollWhileVisible(async () => {
+      try {
+        const items = await api.groupedRuns();
+        if (cancelled) return false;
+        setRuns(items);
+        setError("");
+        return items.some(isLive);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load test runs");
+        return true;
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, POLL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stop();
     };
   }, []);
 
@@ -204,139 +289,78 @@ export function TestRunsPage() {
     navigate(`/runs/batches/${run.id}`);
   }
 
+  const filtered = query.trim() !== "" || typeFilter !== "all";
+
   return (
-    <div className="p-6 lg:p-8">
-      <div>
-        <h1 className="text-3xl font-bold">
-          Test Runs <span className="font-medium text-slate-500">(Execution History)</span>
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Individual, suite, and project executions, newest first.
-        </p>
-      </div>
+    <PageContainer>
+      <PageHeader title="Test Runs" description="Execution history for individual, suite and project runs, newest first." />
 
-      {error && (
-        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      {error ? <Alert variant="error" title="Could not refresh test runs">{error}</Alert> : null}
 
-      <div className="mt-6 overflow-hidden rounded-lg bg-white shadow-sm">
-        <div className="flex flex-wrap items-center gap-3 border-b p-3">
-          <div className="relative w-full max-w-md">
-            <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
-            <input
-              className="w-full rounded bg-indigo-50 py-2 pl-9 pr-3 text-sm"
-              placeholder="Search by name, code, or status..."
+      <div className="flex flex-col">
+        <Toolbar
+          sticky
+          className="mb-1"
+          search={
+            <SearchInput
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={setQuery}
+              placeholder="Search by name, code, or status…"
+              shortcut="/"
+              bindShortcut
             />
-          </div>
-          <select
-            aria-label="Run type"
-            className="rounded-lg border bg-indigo-50 px-3 py-2 text-sm"
-            value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value)}
-          >
-            <option value="all">All Runs</option>
-            <option value="individual">Individual</option>
-            <option value="suite">Suite</option>
-            <option value="project">Project</option>
-          </select>
-        </div>
+          }
+          filters={<Select aria-label="Run type" value={typeFilter} onChange={setTypeFilter} options={TYPE_OPTIONS} />}
+          actions={
+            !loading && runs.length > 0 ? (
+              <p className="text-xs text-muted-foreground tabular-nums">
+                Showing {visible.length} of {runs.length} run{runs.length === 1 ? "" : "s"}
+              </p>
+            ) : null
+          }
+        />
 
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-600">
-            <tr>
-              <th className="px-4 py-3 text-left">Run type</th>
-              <th className="px-4 py-3 text-left">Name</th>
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-left">Progress</th>
-              <th className="px-4 py-3 text-left">Started</th>
-              <th className="px-4 py-3 text-left">Duration</th>
-              <th className="px-4 py-3 text-left">Summary</th>
-              <th className="px-4 py-3 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
-                  <LoadingSpinner label="Loading run history…" compact className="justify-center" />
-                </td>
-              </tr>
-            ) : visible.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
-                  {runs.length === 0
-                    ? "No test runs recorded yet. Run a test case, suite, or project to see it here."
-                    : "No test runs match these filters."}
-                </td>
-              </tr>
+        <DataTable
+          columns={columns}
+          data={visible}
+          getRowId={(run) => `${run.runType}-${run.id}`}
+          loading={loading}
+          loadingLabel="Loading test runs…"
+          minWidth={960}
+          onRowClick={openRun}
+          rowLabel={(run) => `Open ${TYPE_LABELS[run.runType]} run ${run.title}`}
+          empty={
+            runs.length === 0 ? (
+              <EmptyState
+                icon={History}
+                title="No test runs yet"
+                description="Run a test case, suite or project to see it here."
+              />
             ) : (
-              visible.map((run) => (
-                <tr
-                  key={`${run.runType}-${run.id}`}
-                  className="cursor-pointer border-t align-top hover:bg-slate-50"
-                  tabIndex={0}
-                  aria-label={`Open ${TYPE_LABELS[run.runType]} run ${run.title}`}
-                  onClick={() => openRun(run)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      openRun(run);
-                    }
-                  }}
-                >
-                  <td className="px-4 py-4 font-medium">
-                    <span className="inline-flex items-center gap-2">
-                      <TypeIcon type={run.runType} />
-                      {TYPE_LABELS[run.runType]}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4">
-                    <span className="font-medium">{run.title}</span>
-                    {run.code && <span className="ml-2 font-mono text-xs text-slate-500">{run.code}</span>}
-                    {run.runType === "project" && run.suiteCategory && (
-                      <div className="mt-1 text-xs text-slate-500">Category: {suiteCategoryLabel(run.suiteCategory)}</div>
-                    )}
-                    {run.environmentName && (
-                      <div className="mt-1 text-xs text-slate-500">Environment: {run.environmentName}</div>
-                    )}
-                  </td>
-                  <td className="px-4 py-4">
-                    <StatusPill status={run.status} />
-                  </td>
-                  <td className="px-4 py-4 font-mono text-xs">{progress(run)}</td>
-                  <td className="px-4 py-4 text-slate-600">{formatWhen(run.startedAt)}</td>
-                  <td className="px-4 py-4 font-mono text-xs">{formatDuration(run.durationMs)}</td>
-                  <td className="max-w-md px-4 py-4">
-                    {run.runType === "individual" && run.errorMessage ? (
-                      <pre className="whitespace-pre-wrap break-words font-mono text-xs text-red-700">
-                        {run.errorMessage}
-                      </pre>
-                    ) : (
-                      <span className={run.runType === "individual" ? "text-slate-400" : "text-slate-700"}>
-                        {summary(run)}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-4" onClick={(event) => event.stopPropagation()}>
-                    <RunActions run={run} />
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-
-        {!loading && visible.length > 0 && (
-          <div className="border-t px-4 py-3 text-sm text-slate-500">
-            Showing {visible.length} of {runs.length} run{runs.length === 1 ? "" : "s"}
-          </div>
-        )}
+              <EmptyState
+                icon={Search}
+                size="sm"
+                title="No matching runs"
+                action={
+                  filtered ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setQuery("");
+                        setTypeFilter("all");
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  ) : null
+                }
+              />
+            )
+          }
+        />
       </div>
-    </div>
+    </PageContainer>
   );
 }
 

@@ -1,48 +1,88 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-export type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
+/** Shared control styling, reused by Select, Textarea and custom fields. */
+export const controlClasses =
+  "h-9 w-full min-w-0 rounded-md border border-input bg-surface px-3 text-sm text-foreground transition-[border-color,box-shadow] duration-150 outline-none placeholder:text-faint hover:border-border-strong focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:bg-elevated disabled:text-muted-foreground aria-invalid:border-destructive aria-invalid:focus-visible:ring-destructive/25";
+
+export type InputProps = React.ComponentProps<"input"> & {
   label?: string;
   error?: string;
+  /** Helper text shown under the field when there is no error. */
+  hint?: string;
 };
 
-export function Input({ className, label, error, required, id, ...props }: InputProps) {
-  const inputId = id ?? (label ? `input-${label.replace(/\s+/g, "-").toLowerCase()}` : undefined);
+export function FieldLabel({
+  htmlFor,
+  required,
+  children,
+  className,
+}: {
+  htmlFor?: string;
+  required?: boolean;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <label
+      data-slot="field-label"
+      htmlFor={htmlFor}
+      className={cn("mb-1.5 block text-[13px] font-medium text-foreground", className)}
+    >
+      {children}
+      {required ? <span className="text-destructive"> *</span> : null}
+    </label>
+  );
+}
+
+export function FieldMessage({ id, error, hint }: { id?: string; error?: string; hint?: string }) {
+  if (error) {
+    return (
+      <p id={id} data-slot="field-error" className="mt-1.5 text-xs text-destructive">
+        {error}
+      </p>
+    );
+  }
+  if (hint) {
+    return (
+      <p id={id} data-slot="field-hint" className="mt-1.5 text-xs text-muted-foreground">
+        {hint}
+      </p>
+    );
+  }
+  return null;
+}
+
+export function Input({ className, label, error, hint, required, id, ...props }: InputProps) {
+  const generatedId = React.useId();
+  const inputId = id ?? (label ? `input-${label.replace(/\s+/g, "-").toLowerCase()}` : generatedId);
+  const messageId = error || hint ? `${inputId}-message` : undefined;
 
   const field = (
     <input
       id={inputId}
+      data-slot="input"
       required={required}
       aria-invalid={error ? true : undefined}
+      aria-describedby={messageId}
       className={cn(
-        "h-11 w-full rounded-lg border bg-white px-3 text-sm outline-none transition",
-        error
-          ? "border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-100"
-          : "border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100",
-        props.disabled && "cursor-not-allowed bg-slate-50 text-slate-500",
+        controlClasses,
+        "file:mr-3 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground",
         className
       )}
       {...props}
     />
   );
 
-  if (!label) {
-    return (
-      <div className="w-full">
-        {field}
-        {error ? <p className="mt-1.5 text-sm text-red-600">{error}</p> : null}
-      </div>
-    );
-  }
-
   return (
     <div className="w-full">
-      <label htmlFor={inputId} className="mb-1.5 block text-sm font-medium text-slate-900">
-        {label}
-        {required ? <span className="text-red-600"> *</span> : null}
-      </label>
+      {label ? (
+        <FieldLabel htmlFor={inputId} required={required}>
+          {label}
+        </FieldLabel>
+      ) : null}
       {field}
-      {error ? <p className="mt-1.5 text-sm text-red-600">{error}</p> : null}
+      <FieldMessage id={messageId} error={error} hint={hint} />
     </div>
   );
 }

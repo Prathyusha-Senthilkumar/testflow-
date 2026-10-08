@@ -1,15 +1,58 @@
 "use client";
 
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { useEffect, useState } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { WaitingHint } from "@/components/runs/WaitingHint";
+import { AdminDetails } from "@/components/common/AdminDetails";
+import { friendlyRunError } from "@/lib/friendlyRunError";
+import { LoadingArea } from "@/components/common/LoadingArea";
+import { useEffect, useState, type ReactNode } from "react";
+import { ArrowLeft, Download, ImageOff, RotateCcw, Square } from "lucide-react";
+import { toast } from "sonner";
 import { Link, useNavigate, useParams, useSearchParams } from "@/lib/navigation";
 import { api, type ReportRun, type RunScreenshot } from "@/lib/api";
-import { StepScreenshots } from "@/components/runs/StepScreenshots";
 import { formatDuration, formatExecutedAt } from "@/lib/reportCsv";
 import { downloadRunReport, splitFailure } from "@/lib/runReport";
+import { pollWhileVisible } from "@/hooks/useExecutionPolling";
+import { StepScreenshots } from "@/components/runs/StepScreenshots";
+import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
+import { DetailLayout, PageContainer, PageHeader } from "@/components/layout/page-header";
+import { runLabel, testCaseLabel, usePublishEntityName } from "@/components/layout/shell-context";
+import { EmptyState } from "@/components/common/EmptyState";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TestResultPage } from "@/views/TestResultPage";
 
+const POLL_MS = 2000;
+
+const isLiveStatus = (status?: string | null) => status === "Queued" || status === "Running";
+
+function RunResultSkeleton() {
+  return (
+    <PageContainer width="detail">
+      <LoadingArea
+        loading
+        label="Loading result…"
+        skeleton={
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-24" />
+              <Skeleton className="h-7 w-80 max-w-full" />
+              <Skeleton className="h-4 w-56" />
+            </div>
+            <DetailLayout main={<Skeleton className="h-80 w-full" />} aside={<Skeleton className="h-48 w-full" />} />
+          </div>
+        }
+      />
+    </PageContainer>
+  );
+}
+
 export function RunResultPage() {
+  const confirm = useConfirm();
   const navigate = useNavigate();
   const { id: projectId = "", runId = "" } = useParams();
   const fromRuns = useSearchParams().get("from") === "runs";
@@ -19,36 +62,38 @@ export function RunResultPage() {
   const [busy, setBusy] = useState(false);
   const [screenshots, setScreenshots] = useState<RunScreenshot[]>([]);
   const [reportBusy, setReportBusy] = useState(false);
-  const [reportError, setReportError] = useState("");
 
   useEffect(() => {
     if (!runId) return;
-    const status = run?.status;
-    if (status && status !== "Queued" && status !== "Running") return;
     let cancelled = false;
-    const load = () => {
-      api
-        .reportRun(runId)
-        .then((row) => {
-          if (!cancelled) setRun(row);
-        })
-        .catch((err: Error) => {
-          if (cancelled) return;
-          if (/not found/i.test(err.message)) setMissing(true);
-          else setError(err.message || "Could not load this result.");
-        });
-    };
-    load();
-    const timer = window.setInterval(load, 2000);
+    // Poll while the run is queued/running; stop at a terminal status or when
+    // the run is missing. Pauses while the tab is hidden.
+    const stop = pollWhileVisible(async () => {
+      try {
+        const row = await api.reportRun(runId);
+        if (cancelled) return false;
+        setRun(row);
+        return isLiveStatus(row.status);
+      } catch (err) {
+        if (cancelled) return false;
+        const message = err instanceof Error ? err.message : "";
+        if (/not found/i.test(message)) {
+          setMissing(true);
+          return false;
+        }
+        setError(message || "Could not load this result.");
+        return true;
+      }
+    }, POLL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stop();
     };
-  }, [runId, run?.status]);
+  }, [runId]);
 
   useEffect(() => {
     const status = run?.status;
-    if (!runId || status === "Queued" || status === "Running" || !status) return;
+    if (!runId || isLiveStatus(status) || !status) return;
     let cancelled = false;
     api.runScreenshots(runId).then((items) => {
       if (!cancelled) setScreenshots(items);
@@ -60,37 +105,47 @@ export function RunResultPage() {
     };
   }, [runId, run?.status]);
 
+  usePublishEntityName("project", run?.projectId, run?.projectName);
+  usePublishEntityName("testCase", run?.testCaseId, run ? testCaseLabel(run.testCaseCode, run.testName) : null);
+  usePublishEntityName("run", run ? runId : null, run ? runLabel(run.startedAt) : null, { testCaseId: run?.testCaseId });
+
   if (missing) return <TestResultPage />;
 
-  if (error) {
+  if (error && !run) {
     return (
-      <div className="p-6 lg:p-8">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">{error}</div>
-      </div>
+      <PageContainer width="detail">
+        <Alert variant="error" title="Could not load this result">
+          {error}
+        </Alert>
+      </PageContainer>
     );
   }
 
-  if (!run) {
-    return (
-      <div className="p-6 lg:p-8">
-        <div className="rounded-lg bg-white shadow-sm"><LoadingSpinner label="Loading result…" /></div>
-      </div>
-    );
-  }
+  if (!run) return <RunResultSkeleton />;
 
   const cancelled = run.status === "Not Run" && run.errorMessage === "Cancelled";
   const label = cancelled ? "Cancelled" : run.status;
-  const failed = run.status === "Failed";
-  const active = run.status === "Queued" || run.status === "Running";
+  const active = isLiveStatus(run.status);
+  const projectPath = `/projects/${projectId || run.projectId}`;
+  const heading = `${run.testCaseCode ? `${run.testCaseCode} · ` : ""}${run.testName || "Test run"}`;
 
   async function cancelRun() {
+    const ok = await confirm({
+      title: "Cancel this run?",
+      tone: "danger",
+      confirmLabel: "Cancel run",
+      cancelLabel: "Keep running",
+      description: <p>Tests that haven’t finished will stop. Results already recorded are kept.</p>,
+    });
+    if (!ok) return;
     setBusy(true);
-    setError("");
     try {
       await api.cancelTestRun(runId);
-      setRun(await api.reportRun(runId));
+      const next = await api.reportRun(runId);
+      setRun(next);
+      toast.success("Cancellation requested");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not cancel this run");
+      toast.error(err instanceof Error ? err.message : "Could not cancel this run");
     } finally {
       setBusy(false);
     }
@@ -98,7 +153,6 @@ export function RunResultPage() {
 
   async function rerun() {
     setBusy(true);
-    setError("");
     try {
       const started = await api.rerunTestRun(runId);
       if (started.testRunId) {
@@ -106,130 +160,161 @@ export function RunResultPage() {
         navigate(`/projects/${projectId || run?.projectId}/results/${started.testRunId}${from}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not rerun");
+      toast.error(err instanceof Error ? err.message : "Could not rerun");
       setBusy(false);
     }
   }
 
+  async function downloadReport() {
+    if (!run) return;
+    setReportBusy(true);
+    try {
+      await downloadRunReport({
+        testName: run.testName || "Test run",
+        projectName: run.projectName,
+        suiteName: run.suiteName,
+        runId: run.id,
+        executedAt: formatExecutedAt(run.completedAt || run.startedAt),
+        environment: null,
+        status: cancelled ? "Cancelled" : run.status,
+        duration: formatDuration(run.durationMs),
+        errorMessage: run.errorMessage,
+        steps: screenshots,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not download this report");
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
+  const showFailure = Boolean(run.errorMessage) && screenshots.length === 0;
+  const showScreenshots = screenshots.length > 0 && !active;
+
   return (
-    <div className="p-6 lg:p-8">
-      <div className="rounded-lg bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className={`rounded-full px-3 py-1 text-xs font-semibold text-white ${failed ? "bg-red-600" : cancelled ? "bg-orange-700" : "bg-teal-700"}`}>
-            {label.toUpperCase()}
-          </span>
-          <span className="text-sm text-slate-500">{run.projectName || "Project"}</span>
-          <span className="text-sm text-slate-500">{run.suiteName || "Suite"}</span>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
-          <h1 className="text-3xl font-bold">
-            {run.testCaseId ? (
-              <Link to={`/projects/${projectId || run.projectId}/test-cases/${run.testCaseId}`} className="hover:underline">
-                {run.testCaseCode ? `${run.testCaseCode} · ` : ""}
-                {run.testName || "Test run"}
-              </Link>
-            ) : (
-              <>
-                {run.testCaseCode ? `${run.testCaseCode} · ` : ""}
-                {run.testName || "Test run"}
-              </>
-            )}
-          </h1>
-          <div className="flex gap-2">
-            {active && (
-              <button type="button" disabled={busy} onClick={cancelRun} className="rounded-lg border border-orange-300 px-4 py-2 text-sm font-medium text-orange-800 disabled:opacity-60">
-                Cancel
-              </button>
-            )}
-            {!active && (
-              <button type="button" disabled={busy} onClick={rerun} className="rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-60">
-                Rerun
-              </button>
-            )}
-            {!active && (
-              <button
-                type="button"
-                disabled={reportBusy}
-                onClick={async () => {
-                  setReportError("");
-                  setReportBusy(true);
-                  try {
-                    await downloadRunReport({
-                      testName: run.testName || "Test run",
-                      projectName: run.projectName,
-                      suiteName: run.suiteName,
-                      runId: run.id,
-                      executedAt: formatExecutedAt(run.completedAt || run.startedAt),
-                      environment: null,
-                      status: cancelled ? "Cancelled" : run.status,
-                      duration: formatDuration(run.durationMs),
-                      errorMessage: run.errorMessage,
-                      steps: screenshots,
-                    });
-                  } catch (err) {
-                    setReportError(err instanceof Error ? err.message : "Could not download this report");
-                  } finally {
-                    setReportBusy(false);
-                  }
-                }}
-                className="rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-60"
-              >
-                {reportBusy ? "Generating report..." : "Download Report"}
-              </button>
-            )}
+    <PageContainer width="detail">
+      <PageHeader
+        title={
+          run.testCaseId ? (
+            <Link
+              to={`${projectPath}/test-cases/${run.testCaseId}`}
+              className="rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {heading}
+            </Link>
+          ) : (
+            heading
+          )
+        }
+        description={`Run ${run.id}`}
+        meta={
+          <>
+            <RunStatusBadge status={label} />
+            <WaitingHint status={run.status} since={run.startedAt} />
+            {run.projectName ? <Badge variant="outline">{run.projectName}</Badge> : null}
+            {run.suiteName ? <Badge variant="outline">{run.suiteName}</Badge> : null}
+          </>
+        }
+        actions={
+          <>
             {fromRuns && run.testCaseId ? (
-              <Link
-                to={`/projects/${projectId || run.projectId}/test-cases/${run.testCaseId}`}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
-              >
-                Back to test case
-              </Link>
+              <Button variant="ghost" asChild>
+                <Link to={`${projectPath}/test-cases/${run.testCaseId}`}>
+                  <ArrowLeft aria-hidden />
+                  Back to test case
+                </Link>
+              </Button>
             ) : (
-              <Link to="/reports" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">
-                Back to Reports
-              </Link>
+              <Button variant="ghost" asChild>
+                <Link to="/reports">
+                  <ArrowLeft aria-hidden />
+                  Back to Reports
+                </Link>
+              </Button>
             )}
-          </div>
-        </div>
-      </div>
+            {!active ? (
+              <Button variant="outline" loading={reportBusy} onClick={downloadReport}>
+                {reportBusy ? null : <Download aria-hidden />}
+                {reportBusy ? "Generating report…" : "Download report"}
+              </Button>
+            ) : null}
+            {active ? (
+              <Button variant="danger" loading={busy} onClick={cancelRun}>
+                {busy ? null : <Square className="size-3.5" aria-hidden />}
+                Cancel
+              </Button>
+            ) : (
+              <Button loading={busy} onClick={rerun}>
+                {busy ? null : <RotateCcw aria-hidden />}
+                Rerun
+              </Button>
+            )}
+          </>
+        }
+      />
 
-      <div className="mt-5 rounded-lg bg-white p-5 shadow-sm">
-        <h2 className="font-semibold">Execution result</h2>
-        <dl className="mt-4 space-y-3 text-sm">
-          <Row label="Status" value={label} />
-          <Row label="Executed" value={formatExecutedAt(run.completedAt || run.startedAt) || "—"} />
-          <Row label="Duration" value={formatDuration(run.durationMs) || "—"} />
-          <Row label="Run by" value={run.runBy || "—"} />
-        </dl>
-        {run.errorMessage && screenshots.length === 0 && (
-          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            <p className="font-semibold">{cancelled ? "Reason" : "Failure reason"}</p>
-            <p className="mt-2 whitespace-pre-wrap">{splitFailure(run.errorMessage).summary}</p>
-          </div>
-        )}
-        {reportError ? <p className="mt-3 text-sm text-red-600">{reportError}</p> : null}
-      </div>
+      {error ? <Alert variant="warning" title="Live updates interrupted">{error}</Alert> : null}
 
-      {screenshots.length > 0 && !active && (
-        <div className="mt-5 rounded-lg bg-white p-5 shadow-sm">
-          <h2 className="font-semibold">Screenshots</h2>
-          <StepScreenshots
-            runId={run.id}
-            steps={screenshots}
-            status={run.status}
-            errorMessage={run.status === "Failed" ? run.errorMessage : null}
-          />
-        </div>
-      )}
-    </div>
+      <DetailLayout
+        main={
+          <>
+            {showFailure ? (
+              <Alert variant={cancelled ? "warning" : "error"} title={cancelled ? "Cancelled" : friendlyRunError(run.errorMessage) || "Failure reason"}>
+                {cancelled ? null : <AdminDetails detail={splitFailure(run.errorMessage ?? "").summary || run.errorMessage} />}
+              </Alert>
+            ) : null}
+            {showScreenshots ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Screenshots</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <StepScreenshots
+                    runId={run.id}
+                    steps={screenshots}
+                    status={run.status}
+                    errorMessage={run.status === "Failed" ? run.errorMessage : null}
+                  />
+                </CardContent>
+              </Card>
+            ) : active ? (
+              <div className="rounded-lg border border-border bg-surface">
+                <LoadingSpinner label={run.status === "Queued" ? "Waiting for a runner…" : "Running test…"} />
+              </div>
+            ) : !showFailure ? (
+              <EmptyState
+                variant="panel"
+                icon={ImageOff}
+                title="No screenshots recorded"
+                description="This run did not capture step screenshots."
+              />
+            ) : null}
+          </>
+        }
+        aside={
+          <Card>
+            <CardHeader>
+              <CardTitle>Execution result</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="space-y-2.5 text-[13px]">
+                <Row label="Executed" value={formatExecutedAt(run.completedAt || run.startedAt) || "—"} />
+                <Row label="Duration" value={formatDuration(run.durationMs) || "—"} numeric />
+                <Row label="Run by" value={run.runBy || "—"} />
+              </dl>
+            </CardContent>
+          </Card>
+        }
+      />
+    </PageContainer>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value, numeric }: { label: string; value: ReactNode; numeric?: boolean }) {
   return (
-    <div className="flex gap-3">
-      <dt className="w-28 text-slate-500">{label}</dt>
-      <dd className="font-medium">{value}</dd>
+    <div className="flex items-center justify-between gap-3">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={`min-w-0 truncate text-right font-medium text-foreground ${numeric ? "tabular-nums" : ""}`}>{value}</dd>
     </div>
   );
 }

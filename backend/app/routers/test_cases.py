@@ -7,7 +7,6 @@ from app.repositories.test_case_repository import test_case_repository
 from app.services.test_cases_service import TestCasesService
 from app.schemas.test_case import TestCaseSummary, CreateTestCaseDto, UpdateTestCaseDto
 from app.schemas.test_case_version import TestCaseVersionDetail, TestCaseVersionSummary
-from app.schemas.test_run import TestRunResult
 from app.schemas.test_script import TestScriptDto, TestScriptResponse
 
 router = APIRouter(prefix="/projects/{project_id}/test-cases", tags=["test-cases"])
@@ -122,12 +121,3 @@ def record_test_case(
     service: TestCasesService = Depends(get_test_cases_service),
 ):
     return service.record(project_id, test_case_id)
-
-
-@router.post("/{test_case_id}/run", response_model=TestRunResult)
-def run_test_case(
-    project_id: str,
-    test_case_id: str,
-    service: TestCasesService = Depends(get_test_cases_service),
-):
-    return service.run(project_id, test_case_id)

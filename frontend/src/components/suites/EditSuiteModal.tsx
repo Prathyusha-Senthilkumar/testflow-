@@ -73,7 +73,11 @@ export function EditSuiteModal({ open, suite, loading = false, onClose, onSubmit
           value={description}
           onChange={(event) => setDescription(event.target.value)}
         />
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        {error ? (
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
       </form>
     </Modal>
   );

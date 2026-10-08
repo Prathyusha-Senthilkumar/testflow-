@@ -1,29 +1,40 @@
 "use client";
 
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FileCheck2, ListMinus, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useCreateDraftTestCase } from "@/hooks/useCreateDraftTestCase";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
-import { api, type EnvironmentSummary, type TestCaseInput, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
+import { api, type EnvironmentSummary, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Alert } from "@/components/ui/alert";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DataTable, createDataTableColumns } from "@/components/ui/data-table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { EmptyState } from "@/components/common/EmptyState";
+import { PageContainer, PageHeader, SectionHeader } from "@/components/layout/page-header";
+import { usePublishEntityName } from "@/components/layout/shell-context";
 import { AddTestCasesModal } from "@/components/suites/AddTestCasesModal";
 import { EditSuiteModal } from "@/components/suites/EditSuiteModal";
 import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
-import { TestCaseFormModal } from "@/components/test-cases/TestCaseFormModal";
+
+const column = createDataTableColumns<TestCaseSummary>();
 
 export function TestSuiteDetailPage() {
   const navigate = useNavigate();
+  const createDraft = useCreateDraftTestCase();
+  const confirm = useConfirm();
   const { id: projectId = "", suiteId = "" } = useParams();
   const [suite, setSuite] = useState<TestSuiteDetail | null>(null);
   const [projectCases, setProjectCases] = useState<TestCaseSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
   const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
   const [environmentId, setEnvironmentId] = useState("");
@@ -49,23 +60,6 @@ export function TestSuiteDetailPage() {
       .finally(() => setLoading(false));
   }, [projectId, suiteId]);
 
-  async function handleCreate(input: TestCaseInput) {
-    if (!projectId || !suiteId) return;
-    setCreating(true);
-    setError("");
-    try {
-      const created = await api.createTestCase(projectId, { ...input, suiteId });
-      const updated = await api.testSuite(projectId, suiteId);
-      setSuite(updated);
-      setProjectCases((current) => [created, ...current.filter((item) => item.id !== created.id)]);
-      setCreateOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create test case");
-    } finally {
-      setCreating(false);
-    }
-  }
-
   async function handleAdd(testCaseIds: string[]) {
     if (!projectId || !suiteId) return;
     setBusy(true);
@@ -74,35 +68,35 @@ export function TestSuiteDetailPage() {
       const updated = await api.addTestCasesToSuite(projectId, suiteId, testCaseIds);
       setSuite(updated);
       setAddOpen(false);
+      toast.success(`Added ${testCaseIds.length} test case${testCaseIds.length === 1 ? "" : "s"}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add test cases");
+      toast.error(err instanceof Error ? err.message : "Could not add test cases");
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleDeleteCase(testCaseId: string, name: string) {
-    if (!projectId || !suiteId) return;
-    if (!window.confirm(`Delete test case “${name}”? This cannot be undone.`)) return;
-    setError("");
-    try {
-      await api.deleteTestCase(projectId, testCaseId);
-      const updated = await api.testSuite(projectId, suiteId);
-      setSuite(updated);
-      setProjectCases((current) => current.filter((item) => item.id !== testCaseId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete test case");
-    }
-  }
-
-  async function handleRemove(testCaseId: string) {
+  /** Removes immediately (nothing is lost) with an Undo that re-adds the case. */
+  async function handleRemove(testCaseId: string, name: string) {
     if (!projectId || !suiteId) return;
     setError("");
     try {
       const updated = await api.removeTestCaseFromSuite(projectId, suiteId, testCaseId);
       setSuite(updated);
+      toast.success("Removed from suite", {
+        description: name,
+        action: {
+          label: "Undo",
+          onClick: () => {
+            api
+              .addTestCasesToSuite(projectId, suiteId, [testCaseId])
+              .then(setSuite)
+              .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Couldn’t add it back"));
+          },
+        },
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not remove test case");
+      toast.error(err instanceof Error ? err.message : "Could not remove test case");
     }
   }
 
@@ -115,8 +109,9 @@ export function TestSuiteDetailPage() {
       const refreshed = await api.testSuite(projectId, suiteId);
       setSuite(refreshed);
       setEditOpen(false);
+      toast.success("Suite updated");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update suite");
+      toast.error(err instanceof Error ? err.message : "Could not update suite");
     } finally {
       setBusy(false);
     }
@@ -134,7 +129,7 @@ export function TestSuiteDetailPage() {
       setRunOpen(false);
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start the suite run");
+      toast.error(err instanceof Error ? err.message : "Could not start the suite run");
       setStarting(false);
       setCancelling(false);
     }
@@ -151,157 +146,214 @@ export function TestSuiteDetailPage() {
 
   async function handleDelete() {
     if (!projectId || !suiteId) return;
-    if (!window.confirm("Delete this test suite? Test cases will not be deleted.")) return;
     setError("");
-    try {
-      await api.deleteTestSuite(projectId, suiteId);
-      navigate(`/projects/${projectId}/suites`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete suite");
-    }
+    const deleted = await confirm({
+      title: "Delete suite?",
+      description: (
+        <>
+          <strong>{suite?.name ?? "This suite"}</strong> will be permanently deleted. Test cases in this suite are kept.
+        </>
+      ),
+      confirmLabel: "Delete suite",
+      tone: "danger",
+      onConfirm: async () => {
+        await api.deleteTestSuite(projectId, suiteId);
+      },
+    });
+    if (!deleted) return;
+    toast.success("Suite deleted");
+    navigate(`/projects/${projectId}/suites`);
   }
 
+  usePublishEntityName("suite", suite?.id, suite?.name);
+
+  // The handlers only close over projectId/suiteId, so columns rebuild on those.
+  const columns = useMemo(
+    () => [
+      column.accessor("code", {
+        header: "Code",
+        meta: { className: "w-24" },
+        cell: (info) => <span className="font-mono text-xs text-muted-foreground">{info.getValue()}</span>,
+      }),
+      column.accessor("name", {
+        header: "Name",
+        meta: { className: "whitespace-normal" },
+        cell: (info) => (
+          <div className="min-w-0">
+            <div className="font-medium text-foreground">{info.getValue()}</div>
+            {info.row.original.categories?.length ? (
+              <div className="mt-1">
+                <SuiteCategoryBadges categories={info.row.original.categories} />
+              </div>
+            ) : null}
+          </div>
+        ),
+      }),
+      column.accessor((testCase) => testCase.category ?? "Functional", {
+        id: "category",
+        header: "Category",
+        cell: (info) => <span className="text-muted-foreground">{info.getValue()}</span>,
+      }),
+      column.accessor((testCase) => testCase.scenario ?? "Happy Path", {
+        id: "scenario",
+        header: "Scenario",
+        cell: (info) => <span className="text-muted-foreground">{info.getValue()}</span>,
+      }),
+      column.accessor("automationStatus", {
+        header: "Automation",
+        cell: (info) => <span className="text-muted-foreground">{info.getValue()}</span>,
+      }),
+      column.display({
+        id: "actions",
+        header: () => <span className="sr-only">Actions</span>,
+        meta: { align: "right", className: "w-12" },
+        cell: (info) => {
+          const testCase = info.row.original;
+          return (
+            <div
+              className="flex items-center justify-end gap-1"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Remove ${testCase.name} from suite`}
+                    className="reveal-on-hover"
+                    onClick={() => void handleRemove(testCase.id, testCase.name)}
+                  >
+                    <ListMinus />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Remove from suite</TooltipContent>
+              </Tooltip>
+            </div>
+          );
+        },
+      }),
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers are recreated each render but only read projectId/suiteId
+    [projectId, suiteId]
+  );
+
   if (loading) {
-    return <div className="p-6 lg:p-8"><LoadingSpinner label="Loading suite…" /></div>;
+    return (
+      <PageContainer>
+        <div className="space-y-2" aria-hidden>
+          <Skeleton className="h-7 w-64" />
+          <Skeleton className="h-4 w-96 max-w-full" />
+        </div>
+        <DataTable columns={columns} data={[]} loading skeletonRows={5} />
+      </PageContainer>
+    );
   }
 
   if (!suite) {
     return (
-      <div className="p-6 lg:p-8">
-        <p className="text-sm text-red-600">{error || "Suite not found."}</p>
-        <Link to={`/projects/${projectId}/suites`} className="mt-2 inline-block text-sm text-indigo-600">
-          ← Test Suites
-        </Link>
-      </div>
+      <PageContainer>
+        <EmptyState
+          variant="panel"
+          icon={FileCheck2}
+          title="Suite not found"
+          description={error || "This suite may have been deleted."}
+          action={
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/projects/${projectId}/suites`}>
+                <ArrowLeft />
+                Back to suites
+              </Link>
+            </Button>
+          }
+        />
+      </PageContainer>
     );
   }
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <Link to={`/projects/${projectId}/suites`} className="text-sm text-indigo-600 hover:underline">
-            ← Test Suites
-          </Link>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <h1 className="text-3xl font-bold">{suite.name}</h1>
-            <SuiteCategoryBadges categories={suite.categories} category={suite.category} />
-          </div>
-          {suite.description ? <p className="mt-1 text-sm text-slate-500">{suite.description}</p> : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" onClick={() => setRunOpen(true)}>
-            <Play size={15} className="mr-1 inline" />
-            Run Test Suite
-          </Button>
-          <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>
-            <Pencil size={15} className="mr-1 inline" />
-            Edit Suite
-          </Button>
-          <Button type="button" variant="outline" onClick={handleDelete}>
-            <Trash2 size={15} className="mr-1 inline" />
-            Delete Suite
-          </Button>
-        </div>
-      </div>
-
-      {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
-
-      <div className="mt-8 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Test Cases</h2>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={() => setAddOpen(true)}>
-            <Plus size={15} className="mr-1 inline" />
-            Add Test Cases
-          </Button>
-          <Button type="button" onClick={() => setCreateOpen(true)}>
-            <Plus size={15} className="mr-1 inline" />
-            Create Test Case
-          </Button>
-        </div>
-      </div>
-
-      <div className="mt-4 overflow-hidden rounded-lg bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-600">
-            <tr>
-              <th className="px-5 py-3 text-left">Code</th>
-              <th className="px-5 py-3 text-left">Name</th>
-              <th className="px-5 py-3 text-left">Category</th>
-              <th className="px-5 py-3 text-left">Scenario</th>
-              <th className="px-5 py-3 text-left">Automation</th>
-              <th className="px-5 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {suite.testCases.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-5 py-8 text-center text-slate-500">
-                  No test cases in this suite yet.
-                </td>
-              </tr>
-            ) : (
-              suite.testCases.map((testCase) => (
-                <tr
-                  key={testCase.id}
-                  className="cursor-pointer border-t hover:bg-slate-50"
-                  tabIndex={0}
-                  aria-label={`Open ${testCase.code} ${testCase.name}`}
-                  onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      navigate(`/projects/${projectId}/test-cases/${testCase.id}`);
-                    }
-                  }}
-                >
-                  <td className="px-5 py-4 font-mono text-xs">{testCase.code}</td>
-                  <td className="px-5 py-4 font-medium text-indigo-600">
-                    <div>{testCase.name}</div>
-                    {testCase.categories?.length ? (
-                      <div className="mt-1">
-                        <SuiteCategoryBadges categories={testCase.categories} />
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="px-5 py-4 text-slate-600">{testCase.category ?? "Functional"}</td>
-                  <td className="px-5 py-4 text-slate-600">{testCase.scenario ?? "Happy Path"}</td>
-                  <td className="px-5 py-4 text-slate-600">{testCase.automationStatus}</td>
-                  <td
-                    className="px-5 py-4 text-right"
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => handleRemove(testCase.id)}
-                      className="mr-3 text-sm text-slate-600 hover:underline"
-                    >
-                      Remove
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Delete ${testCase.name}`}
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                      onClick={() => handleDeleteCase(testCase.id, testCase.name)}
-                    >
-                      <Trash2 size={16} className="inline" />
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <TestCaseFormModal
-        open={createOpen}
-        projectId={projectId}
-        loading={creating}
-        onClose={() => setCreateOpen(false)}
-        onSubmit={handleCreate}
+    <PageContainer>
+      <PageHeader
+        title={suite.name}
+        description={suite.description || undefined}
+        meta={<SuiteCategoryBadges categories={suite.categories} category={suite.category} />}
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setEditOpen(true)}>
+              <Pencil />
+              Edit
+            </Button>
+            <Button variant="outline" onClick={handleDelete} className="hover:border-destructive/40 hover:text-destructive">
+              <Trash2 />
+              Delete
+            </Button>
+            <Button onClick={() => setRunOpen(true)}>
+              <Play />
+              Run suite
+            </Button>
+          </>
+        }
       />
+
+      {error ? <Alert variant="error">{error}</Alert> : null}
+
+      <section className="flex flex-col gap-3">
+        <SectionHeader
+          title="Test cases"
+          count={suite.testCases.length}
+          actions={
+            <>
+              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+                <Plus />
+                Add existing
+              </Button>
+              <Button
+                size="sm"
+                loading={createDraft.creating}
+                onClick={() => void createDraft.create(projectId, { suiteId, from: `/projects/${projectId}/suites/${suiteId}` })}
+              >
+                {!createDraft.creating ? <Plus /> : null}
+                Create test case
+              </Button>
+            </>
+          }
+        />
+        <DataTable
+          columns={columns}
+          data={suite.testCases}
+          getRowId={(testCase) => testCase.id}
+          searchable={suite.testCases.length > 0}
+          searchPlaceholder="Search test cases…"
+          onRowClick={(testCase) => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
+          rowLabel={(testCase) => `Open ${testCase.code} ${testCase.name}`}
+          minWidth={760}
+          empty={
+            suite.testCases.length > 0 ? undefined : (
+              <EmptyState
+                icon={FileCheck2}
+                title="No test cases in this suite"
+                description="Add existing test cases from this project or create a new one."
+                action={
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+                      Add existing
+                    </Button>
+                    <Button
+                      size="sm"
+                      loading={createDraft.creating}
+                      onClick={() => void createDraft.create(projectId, { suiteId, from: `/projects/${projectId}/suites/${suiteId}` })}
+                    >
+                      {!createDraft.creating ? <Plus /> : null}
+                      Create test case
+                    </Button>
+                  </>
+                }
+              />
+            )
+          }
+        />
+      </section>
+
 
       <AddTestCasesModal
         open={addOpen}
@@ -315,49 +367,36 @@ export function TestSuiteDetailPage() {
       <Modal
         open={runOpen}
         onClose={closeRunDialog}
-        title="Run Test Suite"
+        title="Run test suite"
         description={suite.name}
         footer={
           <>
-            <button
-              type="button"
-              className="rounded-lg border border-orange-300 px-4 py-2 text-sm font-medium text-orange-800 disabled:opacity-60"
-              disabled={cancelling}
-              onClick={closeRunDialog}
-            >
-              {starting ? (cancelling ? "Cancelling..." : "Cancel run") : "Cancel"}
-            </button>
-            <button
-              type="button"
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-              disabled={starting || !environmentId}
-              onClick={runSuite}
-            >
-              {starting ? "Starting..." : "Run Suite"}
-            </button>
+            <Button variant="outline" disabled={cancelling} onClick={closeRunDialog}>
+              {starting ? (cancelling ? "Cancelling…" : "Cancel run") : "Cancel"}
+            </Button>
+            <Button loading={starting} disabled={starting || !environmentId} onClick={runSuite}>
+              {starting ? "Starting…" : (
+                <>
+                  <Play />
+                  Run suite
+                </>
+              )}
+            </Button>
           </>
         }
       >
         {environments.length === 0 ? (
-          <p className="text-sm text-amber-700">
-            No environments are configured for this project. Add an environment before running tests.
-          </p>
+          <Alert variant="warning" title="No environments configured">
+            Add an environment to this project before running tests.
+          </Alert>
         ) : (
-          <label className="block text-sm font-medium text-slate-700">
-            Environment
-            <select
-              className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
-              value={environmentId}
-              onChange={(event) => setEnvironmentId(event.target.value)}
-            >
-              <option value="">Select Environment</option>
-              {environments.map((environment) => (
-                <option key={environment.id} value={environment.id}>
-                  {environment.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="Environment"
+            value={environmentId}
+            onChange={setEnvironmentId}
+            placeholder="Select environment"
+            options={environments.map((environment) => ({ value: environment.id, label: environment.name }))}
+          />
         )}
       </Modal>
 
@@ -368,7 +407,7 @@ export function TestSuiteDetailPage() {
         onClose={() => setEditOpen(false)}
         onSubmit={handleEdit}
       />
-    </div>
+    </PageContainer>
   );
 }
 

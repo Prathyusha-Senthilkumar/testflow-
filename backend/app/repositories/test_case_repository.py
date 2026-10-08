@@ -1,6 +1,7 @@
 import json
 import re
 import time
+import uuid
 from typing import Dict, List
 from fastapi import HTTPException
 from app.database import get_supabase_client
@@ -30,6 +31,13 @@ from app.schemas.test_classification import (
 )
 
 _CODE_PATTERN = re.compile(r"^TC-(\d+)$", re.IGNORECASE)
+
+
+def _clean_name(value: str) -> str:
+    name = (value or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Test case name is required.")
+    return name
 
 
 class TestCaseRepository:
@@ -109,6 +117,29 @@ class TestCaseRepository:
             raise HTTPException(status_code=404, detail="Test case not found")
         return self._map_row(row)
 
+    def find_many(self, project_id: str, test_case_ids: List[str]) -> List[TestCaseSummary]:
+        """Batch form of ``find_by_id``: two queries total instead of two per case.
+
+        Returns cases in the order of ``test_case_ids``; ids that do not exist or
+        belong to another project raise 404, matching ``find_by_id``.
+        """
+        if not test_case_ids:
+            return []
+        if not self.db:
+            return [self.find_by_id(project_id, case_id) for case_id in test_case_ids]
+
+        res = self.db.from_("test_cases").select("*").in_("id", test_case_ids).execute()
+        project_suites = set(self._suite_ids_for_project(project_id))
+        rows = {
+            str(row["id"]): row
+            for row in (res.data or [])
+            if str(row.get("suite_id")) in project_suites
+        }
+        missing = [case_id for case_id in test_case_ids if case_id not in rows]
+        if missing:
+            raise HTTPException(status_code=404, detail="Test case not found")
+        return [self._map_row(rows[case_id]) for case_id in test_case_ids]
+
     def create(self, project_id: str, input_dto: CreateTestCaseDto) -> TestCaseSummary:
         desc = (
             input_dto.description.strip()
@@ -118,7 +149,7 @@ class TestCaseRepository:
         code = self._next_code(project_id)
 
         if not self.db:
-            new_id = f"demo-case-{int(time.time() * 1000)}"
+            new_id = f"demo-case-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
             case = TestCaseSummary(
                 id=new_id,
                 code=code,
@@ -211,6 +242,10 @@ class TestCaseRepository:
             for index, case in enumerate(cases):
                 if case.id == test_case_id:
                     updates: dict = {}
+                    if input_dto.name is not None:
+                        updates["name"] = _clean_name(input_dto.name)
+                    if "description" in input_dto.model_fields_set:
+                        updates["description"] = (input_dto.description or "").strip()
                     if input_dto.startPath is not None:
                         updates["startPath"] = normalize_start_path(input_dto.startPath)
                     if input_dto.expectedResult is not None:
@@ -242,6 +277,10 @@ class TestCaseRepository:
             raise HTTPException(status_code=404, detail="Test case not found")
 
         changes: dict = {}
+        if input_dto.name is not None:
+            changes["name"] = _clean_name(input_dto.name)
+        if "description" in input_dto.model_fields_set:
+            changes["description"] = (input_dto.description or "").strip()
         if input_dto.startPath is not None:
             changes["start_path"] = normalize_start_path(input_dto.startPath)
         if input_dto.expectedResult is not None:

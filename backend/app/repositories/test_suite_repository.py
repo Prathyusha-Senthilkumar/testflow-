@@ -1,4 +1,5 @@
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Set
 
@@ -134,7 +135,7 @@ class TestSuiteRepository:
 
     def create(self, project_id: str, input_dto: CreateTestSuiteDto) -> TestSuiteSummary:
         if not self.db:
-            new_id = f"suite-{int(time.time() * 1000)}"
+            new_id = f"suite-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
             suite = TestSuiteSummary(
                 id=new_id,
                 projectId=project_id,

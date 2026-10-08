@@ -15,10 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.database import get_supabase_client
 from app.services.secret_store import (
     SecretUnavailableError,
-    decrypt_mapping,
     decrypt_mapping_legacy,
     encrypt_mapping,
     is_configured,
+    try_decrypt_mapping,
 )
 
 
@@ -47,7 +47,7 @@ def main() -> int:
             if not token:
                 absent_fields += 1
                 continue
-            if decrypt_mapping(token) is not None:
+            if try_decrypt_mapping(token) is not None:
                 skipped_fields += 1
                 continue
             payload = decrypt_mapping_legacy(token)
@@ -70,7 +70,7 @@ def main() -> int:
             if not verify:
                 raise RuntimeError(f"Could not verify re-keyed profile {profile_id}")
             for column in updates:
-                if decrypt_mapping(str(verify[0].get(column) or "")) is None:
+                if try_decrypt_mapping(str(verify[0].get(column) or "")) is None:
                     raise RuntimeError(f"New-key verification failed for {profile_id}:{column}")
                 migrated_fields += 1
     print(f"Profiles scanned: {len(rows)}")

@@ -1,10 +1,14 @@
 import json
+import logging
+import os
 import re
 import shutil
 import time
+import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from fastapi import HTTPException
 
@@ -20,6 +24,45 @@ _CREDENTIALS_FILENAME = "credentials.enc"
 _EXPIRING_WINDOW = timedelta(hours=24)
 # Used when the saved cookies carry no expiry (session cookies only).
 _MAX_SESSION_AGE = timedelta(days=7)
+
+
+logger = logging.getLogger("testflow.auth_profiles")
+
+
+def _decrypt_for_use(token: str) -> Optional[dict]:
+    """Strict decrypt for runs and recording: a bad key is an explicit error, never 'no session'."""
+    from app.services.secret_store import SecretDecryptError, SecretUnavailableError, decrypt_mapping
+
+    try:
+        return decrypt_mapping(token)
+    except SecretUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except SecretDecryptError as exc:
+        logger.error("event=auth_profile_decrypt_failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _decrypt_for_summary(token: str, profile_id: str, field: str) -> Tuple[Optional[dict], bool]:
+    """Listing stays usable when one secret cannot be read. Returns (value, unreadable)."""
+    from app.services.secret_store import SecretDecryptError, SecretUnavailableError, decrypt_mapping
+
+    try:
+        return decrypt_mapping(token), False
+    except (SecretUnavailableError, SecretDecryptError) as exc:
+        logger.error(
+            "event=auth_profile_decrypt_failed profile_id=%s field=%s reason=%s",
+            profile_id,
+            field,
+            exc.__class__.__name__,
+        )
+        return None, True
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Create a new 0600 file; fails if it already exists."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
 
 
 def _public_refresh(refresh: AuthRefreshConfig) -> dict:
@@ -209,8 +252,6 @@ class AuthProfileRepository:
 
     def read_credentials(self, project_id: str, profile_id: str) -> Optional[dict]:
         """Decrypted {username, password}. Callers must never log or return this."""
-        from app.services.secret_store import decrypt_mapping
-
         client = self._client()
         token = ""
         if client is not None:
@@ -222,7 +263,7 @@ class AuthProfileRepository:
                 token = path.read_text(encoding="utf-8").strip()
         if not token:
             return None
-        payload = decrypt_mapping(token)
+        payload = _decrypt_for_use(token)
         if not payload or not payload.get("username"):
             return None
         return payload
@@ -321,7 +362,8 @@ class AuthProfileRepository:
         # password is never read back out to the API layer.
         username = None
         if has_credentials:
-            stored = self.read_credentials(project_id, profile_id)
+            token = (profile_dir / _CREDENTIALS_FILENAME).read_text(encoding="utf-8").strip()
+            stored, _ = _decrypt_for_summary(token, profile_id, "credentials")
             username = stored.get("username") if stored else None
         return AuthProfileSummary(
             id=str(payload.get("id") or profile_id),
@@ -340,48 +382,82 @@ class AuthProfileRepository:
         )
 
 
-    def ensure_storage_file(self, project_id: str, profile_id: str) -> Path:
-        """Write the Playwright session file from Supabase when the worker needs a path."""
-        path = self.storage_state_path(project_id, profile_id)
+    def read_storage_state(self, project_id: str, profile_id: str) -> Optional[dict]:
+        """Decrypted Playwright storage state, or None when none is saved. Never log or return it."""
         client = self._client()
         if client is None:
-            return path
+            path = self.storage_state_path(project_id, profile_id)
+            if not path.is_file() or path.stat().st_size == 0:
+                return None
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return None
+            return payload if isinstance(payload, dict) else None
         row = self._row(client, project_id, profile_id)
-        token = str((row or {}).get("storage_state_enc") or "")
-        if not token:
-            return path
-        from app.services.secret_store import decrypt_mapping
+        if row is None:
+            raise HTTPException(status_code=404, detail="Auth profile not found")
+        return _decrypt_for_use(str(row.get("storage_state_enc") or ""))
 
-        payload = decrypt_mapping(token)
-        if not isinstance(payload, dict):
-            return path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload), encoding="utf-8")
-        return path
-
-    def persist_storage_file(self, project_id: str, profile_id: str) -> None:
-        """Encrypt a recorded session file into Supabase. The file is left in place."""
+    def save_storage_state(self, project_id: str, profile_id: str, state: dict) -> None:
+        """Encrypt a session into Supabase (demo mode: the profile's local file)."""
         client = self._client()
         if client is None:
-            return
-        path = self.storage_state_path(project_id, profile_id)
-        if not path.is_file():
-            return
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return
-        if not isinstance(payload, dict):
+            path = self.storage_state_path(project_id, profile_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(state), encoding="utf-8")
             return
         from app.services.secret_store import SecretUnavailableError, encrypt_mapping
 
         try:
-            token = encrypt_mapping(payload)
+            token = encrypt_mapping(state)
         except SecretUnavailableError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         client.from_("auth_profiles").update({"storage_state_enc": token}).eq("id", profile_id).eq(
             "project_id", project_id
         ).execute()
+
+    @contextmanager
+    def session_file(
+        self, project_id: str, profile_id: str, *, load: bool = True, save: bool = False
+    ) -> Iterator[Path]:
+        """A storageState file for tools that only accept a path (Playwright codegen).
+
+        Supabase mode: a private (0600), uniquely named temp file inside the profile folder
+        (bind-mounted, so the host recorder can reach it). With load=True it holds the
+        decrypted session; with save=True whatever the caller left there is encrypted back
+        if it changed. The file is always deleted. Demo mode yields the profile's own file.
+        """
+        if self._client() is None:
+            path = self.storage_state_path(project_id, profile_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            yield path
+            return
+
+        profile_dir = self._profile_dir(project_id, profile_id)
+        profile_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path = profile_dir / f"storage_state.{uuid.uuid4().hex}.tmp.json"
+        original = ""
+        state = self.read_storage_state(project_id, profile_id) if load else None
+        if state is not None:
+            original = json.dumps(state)
+        # Always pre-create it private, so a tool writing into it keeps 0600.
+        _write_private(path, original)
+        try:
+            yield path
+            if save and path.is_file() and path.stat().st_size > 0:
+                written = path.read_text(encoding="utf-8")
+                if written != original:
+                    try:
+                        new_state = json.loads(written)
+                    except json.JSONDecodeError as exc:
+                        raise HTTPException(
+                            status_code=400, detail="The recorded session file is not valid JSON."
+                        ) from exc
+                    if isinstance(new_state, dict):
+                        self.save_storage_state(project_id, profile_id, new_state)
+        finally:
+            path.unlink(missing_ok=True)
 
     def _row(self, client, project_id: str, profile_id: str) -> Optional[dict]:
         rows = (
@@ -397,11 +473,18 @@ class AuthProfileRepository:
         return rows[0] if rows else None
 
     def _from_row(self, row: dict) -> AuthProfileSummary:
-        from app.services.secret_store import decrypt_mapping
-
-        storage = decrypt_mapping(str(row.get("storage_state_enc") or ""))
+        profile_id = str(row.get("id"))
+        storage, storage_unreadable = _decrypt_for_summary(
+            str(row.get("storage_state_enc") or ""), profile_id, "storage_state"
+        )
         status, recorded_at, expires_at = self._session_from_payload(storage, str(row.get("created_at") or None))
-        credentials = decrypt_mapping(str(row.get("credentials_enc") or ""))
+        if storage_unreadable:
+            # Stored but unreadable with the current key: show it as needing a new login,
+            # never as "no session".
+            status, expires_at = "expired", None
+        credentials, credentials_unreadable = _decrypt_for_summary(
+            str(row.get("credentials_enc") or ""), profile_id, "credentials"
+        )
         username = credentials.get("username") if isinstance(credentials, dict) else None
         return AuthProfileSummary(
             id=str(row.get("id")),
@@ -413,7 +496,7 @@ class AuthProfileRepository:
             sessionRecordedAt=recorded_at,
             sessionExpiresAt=expires_at,
             needsRenewal=status in ("expiring", "expired"),
-            hasCredentials=bool(username),
+            hasCredentials=bool(username) or credentials_unreadable,
             username=username,
             refresh=_refresh_from_payload(row.get("refresh")),
             createdAt=str(row.get("created_at") or ""),

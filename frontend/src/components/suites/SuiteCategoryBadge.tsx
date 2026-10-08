@@ -1,11 +1,8 @@
 import { suiteCategoryLabel } from "@/lib/suiteCategory";
+import { Badge } from "@/components/ui/badge";
 
 export function SuiteCategoryBadge({ category }: { category?: string | null }) {
-  return (
-    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-      {suiteCategoryLabel(category)}
-    </span>
-  );
+  return <Badge variant="outline">{suiteCategoryLabel(category)}</Badge>;
 }
 
 export function SuiteCategoryBadges({

@@ -26,16 +26,14 @@ class TestSuitesService:
         self.projects = project_repository
 
     def list_for_project(self, project_id: str) -> List[TestSuiteSummary]:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         return self.suites.list_by_project(project_id)
 
     def get(self, project_id: str, suite_id: str) -> TestSuiteDetail:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         suite = self.suites.find_by_id(project_id, suite_id)
         case_ids = self.suites.list_case_ids(project_id, suite_id)
-        test_cases = []
-        for case_id in case_ids:
-            test_cases.append(self.test_cases.find_by_id(project_id, case_id))
+        test_cases = self.test_cases.find_many(project_id, case_ids)
         return TestSuiteDetail(
             id=suite.id,
             projectId=suite.projectId,
@@ -49,7 +47,7 @@ class TestSuitesService:
         )
 
     def create(self, project_id: str, input_dto: CreateTestSuiteDto) -> TestSuiteSummary:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         name = (input_dto.name or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="Suite name is required")
@@ -65,17 +63,17 @@ class TestSuitesService:
         )
 
     def update(self, project_id: str, suite_id: str, input_dto: UpdateTestSuiteDto) -> TestSuiteSummary:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         if input_dto.name is not None and not input_dto.name.strip():
             raise HTTPException(status_code=400, detail="Suite name is required")
         return self.suites.update(project_id, suite_id, input_dto)
 
     def delete(self, project_id: str, suite_id: str) -> None:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         self.suites.delete(project_id, suite_id)
 
     def add_test_cases(self, project_id: str, suite_id: str, input_dto: AddTestCasesToSuiteDto) -> TestSuiteDetail:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         self.suites.find_by_id(project_id, suite_id)
         if not input_dto.testCaseIds:
             raise HTTPException(status_code=400, detail="At least one test case id is required")
@@ -89,6 +87,6 @@ class TestSuitesService:
         return self.get(project_id, suite_id)
 
     def remove_test_case(self, project_id: str, suite_id: str, test_case_id: str) -> TestSuiteDetail:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         self.suites.remove_case_id(project_id, suite_id, test_case_id)
         return self.get(project_id, suite_id)

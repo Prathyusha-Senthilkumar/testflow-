@@ -1,9 +1,20 @@
+"use client";
+
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { FieldLabel, FieldMessage, controlClasses } from "@/components/ui/input";
+import {
+  Select as SelectRoot,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select-menu";
 
 export type SelectOption = {
   value: string;
   label: string;
+  disabled?: boolean;
 };
 
 export type SelectProps = {
@@ -14,11 +25,29 @@ export type SelectProps = {
   disabled?: boolean;
   required?: boolean;
   error?: string;
+  /** Classes for the wrapper (width, margins). */
   className?: string;
+  /** Classes for the trigger button. */
+  triggerClassName?: string;
   id?: string;
   placeholder?: string;
+  /** Form field name (Radix renders a hidden native select for form submission). */
+  name?: string;
+  size?: "default" | "sm";
+  "aria-label"?: string;
 };
 
+/** Radix Select can't use "" as an item value, so "" options map to this sentinel internally. */
+const EMPTY_SENTINEL = "__attest_empty__";
+
+const toRadix = (value: string) => (value === "" ? EMPTY_SENTINEL : value);
+const fromRadix = (value: string) => (value === EMPTY_SENTINEL ? "" : value);
+
+/**
+ * Single-choice picker with the legacy `options` / `onChange(value)` API,
+ * rendered as a Radix Select (keyboard navigation, typeahead, check on the
+ * selected item, scrollable popover).
+ */
 export function Select({
   label,
   options,
@@ -28,46 +57,60 @@ export function Select({
   required,
   error,
   className,
+  triggerClassName,
   id,
   placeholder,
+  name,
+  size = "default",
+  "aria-label": ariaLabel,
 }: SelectProps) {
-  const selectId = id ?? (label ? `select-${label.replace(/\s+/g, "-").toLowerCase()}` : undefined);
+  const generatedId = React.useId();
+  const selectId = id ?? (label ? `select-${label.replace(/\s+/g, "-").toLowerCase()}` : generatedId);
+  const messageId = error ? `${selectId}-message` : undefined;
+  const current = value ?? "";
+  const hasEmptyOption = options.some((option) => option.value === "");
+  // "" with no matching option means "nothing selected": show the placeholder.
+  const radixValue = current === "" && !hasEmptyOption ? "" : toRadix(current);
 
   return (
-    <div className={cn("w-full", className)}>
+    <div className={cn("w-full min-w-0", className)}>
       {label ? (
-        <label htmlFor={selectId} className="mb-1.5 block text-sm font-medium text-slate-900">
+        <FieldLabel htmlFor={selectId} required={required}>
           {label}
-          {required ? <span className="text-red-600"> *</span> : null}
-        </label>
+        </FieldLabel>
       ) : null}
-      <select
-        id={selectId}
-        value={value ?? ""}
+      <SelectRoot
+        value={radixValue}
+        onValueChange={(next) => onChange?.(fromRadix(next))}
         disabled={disabled}
         required={required}
-        aria-invalid={error ? true : undefined}
-        onChange={(event) => onChange?.(event.target.value)}
-        className={cn(
-          "h-11 w-full rounded-lg border bg-white px-3 text-sm outline-none transition",
-          error
-            ? "border-red-300 focus:border-red-500 focus:ring-2 focus:ring-red-100"
-            : "border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100",
-          disabled && "cursor-not-allowed bg-slate-50 text-slate-500"
-        )}
+        name={name}
       >
-        {placeholder ? (
-          <option value="" disabled>
-            {placeholder}
-          </option>
-        ) : null}
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      {error ? <p className="mt-1.5 text-sm text-red-600">{error}</p> : null}
+        <SelectTrigger
+          id={selectId}
+          size={size}
+          aria-label={ariaLabel}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={messageId}
+          className={cn("w-full", triggerClassName)}
+        >
+          <SelectValue placeholder={placeholder ?? "Select…"} />
+        </SelectTrigger>
+        <SelectContent position="popper" className="max-h-72 min-w-(--radix-select-trigger-width)">
+          {options.map((option) => (
+            <SelectItem key={option.value || EMPTY_SENTINEL} value={toRadix(option.value)} disabled={option.disabled}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </SelectRoot>
+      <FieldMessage id={messageId} error={error} />
     </div>
   );
 }
+
+/**
+ * Class string for a native `<select>` styled like the other controls. Only for
+ * cases that truly need native behaviour; prefer `Select`.
+ */
+export const nativeSelectClasses = cn(controlClasses, "pr-8");

@@ -4,10 +4,12 @@ import time
 
 from fastapi.testclient import TestClient
 
+from auth_helpers import auth_headers
+
 from app.main import app
 from app.repositories.auth_profile_repository import auth_profile_repository
 
-client = TestClient(app)
+client = TestClient(app, headers=auth_headers())
 
 
 def _create_project(name: str = "Auth Profile Project"):

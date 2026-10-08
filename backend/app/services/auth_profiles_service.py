@@ -1,4 +1,6 @@
-from typing import List
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Iterator, List, Optional
 
 from fastapi import HTTPException
 
@@ -91,25 +93,35 @@ class AuthProfilesService:
             self.test_cases.clear_auth_profile_refs(project_id, profile_id)
 
     def record_login(self, project_id: str, profile_id: str) -> AuthProfileSummary:
+        """Capture a session with codegen into a private temp file, store it encrypted, delete the file."""
         from app.services.automation_service import record_auth_profile_login
 
         self.profiles.validate_project_id(project_id)
         self.profiles.validate_profile_id(profile_id)
         self.projects.find_by_id(project_id)
         profile = self.profiles.find_by_id(project_id, profile_id)
-        save_path = self.profiles.storage_state_path(project_id, profile_id)
-        record_auth_profile_login(profile.loginUrl, save_path)
-        self.profiles.persist_storage_file(project_id, profile_id)
+        with self.profiles.session_file(project_id, profile_id, load=False, save=True) as save_path:
+            record_auth_profile_login(profile.loginUrl, save_path)
         return self.profiles.find_by_id(project_id, profile_id)
 
-    def require_storage_path(self, project_id: str, profile_id: str) -> str:
+    @contextmanager
+    def recording_session(self, project_id: str, profile_id: Optional[str]) -> Iterator[Optional[Path]]:
+        """Session file for Record Test (codegen --load-storage). None without an Auth Profile.
+
+        The file is a private temp copy that is deleted when recording ends. Renewing an expired
+        session happens at run time in the worker, not here.
+        """
+        if not profile_id:
+            yield None
+            return
         profile = self.get(project_id, profile_id)
         if not profile.hasStorageState:
             raise HTTPException(
                 status_code=400,
                 detail="Auth profile has no saved session. Record login first.",
             )
-        return str(self.profiles.ensure_storage_file(project_id, profile_id).resolve())
+        with self.profiles.session_file(project_id, profile_id, load=True, save=False) as path:
+            yield path
 
 
 def _require_refresh_fields(refresh: AuthRefreshConfig) -> None:

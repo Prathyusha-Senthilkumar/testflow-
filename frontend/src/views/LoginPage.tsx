@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Eye, EyeOff, TerminalSquare } from "lucide-react";
 import { Link, useNavigate } from "@/lib/navigation";
+import { safeNextPath } from "@/lib/account";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Alert } from "@/components/ui/alert";
+import { AuthLayout, PasswordVisibilityToggle } from "@/components/layout/auth-layout";
 import { accountApi } from "@/lib/api";
 import { readAccount, writeAccount, type Account } from "@/lib/account";
 
@@ -33,7 +35,7 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (readAccount()) navigate("/dashboard");
+    if (readAccount()) navigate(safeNextPath(window.location.search));
     if (new URLSearchParams(window.location.search).get("reset") === "1") {
       setNotice("Password updated. Sign in with your new password.");
     }
@@ -59,7 +61,7 @@ export function LoginPage() {
           return;
         }
       }
-      navigate("/dashboard");
+      navigate(safeNextPath(window.location.search));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not sign in");
     } finally {
@@ -67,30 +69,47 @@ export function LoginPage() {
     }
   }
 
+  const isLogin = mode === "login";
+
   return (
-    <div className="grid min-h-screen place-items-center bg-[#f7f9fc] px-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-7 shadow-xl shadow-slate-200/60">
-        <div className="mb-6 text-center">
-          <span className="mx-auto grid h-11 w-11 place-items-center rounded-lg bg-indigo-600 text-white">
-            <TerminalSquare size={22} />
-          </span>
-          <h1 className="mt-3 text-lg font-bold">TestFlow</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {mode === "login" ? "Sign in to your account." : "Create your TestFlow account."}
-          </p>
-        </div>
-        <form onSubmit={submit} className="space-y-4">
-          {mode === "signup" && (
-            <Input label="Name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" required />
-          )}
+    <AuthLayout
+      title={isLogin ? "Sign in to Attest" : "Create your Attest account"}
+      description={isLogin ? "Welcome back. Enter your details to continue." : "Start creating repeatable browser tests."}
+      footer={
+        <button
+          type="button"
+          className="font-medium text-brand-accent underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none"
+          onClick={() => {
+            setMode((current) => (current === "login" ? "signup" : "login"));
+            setError("");
+            setNotice("");
+          }}
+        >
+          {isLogin ? "Need an account? Create one" : "Already have an account? Sign in"}
+        </button>
+      }
+    >
+      <form onSubmit={submit} className="space-y-4">
+        {mode === "signup" && (
           <Input
-            label="Email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@example.com"
+            label="Name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Your name"
+            autoComplete="name"
             required
           />
+        )}
+        <Input
+          label="Email"
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="you@example.com"
+          autoComplete="email"
+          required
+        />
+        <div>
           <div className="relative">
             <Input
               label="Password"
@@ -98,43 +117,28 @@ export function LoginPage() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="••••••••"
+              autoComplete={isLogin ? "current-password" : "new-password"}
               required
               minLength={6}
-              className="pr-10"
+              className="pr-9"
             />
-            <button
-              type="button"
-              aria-label={show ? "Hide password" : "Show password"}
-              onClick={() => setShow((current) => !current)}
-              className="absolute bottom-2.5 right-3 text-slate-400"
-            >
-              {show ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
+            <PasswordVisibilityToggle shown={show} onToggle={() => setShow((current) => !current)} />
           </div>
-          {mode === "login" ? (
-            <Link to="/forgot-password" className="block text-right text-sm text-indigo-700 hover:underline">
-              Forgot password?
-            </Link>
+          {isLogin ? (
+            <div className="mt-1.5 text-right">
+              <Link to="/forgot-password" className="text-[13px] text-brand-accent underline-offset-4 hover:underline">
+                Forgot password?
+              </Link>
+            </div>
           ) : null}
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          {notice ? <p className="text-sm text-slate-600">{notice}</p> : null}
-          <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700" disabled={loading} loading={loading}>
-            {mode === "login" ? "Sign in" : "Create account"}
-          </Button>
-        </form>
-        <button
-          type="button"
-          className="mt-4 w-full text-center text-sm text-indigo-700 hover:underline"
-          onClick={() => {
-            setMode((current) => (current === "login" ? "signup" : "login"));
-            setError("");
-            setNotice("");
-          }}
-        >
-          {mode === "login" ? "Need an account? Create one" : "Already have an account? Sign in"}
-        </button>
-      </div>
-    </div>
+        </div>
+        {error ? <Alert variant="error">{error}</Alert> : null}
+        {notice ? <Alert variant="info">{notice}</Alert> : null}
+        <Button type="submit" className="w-full" disabled={loading} loading={loading}>
+          {isLogin ? "Sign in" : "Create account"}
+        </Button>
+      </form>
+    </AuthLayout>
   );
 }
 

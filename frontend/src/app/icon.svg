@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Attest app icon: dawn-blue (#07184f) tile, white "check peak" A, #8ea2f0 tick.
+       Mirrors AttestMark variant="onPrimary". Standalone favicon, so it can't read app CSS tokens. -->
+  <rect width="64" height="64" rx="14" fill="#07184f"/>
+  <g transform="translate(10 10) scale(0.6875)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 54L32 10l22 44" stroke="#ffffff" stroke-width="6"/>
+    <path d="M17.5 37.5l7.5 7.5L40.5 27.5" stroke="#8ea2f0" stroke-width="5.5"/>
+  </g>
+</svg>

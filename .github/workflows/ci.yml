@@ -1,6 +1,10 @@
 name: TestFlow CI
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -84,14 +88,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
+        env:
+          # Typecheck only; the browser is installed in the worker image.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
       - name: Typecheck
-        run: |
-          npm install --no-save --no-audit --no-fund typescript @types/node
-          npx tsc --noEmit
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test
 
   docker:
     name: Docker images

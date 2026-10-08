@@ -80,7 +80,11 @@ export function CreateSuiteModal({ open, loading = false, onClose, onSubmit }: P
           onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
           placeholder="Optional summary"
         />
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        {error ? (
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
       </form>
     </Modal>
   );

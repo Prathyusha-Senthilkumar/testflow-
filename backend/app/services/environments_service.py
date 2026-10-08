@@ -28,12 +28,12 @@ class EnvironmentsService:
         self.projects = project_repository
 
     def list_for_project(self, project_id: str) -> List[EnvironmentSummary]:
-        project = self.projects.find_by_id(project_id)
+        project = self.projects.find_base(project_id)
         self.environments.ensure_default(project_id, project.baseUrl)
         return self.environments.list_by_project(project_id)
 
     def create(self, project_id: str, input_dto: CreateEnvironmentDto) -> EnvironmentSummary:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         name = (input_dto.name or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="Environment name is required")
@@ -45,7 +45,7 @@ class EnvironmentsService:
     def update(
         self, project_id: str, environment_id: str, input_dto: UpdateEnvironmentDto
     ) -> EnvironmentSummary:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         name = input_dto.name
         base_url = input_dto.baseUrl
         if name is not None:
@@ -61,13 +61,13 @@ class EnvironmentsService:
         )
 
     def delete(self, project_id: str, environment_id: str) -> None:
-        self.projects.find_by_id(project_id)
+        self.projects.find_base(project_id)
         self.environments.delete(project_id, environment_id)
 
     def resolve_start_url(self, project_id: str, start_path: str, environment_id: str | None) -> str:
         from automation.framework.url_resolve import resolve_start_url
 
-        project = self.projects.find_by_id(project_id)
+        project = self.projects.find_base(project_id)
         if environment_id:
             env = self.environments.find_by_id(project_id, environment_id)
             base_url = env.baseUrl

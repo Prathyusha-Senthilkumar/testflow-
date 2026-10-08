@@ -76,6 +76,9 @@ class CreateTestCaseDto(BaseModel):
 class UpdateTestCaseDto(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=4000)
+
     environmentId: Optional[str] = Field(None, alias="environmentId")
     authProfileId: Optional[str] = Field(None, alias="authProfileId")
     startPath: Optional[str] = Field(None, alias="startPath")

@@ -19,14 +19,12 @@ from app.schemas.test_case import (
     UpdateTestCaseDto,
 )
 from app.schemas.test_case_version import TestCaseVersionDetail, TestCaseVersionSummary
-from app.schemas.test_run import TestRunResult
 from app.schemas.test_script import TestScriptDto, TestScriptResponse
 from app.services.automation_service import (
     _REPO_ROOT,
     read_test_script,
     record_test_case,
     relative_script_path,
-    run_test_case_script,
     write_test_script,
 )
 from app.services.environments_service import EnvironmentsService
@@ -204,17 +202,14 @@ class TestCasesService:
         if not resolved:
             raise HTTPException(status_code=400, detail="A valid environment base URL is required for recording")
 
-        load_storage = None
-        if test_case.authProfileId:
-            load_storage = self.auth_profiles.require_storage_path(project_id, test_case.authProfileId)
-
-        relative_script = record_test_case(
-            title=test_case.name,
-            start_url=resolved,
-            project_id=project_id,
-            test_case_id=test_case_id,
-            load_storage=load_storage,
-        )
+        with self.auth_profiles.recording_session(project_id, test_case.authProfileId) as load_storage:
+            relative_script = record_test_case(
+                title=test_case.name,
+                start_url=resolved,
+                project_id=project_id,
+                test_case_id=test_case_id,
+                load_storage=str(load_storage) if load_storage else None,
+            )
         updated = self.test_cases.update_automation(
             project_id,
             test_case_id,
@@ -227,36 +222,6 @@ class TestCasesService:
         updated = self._with_meta_config(project_id, test_case_id, updated)
         self._sync_testflow_meta(project_id, test_case_id, updated)
         return updated
-
-    def run(self, project_id: str, test_case_id: str) -> TestRunResult:
-        self._ensure_project_exists(project_id)
-        test_case = self.test_cases.find_by_id(project_id, test_case_id)
-        test_case = self._ensure_recorded_script_linked(project_id, test_case_id, test_case)
-        if not test_case.testFile:
-            raise HTTPException(
-                status_code=400,
-                detail="No recorded script exists for this test case. Record a test first.",
-            )
-
-        test_case = self._attach_resolved_url(project_id, test_case)
-        test_case = self._with_meta_config(project_id, test_case_id, test_case)
-        self._sync_testflow_meta(project_id, test_case_id, test_case)
-
-        storage_state_path = None
-        if test_case.authProfileId:
-            storage_state_path = self.auth_profiles.require_storage_path(
-                project_id, test_case.authProfileId
-            )
-
-        try:
-            status, duration, error = run_test_case_script(
-                test_case.testFile, storage_state_path=storage_state_path
-            )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            return TestRunResult(status="Failed", duration=0.0, error=str(exc))
-        return TestRunResult(status=status, duration=round(duration, 2), error=error)
 
     def _ensure_recorded_script_linked(
         self, project_id: str, test_case_id: str, test_case: TestCaseSummary
@@ -401,7 +366,7 @@ class TestCasesService:
             environment_repository.find_by_id(project_id, environment_id)
 
     def _ensure_project_exists(self, project_id: str):
-        return self.projects.find_by_id(project_id)
+        return self.projects.find_base(project_id)
 
     def _validate_and_normalize(self, input_dto: CreateTestCaseDto) -> CreateTestCaseDto:
         name = (input_dto.name or "").strip()

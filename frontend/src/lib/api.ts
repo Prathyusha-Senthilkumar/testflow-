@@ -1,5 +1,29 @@
-import { readAccount } from "./account";
-import { isSupabaseConfigured, supabase } from "./supabase";
+import { clearAccount, ensureFreshAccount, readAccount, type RefreshResult } from "./account";
+import { friendlyErrorMessage } from "./friendlyErrors";
+
+// supabase-js is ~62 KB gzipped. It is only needed as a fallback when no
+// TestFlow account is stored, so load it lazily instead of shipping it on
+// every route through this module.
+const supabaseConfigured = Boolean(
+  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
+
+async function supabaseAccessToken(): Promise<string | null> {
+  if (!supabaseConfigured) return null;
+  const { supabase } = await import("./supabase");
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
+/** Error thrown for non-2xx API responses; carries the HTTP status. */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 function resolveApiUrl(): string {
   if (typeof window !== "undefined") return "/api";
@@ -13,16 +37,7 @@ const GET_STALE_MS = 180000;
 const getCache = new Map<string, { at: number; data: unknown }>();
 const inflight = new Map<string, Promise<unknown>>();
 
-function cacheKey(path: string, init: RequestInit) {
-  const method = (init.method ?? "GET").toUpperCase();
-  if (method !== "GET") return "";
-  // Live execution status must not be served from the short GET cache.
-  if (path.startsWith("/executions") || (path.startsWith("/test-runs") && !path.startsWith("/test-runs/latest"))) return "";
-  const account = readAccount();
-  const accountId = account?.userId || account?.email || "anonymous";
-  return `${accountId}|${path}`;
-}
-
+// Cached data belongs to the signed-in account; drop it when that changes.
 if (typeof window !== "undefined") {
   window.addEventListener("testflow-account", () => {
     getCache.clear();
@@ -30,49 +45,125 @@ if (typeof window !== "undefined") {
   });
 }
 
-function startRequest<T>(path: string, init: RequestInit, key: string): Promise<T> {
+type RequestOptions = {
+  /**
+   * Live status endpoints that views poll. They still share in-flight requests
+   * but never read or write the GET cache, so a poll always sees fresh status.
+   */
+  live?: boolean;
+};
+
+function cacheKey(path: string, init: RequestInit) {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method !== "GET") return "";
+  // Live execution status must not be served from the GET cache.
+  if (path.startsWith("/executions") || (path.startsWith("/test-runs") && !path.startsWith("/test-runs/latest"))) return "";
+  const account = readAccount();
+  const accountId = account?.userId || account?.email || "anonymous";
+  return `${accountId}|${path}`;
+}
+
+function startRequest<T>(path: string, init: RequestInit, key: string, cacheable: boolean): Promise<T> {
   const promise = performRequest<T>(path, init).then((data) => {
-    if (key) getCache.set(key, { at: Date.now(), data });
-    else getCache.clear();
+    if (cacheable) getCache.set(key, { at: Date.now(), data });
+    else if (!key) getCache.clear();
     return data;
   });
   if (key) {
     inflight.set(key, promise);
-    promise.finally(() => {
-      if (inflight.get(key) === promise) inflight.delete(key);
-    });
+    // `.finally()` returns a new promise that rejects with the request; swallow it here
+    // (callers handle the original) so failed requests aren't unhandled rejections.
+    promise
+      .finally(() => {
+        if (inflight.get(key) === promise) inflight.delete(key);
+      })
+      .catch(() => {});
   }
   return promise;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Shared request helper for feature modules (same auth, base URL, caching and error handling as `api`). */
+export function apiRequest<T>(path: string, init: RequestInit = {}, options: RequestOptions = {}): Promise<T> {
+  return request<T>(path, init, options);
+}
+
+/** Authorization headers for a fresh session (for raw fetches such as file downloads). */
+export async function authHeaders(): Promise<Headers> {
+  const account = await ensureFreshAccount(refreshSession);
+  const headers = new Headers();
+  if (account?.accessToken) headers.set("Authorization", `Bearer ${account.accessToken}`);
+  return headers;
+}
+
+/** GETs are served stale-while-revalidate: fresh for GET_CACHE_MS, then returned while a refetch runs, up to GET_STALE_MS. */
+async function request<T>(path: string, init: RequestInit = {}, options: RequestOptions = {}): Promise<T> {
   const key = cacheKey(path, init);
+  const cacheable = Boolean(key) && !options.live;
   if (key) {
+    const pending = inflight.get(key);
+    if (!cacheable) {
+      if (pending) return pending as Promise<T>;
+      return startRequest<T>(path, init, key, false);
+    }
     const hit = getCache.get(key);
     const age = hit ? Date.now() - hit.at : Number.POSITIVE_INFINITY;
-    const pending = inflight.get(key);
     if (pending && age >= GET_STALE_MS) return pending as Promise<T>;
     if (hit && age < GET_STALE_MS) {
-      if (age >= GET_CACHE_MS && !pending) startRequest<T>(path, init, key);
+      // Background revalidation; errors are ignored (the stale value was already served).
+      if (age >= GET_CACHE_MS && !pending) startRequest<T>(path, init, key, true).catch(() => {});
       return hit.data as T;
     }
     if (pending) return pending as Promise<T>;
   }
+  return startRequest<T>(path, init, key, cacheable);
+}
 
-  return startRequest<T>(path, init, key);
+const PUBLIC_AUTH_PATHS = new Set([
+  "/auth/login",
+  "/auth/signup",
+  "/auth/refresh",
+  "/auth/forgot-password",
+  "/auth/reset-password",
+]);
+
+function refreshSession(refreshToken: string): Promise<RefreshResult> {
+  return performRequest<RefreshResult>("/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({ refreshToken }),
+  });
+}
+
+let redirectingToLogin = false;
+
+/** Session rejected by the API: clear it and go to /login?next=<current path>, once. */
+function redirectToLogin() {
+  if (redirectingToLogin) return;
+  const { pathname, search } = window.location;
+  if (pathname === "/login" || pathname.startsWith("/login/")) return;
+  redirectingToLogin = true;
+  clearAccount();
+  window.location.assign(`/login?next=${encodeURIComponent(pathname + search)}`);
+}
+
+/**
+ * Ensures the stored session is fresh (single shared refresh). Resolves to
+ * `false` when there is no usable session and the user must sign in again.
+ */
+export async function ensureSession(): Promise<boolean> {
+  return Boolean(await ensureFreshAccount(refreshSession));
 }
 
 async function performRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
-  const account = readAccount();
+  // Wait for a shared token refresh before any authenticated call, so callers
+  // never send an expiring token. Auth endpoints themselves skip this.
+  const account = PUBLIC_AUTH_PATHS.has(path) ? readAccount() : await ensureFreshAccount(refreshSession);
   if (account?.accessToken) {
     headers.set("Authorization", `Bearer ${account.accessToken}`);
-  } else if (isSupabaseConfigured) {
-    const { data } = await supabase.auth.getSession();
-    if (data.session?.access_token) {
-      headers.set("Authorization", `Bearer ${data.session.access_token}`);
-    }
+  } else {
+    const token = await supabaseAccessToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
   }
 
   let response: Response;
@@ -83,17 +174,20 @@ async function performRequest<T>(path: string, init: RequestInit = {}): Promise<
     const message = err instanceof Error ? err.message : "Network request failed";
     throw new Error(
       message === "Failed to fetch"
-        ? `Could not reach the API at ${resolveApiUrl()}. Is FastAPI running (e.g. uvicorn on port 8000)?`
+        ? friendlyErrorMessage(`Could not reach the API at ${resolveApiUrl()}. Is FastAPI running (e.g. uvicorn on port 8000)?`)
         : message,
       { cause: err }
     );
+  }
+  if (response.status === 401 && !PUBLIC_AUTH_PATHS.has(path) && typeof window !== "undefined") {
+    redirectToLogin();
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     const message = Array.isArray(payload.message)
       ? payload.message.join(", ")
       : payload.detail ?? payload.message ?? "Request failed";
-    throw new Error(message);
+    throw new ApiError(friendlyErrorMessage(String(message)), response.status);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -123,7 +217,7 @@ export const accountApi = {
   updatePassword: (password: string) =>
     request<AccountResponse>("/auth/password", { method: "POST", body: JSON.stringify({ password }) }),
   forgotPassword: (email: string) =>
-    request<{ message: string; resetLink?: string | null }>("/auth/forgot-password", {
+    request<{ message: string }>("/auth/forgot-password", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
@@ -170,14 +264,41 @@ export type ReportRun = {
   screenshotPath?: string | null;
 };
 
-export type RunScreenshot = { file: string; label: string; failed?: boolean; error?: string | null };
+export type RunScreenshot = {
+  file: string;
+  label: string;
+  failed?: boolean;
+  error?: string | null;
+  /** Signed URL relative to the API base (new backend). Expires after ~15 minutes. */
+  url?: string | null;
+};
 
-export function testRunScreenshotUrl(runId: string): string {
-  return `${resolveApiUrl()}/test-runs/${encodeURIComponent(runId)}/screenshot`;
+/** Absolute URL for an API-relative asset path (same base as requests). */
+export function apiAssetUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${resolveApiUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+/** Legacy unsigned step-screenshot URL (current backend). */
 export function testRunStepUrl(runId: string, file: string): string {
   return `${resolveApiUrl()}/test-runs/${encodeURIComponent(runId)}/screenshots/${encodeURIComponent(file)}`;
+}
+
+/** Image URL for a step screenshot: the signed `url` when present, else the legacy URL. */
+export function stepScreenshotSrc(runId: string, step: Pick<RunScreenshot, "file" | "url">): string {
+  if (step.url) return apiAssetUrl(step.url);
+  return step.file ? testRunStepUrl(runId, step.file) : "";
+}
+
+/** Final screenshot URL: signed via `/screenshot-url` (new backend), legacy URL on 404. */
+export async function finalScreenshotUrl(runId: string): Promise<string> {
+  const legacy = `${resolveApiUrl()}/test-runs/${encodeURIComponent(runId)}/screenshot`;
+  try {
+    const { url } = await request<{ url: string }>(`/test-runs/${encodeURIComponent(runId)}/screenshot-url`, {}, { live: true });
+    return url ? apiAssetUrl(url) : legacy;
+  } catch {
+    return legacy;
+  }
 }
 
 export type TestRunHistoryItem = {
@@ -295,7 +416,166 @@ export type StartExecutionInput = {
   timeZone?: string;
 };
 
+/* ----------------------------------------------------------- global search */
+
+export type SearchResultType = "project" | "suite" | "test_case" | "run";
+
+export type SearchItem = {
+  id: string;
+  type: SearchResultType;
+  title: string;
+  subtitle?: string | null;
+  projectId?: string | null;
+  projectName?: string | null;
+  status?: string | null;
+  updatedAt?: string | null;
+  testCaseId?: string | null;
+};
+
+export type SearchGroup = {
+  type: SearchResultType;
+  label: string;
+  total: number;
+  items: SearchItem[];
+};
+
+export type SearchResponse = {
+  query: string;
+  type: SearchResultType | "all";
+  groups: SearchGroup[];
+};
+
+export type SearchOptions = {
+  type?: SearchResultType | "all";
+  projectId?: string | null;
+  limit?: number;
+};
+
+/* ----------------------------------------------------------------- workers */
+
+export type WorkerSlot = {
+  index: number;
+  state: "idle" | "running";
+  jobId?: string | null;
+  runId?: string | null;
+  testCaseId?: string | null;
+  projectId?: string | null;
+  /** The test case CODE (e.g. "TC-007"). */
+  testName?: string | null;
+  startedAt?: string | null;
+  /** Client-side enrichment: resolved test case name (see useWorkers). */
+  testCaseName?: string | null;
+};
+
+export type WorkerWarmState = {
+  browserReady: boolean;
+  spareContexts: number;
+  browserLaunchedAt?: string | null;
+  testsSinceLaunch?: number | null;
+  lastRecycleAt?: string | null;
+  coldStartsAvoided?: number | null;
+};
+
+/**
+ * One worker. Stale workers whose heartbeat key expired only carry
+ * id/status/heartbeatAgeSec/lastHeartbeatAt; browser/process/warm are null and counts 0.
+ */
+export type WorkerInfo = {
+  id: string;
+  hostname?: string | null;
+  pid?: number | null;
+  version?: string | null;
+  startedAt?: string | null;
+  lastHeartbeatAt: string;
+  heartbeatAgeSec: number;
+  status: "online" | "draining" | "stale";
+  concurrency: number;
+  busy: number;
+  idle: number;
+  slots: WorkerSlot[];
+  browser: { connected: boolean; version: string | null; contexts: number } | null;
+  process: { rssMb: number; heapUsedMb: number; uptimeSec: number; loadAvg1: number; cpuCount: number } | null;
+  processedTotal: number;
+  failedTotal: number;
+  /** Optional: older worker builds don't send it. */
+  warm?: WorkerWarmState | null;
+};
+
+export type WorkersResponse = {
+  generatedAt: string;
+  /** slots/busy/idle count online + draining workers only. */
+  totals: { workers: number; online: number; draining?: number; stale: number; slots: number; busy: number; idle: number };
+  queue: { queued: number; scheduled: number; processing: number; batchesPending: number | null } | null;
+  message?: string;
+  workers: WorkerInfo[];
+};
+
+/* ----------------------------------------------------------- notifications */
+
+export type NotificationType = "run_failed" | "run_passed" | "batch_completed" | "run_stuck" | "auth_profile_attention" | "system";
+export type NotificationSeverity = "info" | "success" | "warning" | "error";
+
+export type AppNotification = {
+  id: string;
+  type: NotificationType;
+  severity: NotificationSeverity;
+  title: string;
+  body?: string | null;
+  /** App-relative link, e.g. "/projects/…/results/…". */
+  link?: string | null;
+  projectId?: string | null;
+  /** Not in the contract yet; shown as a chip when present. */
+  projectName?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  read: boolean;
+  createdAt: string;
+};
+
+export type NotificationsPage = { items: AppNotification[]; unreadCount: number; nextCursor: string | null };
+
+export type NotificationPreferences = { runFailed: boolean; runPassed: boolean; batchCompleted: boolean; runStuck: boolean };
+
+/** True for "endpoint not deployed" errors (old backend): callers treat these as empty. */
+export function isNotFoundError(error: unknown): boolean {
+  if (error instanceof ApiError) return error.status === 404;
+  return error instanceof Error && /not found/i.test(error.message);
+}
+
+/** True when the server reports the feature as temporarily unavailable (e.g. 503: table not migrated). */
+export function isUnavailableError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 503;
+}
+
 export const api = {
+  /** Worker heartbeats and execution slots. Live (never cached). */
+  workers: () => request<WorkersResponse>("/workers", {}, { live: true }),
+  /** In-app notifications. A 404 (old backend) should be treated as empty by callers. */
+  notifications: (options: { unreadOnly?: boolean; limit?: number; before?: string | null } = {}) => {
+    const params = new URLSearchParams({ limit: String(options.limit ?? 20) });
+    if (options.unreadOnly) params.set("unreadOnly", "true");
+    if (options.before) params.set("before", options.before);
+    return request<NotificationsPage>(`/notifications?${params.toString()}`, {}, { live: true });
+  },
+  notificationsUnreadCount: () => request<{ unreadCount: number }>("/notifications/unread-count", {}, { live: true }),
+  markNotificationRead: (id: string) =>
+    request<{ unreadCount: number }>(`/notifications/${encodeURIComponent(id)}/read`, { method: "POST" }),
+  markNotificationUnread: (id: string) =>
+    request<{ unreadCount: number }>(`/notifications/${encodeURIComponent(id)}/unread`, { method: "POST" }),
+  markAllNotificationsRead: () => request<{ updated: number; unreadCount: number }>("/notifications/read-all", { method: "POST" }),
+  deleteNotification: (id: string) => request<void>(`/notifications/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  notificationPreferences: () => request<NotificationPreferences>("/notifications/preferences", {}, { live: true }),
+  /** Accepts a partial body; returns the full object. 503 when the table isn't migrated. */
+  updateNotificationPreferences: (input: Partial<NotificationPreferences>) =>
+    request<NotificationPreferences>("/notifications/preferences", { method: "PUT", body: JSON.stringify(input) }),
+  /** Global search across projects, suites, test cases and runs. Live (never cached). */
+  search: (query: string, options: SearchOptions = {}, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ q: query });
+    if (options.type && options.type !== "all") params.set("type", options.type);
+    if (options.projectId) params.set("projectId", options.projectId);
+    if (options.limit) params.set("limit", String(options.limit));
+    return request<SearchResponse>(`/search?${params.toString()}`, { signal }, { live: true });
+  },
   dashboard: () => request<DashboardData>("/dashboard"),
   projects: () => request<ProjectSummary[]>("/projects"),
   project: (id: string) => request<ProjectDetail>(`/projects/${id}`),
@@ -371,11 +651,6 @@ export const api = {
       method: "POST",
       signal: AbortSignal.timeout(60 * 60 * 1000),
     }),
-  runTestCase: (projectId: string, testCaseId: string) =>
-    request<TestRunResult>(`/projects/${projectId}/test-cases/${testCaseId}/run`, {
-      method: "POST",
-      signal: AbortSignal.timeout(15 * 60 * 1000),
-    }),
   deleteTestCase: (projectId: string, testCaseId: string) =>
     request<void>(`/projects/${projectId}/test-cases/${testCaseId}`, { method: "DELETE" }),
   updateTestCase: (projectId: string, testCaseId: string, input: UpdateTestCaseInput) =>
@@ -442,7 +717,7 @@ export const api = {
       body: JSON.stringify({ projectId, suiteCategory, environmentId }),
     }),
   getBatchRun: (batchId: string) =>
-    request<BatchExecutionStatus>(`/executions/batches/${batchId}`),
+    request<BatchExecutionStatus>(`/executions/batches/${batchId}`, {}, { live: true }),
   cancelBatchRun: (batchId: string) =>
     request<BatchExecutionStatus>(`/executions/batches/${batchId}/cancel`, { method: "POST" }),
   rerunBatch: (batchId: string) =>
@@ -451,12 +726,16 @@ export const api = {
     request<void>(`/test-runs/${runId}/cancel`, { method: "POST" }),
   rerunTestRun: (runId: string) =>
     request<ExecutionStatus>(`/test-runs/${runId}/rerun`, { method: "POST" }),
-  getExecution: (jobId: string) => request<ExecutionStatus>(`/executions/${jobId}`),
+  getExecution: (jobId: string) => request<ExecutionStatus>(`/executions/${jobId}`, {}, { live: true }),
   scheduledExecutions: (testCaseId: string) =>
-    request<ScheduledExecution[]>(`/executions/scheduled?testCaseId=${encodeURIComponent(testCaseId)}`),
+    request<ScheduledExecution[]>(
+      `/executions/scheduled?testCaseId=${encodeURIComponent(testCaseId)}`,
+      {},
+      { live: true }
+    ),
   cancelScheduledExecution: (jobId: string) =>
     request<void>(`/executions/scheduled/${jobId}`, { method: "DELETE" }),
-  groupedRuns: () => request<GroupedRun[]>("/test-runs/grouped"),
+  groupedRuns: () => request<GroupedRun[]>("/test-runs/grouped", {}, { live: true }),
   latestCaseRuns: (projectId: string) =>
     request<Array<{ testCaseId: string; projectId?: string | null; status: string; startedAt?: string | null; completedAt?: string | null; runBy?: string | null }>>(
       `/test-runs/latest?projectId=${encodeURIComponent(projectId)}`,
@@ -464,10 +743,10 @@ export const api = {
   testRuns: (limit = 50, testCaseId?: string) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (testCaseId) params.set("testCaseId", testCaseId);
-    return request<TestRunHistoryItem[]>(`/test-runs?${params.toString()}`);
+    return request<TestRunHistoryItem[]>(`/test-runs?${params.toString()}`, {}, { live: true });
   },
   reportRuns: () => request<ReportRun[]>("/test-runs/report?limit=1000"),
-  reportRun: (runId: string) => request<ReportRun>(`/test-runs/${runId}`),
+  reportRun: (runId: string) => request<ReportRun>(`/test-runs/${runId}`, {}, { live: true }),
   runScreenshots: (runId: string) => request<RunScreenshot[]>(`/test-runs/${runId}/screenshots`),
 };
 
@@ -582,6 +861,8 @@ export type StorageEntry = {
 };
 
 export type UpdateTestCaseInput = {
+  name?: string;
+  description?: string;
   environmentId?: string | null;
   environmentIds?: string[];
   authProfileId?: string | null;
@@ -594,6 +875,8 @@ export type UpdateTestCaseInput = {
   storageAssertions?: StorageEntry[];
   accessibilityEnabled?: boolean;
   networkCheckEnabled?: boolean;
+  /** Accepted by PATCH /test-cases/{id}. */
+  assertions?: AssertionConfig[];
 };
 
 export type TestCaseSummary = {

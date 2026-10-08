@@ -1,8 +1,8 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, Response
+from fastapi import APIRouter, Depends, Response
 
-from app.services.account_service import actor_from_authorization
+from app.dependencies.auth import current_actor
 
 from app.schemas.execution import (
     BatchExecutionStatus,
@@ -21,10 +21,10 @@ router = APIRouter(prefix="/executions", tags=["executions"])
 @router.post("/", response_model=ExecutionStatusResponse, include_in_schema=False)
 def start_execution(
     body: StartExecutionRequest,
-    authorization: str | None = Header(default=None),
+    actor: Optional[tuple[str, str]] = Depends(current_actor),
     service: ExecutionService = Depends(get_execution_service),
 ):
-    return service.start(body, run_by=actor_from_authorization(authorization))
+    return service.start(body, run_by=actor)
 
 
 @router.get("/scheduled", response_model=List[ScheduledExecution])
@@ -47,28 +47,28 @@ def cancel_scheduled_execution(
 @router.post("/suites", response_model=BatchExecutionStatus)
 def start_suite_execution(
     body: StartSuiteBatchRequest,
-    authorization: str | None = Header(default=None),
+    actor: Optional[tuple[str, str]] = Depends(current_actor),
     service: ExecutionService = Depends(get_execution_service),
 ):
     return service.start_suite(
         body.project_id,
         body.suite_id,
         body.environment_id,
-        run_by=actor_from_authorization(authorization),
+        run_by=actor,
     )
 
 
 @router.post("/projects", response_model=BatchExecutionStatus)
 def start_project_execution(
     body: StartProjectBatchRequest,
-    authorization: str | None = Header(default=None),
+    actor: Optional[tuple[str, str]] = Depends(current_actor),
     service: ExecutionService = Depends(get_execution_service),
 ):
     return service.start_project(
         body.project_id,
         body.suite_category,
         body.environment_id,
-        run_by=actor_from_authorization(authorization),
+        run_by=actor,
     )
 
 
@@ -83,10 +83,10 @@ def cancel_batch_execution(
 @router.post("/batches/{batch_id}/rerun", response_model=BatchExecutionStatus)
 def rerun_batch_execution(
     batch_id: str,
-    authorization: str | None = Header(default=None),
+    actor: Optional[tuple[str, str]] = Depends(current_actor),
     service: ExecutionService = Depends(get_execution_service),
 ):
-    return service.rerun_batch(batch_id, run_by=actor_from_authorization(authorization))
+    return service.rerun_batch(batch_id, run_by=actor)
 
 
 @router.get("/batches/{batch_id}", response_model=BatchExecutionStatus)

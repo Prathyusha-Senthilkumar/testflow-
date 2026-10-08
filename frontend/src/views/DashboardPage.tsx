@@ -1,61 +1,364 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowRight, CheckCircle2, FolderKanban, FlaskConical, XCircle } from "lucide-react";
-import { Link, useNavigate } from "@/lib/navigation";
-import { api, type DashboardData } from "@/lib/api";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Play } from "lucide-react";
+import { toast } from "sonner";
+import { Link, useNavigate, useSearchParams } from "@/lib/navigation";
+import { api, type DashboardData, type GroupedRun, type ProjectSummary, type ReportRun } from "@/lib/api";
+import {
+  DASHBOARD_RANGES,
+  filterByProject,
+  flakiestTests,
+  groupedRunHref,
+  isActiveStatus,
+  isDashboardRange,
+  kpiSeries,
+  needsAttention,
+  onboardingSteps,
+  periodMetrics,
+  projectHealth,
+  recentRuns,
+  slowestTests,
+  trendBuckets,
+  windowsFor,
+  type AttentionItem,
+  type DashboardRange,
+} from "@/lib/dashboard";
+import { pollWhileVisible } from "@/hooks/useExecutionPolling";
+import { PageContainer, PageHeader } from "@/components/layout/page-header";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Alert } from "@/components/ui/alert";
+import { PageSkeleton } from "@/app/_ui/PageSkeleton";
+import { Panel } from "@/components/dashboard/panel";
+import { KpiStrip } from "@/components/dashboard/kpi-strip";
+import { NeedsAttentionList, type RerunState } from "@/components/dashboard/needs-attention";
+import { RecentRunsTable } from "@/components/dashboard/recent-runs";
+import { ProjectHealthList } from "@/components/dashboard/project-health";
+import { FlakiestTestsList, SlowestTestsList } from "@/components/dashboard/test-lists";
+import { OnboardingChecklist } from "@/components/dashboard/onboarding";
+import { RunnersPanel } from "@/components/dashboard/runners-panel";
+import { useRunners } from "@/components/runners/runners-context";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
-const emptyDashboard: DashboardData = { projects: 0, testCases: 0, passed: 0, failed: 0, recentProjects: [] };
+const RANGE_LABEL: Record<DashboardRange, string> = { "24h": "24h", "7d": "7 days", "30d": "30 days" };
+const EMPTY_RUNS: ReportRun[] = [];
+const EMPTY_GROUPED: GroupedRun[] = [];
+const EMPTY_PROJECTS: ProjectSummary[] = [];
 
-export function DashboardPage() {
-  const [data, setData] = useState<DashboardData>(emptyDashboard);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+type Loaded = {
+  dashboard: DashboardData | null;
+  projects: ProjectSummary[];
+  reportRuns: ReportRun[];
+  groupedRuns: GroupedRun[];
+  errors: string[];
+};
+
+function message(reason: unknown, fallback: string): string {
+  return reason instanceof Error ? reason.message : fallback;
+}
+
+/** Loads every source independently so one failing endpoint doesn't blank the page. */
+async function loadAll(): Promise<Loaded> {
+  const [dashboard, projects, reportRuns, groupedRuns] = await Promise.allSettled([
+    api.dashboard(),
+    api.projects(),
+    api.reportRuns(),
+    api.groupedRuns(),
+  ]);
+  const errors: string[] = [];
+  if (projects.status === "rejected") errors.push(`Projects: ${message(projects.reason, "could not load")}`);
+  if (reportRuns.status === "rejected") errors.push(`Run history: ${message(reportRuns.reason, "could not load")}`);
+  if (groupedRuns.status === "rejected") errors.push(`Recent runs: ${message(groupedRuns.reason, "could not load")}`);
+  return {
+    dashboard: dashboard.status === "fulfilled" ? dashboard.value : null,
+    projects: projects.status === "fulfilled" ? projects.value : EMPTY_PROJECTS,
+    reportRuns: reportRuns.status === "fulfilled" ? reportRuns.value : EMPTY_RUNS,
+    groupedRuns: groupedRuns.status === "fulfilled" ? groupedRuns.value : EMPTY_GROUPED,
+    errors,
+  };
+}
+
+function DashboardContent() {
+  const params = useSearchParams();
   const navigate = useNavigate();
+  // Runner status: shares polling + 404 handling with /workers (10s here, paused while hidden).
+  const { state: runners, openPanel: openRunners } = useRunners();
+  const range: DashboardRange = isDashboardRange(params?.get("range")) ? (params?.get("range") as DashboardRange) : "7d";
+  const projectId = params?.get("project") ?? "";
 
-  useEffect(() => {
-    api.dashboard().then(setData).catch((err: Error) => setError(err.message)).finally(() => setLoading(false));
+  const [data, setData] = useState<Loaded | null>(null);
+  const [now, setNow] = useState(0);
+  const [rerun, setRerun] = useState<Record<string, RerunState>>({});
+  const [setup, setSetup] = useState<{ env: boolean; auth: boolean } | null>(null);
+  const stopRerunPolls = useRef<(() => void)[]>([]);
+
+  const refresh = useCallback(async () => {
+    const loaded = await loadAll();
+    setData(loaded);
+    setNow(Date.now());
+    return loaded;
   }, []);
 
-  const metrics = [
-    { label: "Projects", value: data.projects, icon: FolderKanban, helper: "Applications under test" },
-    { label: "Test Cases", value: data.testCases, icon: FlaskConical, helper: "Across all projects" },
-    { label: "Passed", value: data.passed, icon: CheckCircle2, helper: "Latest recorded outcome" },
-    { label: "Failed", value: data.failed, icon: XCircle, helper: "Needs QA attention" },
-  ];
+  const confirm = useConfirm();
+  /** Cancel a run that has been waiting in the queue for a long time. */
+  const cancelStaleRun = useCallback(
+    async (run: GroupedRun) => {
+      const cancelled = await confirm({
+        title: "Cancel this queued run?",
+        confirmLabel: "Cancel run",
+        cancelLabel: "Keep waiting",
+        description: (
+          <p>
+            <strong>{run.title}</strong> has been waiting in the queue for a long time. Cancelling removes it from the queue.
+          </p>
+        ),
+        onConfirm: async () => {
+          if (run.runType === "individual") await api.cancelTestRun(run.id);
+          else await api.cancelBatchRun(run.id);
+        },
+      });
+      if (!cancelled) return;
+      toast.success("Run cancelled");
+      void refresh();
+    },
+    [confirm, refresh]
+  );
+
+  useEffect(() => {
+    void refresh();
+    const stops = stopRerunPolls.current;
+    return () => stops.forEach((stop) => stop());
+  }, [refresh]);
+
+  // Poll recent runs while anything is queued/running; refresh history once they settle.
+  const hasLive = Boolean(data?.groupedRuns.some((run) => isActiveStatus(run.status)));
+  useEffect(() => {
+    if (!hasLive) return;
+    return pollWhileVisible(async () => {
+      try {
+        const grouped = await api.groupedRuns();
+        const stillLive = grouped.some((run) => isActiveStatus(run.status));
+        if (stillLive) {
+          setData((current) => (current ? { ...current, groupedRuns: grouped } : current));
+          setNow(Date.now());
+          return true;
+        }
+        await refresh();
+        return false;
+      } catch {
+        return true;
+      }
+    }, 4000);
+  }, [hasLive, refresh]);
+
+  function setParam(key: "range" | "project", value: string) {
+    const next = new URLSearchParams(params?.toString() ?? "");
+    if (!value || (key === "range" && value === "7d")) next.delete(key);
+    else next.set(key, value);
+    const query = next.toString();
+    navigate(`/dashboard${query ? `?${query}` : ""}`, { replace: true });
+  }
+
+  const projects = data?.projects ?? EMPTY_PROJECTS;
+  const allRuns = data?.reportRuns ?? EMPTY_RUNS;
+  const runs = useMemo(() => filterByProject(allRuns, projectId), [allRuns, projectId]);
+  const grouped = useMemo(() => filterByProject(data?.groupedRuns ?? EMPTY_GROUPED, projectId), [data?.groupedRuns, projectId]);
+  const scopedProjects = useMemo(() => (projectId ? projects.filter((item) => item.id === projectId) : projects), [projects, projectId]);
+  const projectNames = useMemo(() => Object.fromEntries(projects.map((item) => [item.id, item.name])), [projects]);
+
+  const derived = useMemo(() => {
+    if (!data || !now) return null;
+    const { current, previous } = windowsFor(range, now);
+    const buckets = trendBuckets(runs, range, now);
+    return {
+      current: periodMetrics(runs, current),
+      previous: periodMetrics(runs, previous),
+      series: kpiSeries(buckets),
+      trend: buckets.map((bucket) => ({ key: bucket.key, label: bucket.label, passed: bucket.passed, failed: bucket.failed, isToday: bucket.isCurrent })),
+      attention: needsAttention(runs, current),
+      health: projectHealth(scopedProjects, runs, current),
+      slowest: slowestTests(runs, current),
+      flakiest: flakiestTests(runs, current),
+      recent: recentRuns(grouped.filter((run) => isActiveStatus(run.status) || (run.startedAt && new Date(run.startedAt).getTime() >= current.start)), 15),
+    };
+  }, [data, now, range, runs, grouped, scopedProjects]);
+
+  const loading = !data;
+  const firstRun = Boolean(data) && (projects.length === 0 || allRuns.length === 0);
+  const firstProjectId = projects[0]?.id ?? null;
+
+  // Onboarding needs environment/auth presence for the first project; only fetched in that state.
+  useEffect(() => {
+    if (!firstRun || !firstProjectId) return;
+    let cancelled = false;
+    Promise.allSettled([api.environments(firstProjectId), api.authProfiles(firstProjectId)]).then(([envs, auths]) => {
+      if (cancelled) return;
+      setSetup({
+        env: envs.status === "fulfilled" && envs.value.length > 0,
+        auth: auths.status === "fulfilled" && auths.value.length > 0,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [firstRun, firstProjectId]);
+
+  function startRerun(item: AttentionItem) {
+    setRerun((current) => ({ ...current, [item.testKey]: "starting" }));
+    api
+      .rerunTestRun(item.runId)
+      .then((started) => {
+        toast.success(`Rerun started: ${item.code ? `${item.code} ` : ""}${item.name}`);
+        setRerun((current) => ({ ...current, [item.testKey]: started.state === "running" ? "running" : "queued" }));
+        const stop = pollWhileVisible(async () => {
+          try {
+            const status = await api.getExecution(started.jobId);
+            if (status.state === "queued" || status.state === "running" || status.state === "scheduled") {
+              setRerun((current) => ({ ...current, [item.testKey]: status.state === "running" ? "running" : "queued" }));
+              return true;
+            }
+            const passed = status.state === "completed" && (status.result?.success ?? status.result?.status?.toLowerCase() === "passed");
+            setRerun((current) => ({ ...current, [item.testKey]: passed ? "passed" : "failed" }));
+            void refresh();
+            return false;
+          } catch {
+            return true;
+          }
+        }, 2000);
+        stopRerunPolls.current.push(stop);
+      })
+      .catch((error: unknown) => {
+        toast.error(message(error, "Could not start the rerun"));
+        setRerun((current) => ({ ...current, [item.testKey]: "error" }));
+      });
+  }
+
+  const steps = onboardingSteps({
+    firstProjectId,
+    hasProject: projects.length > 0,
+    hasEnvironment: Boolean(setup?.env),
+    hasAuthProfile: Boolean(setup?.auth),
+    hasTestCase: (data?.dashboard?.testCases ?? 0) > 0 || projects.some((item) => item.cases > 0),
+    hasRun: allRuns.length > 0,
+  });
+
+  const projectOptions = [{ value: "", label: "All projects" }, ...projects.map((item) => ({ value: item.id, label: item.name }))];
+  const runSuiteHref = projectId ? `/projects/${projectId}/suites` : "/projects";
+  const periodLabel = RANGE_LABEL[range];
 
   return (
-    <div className="p-8 lg:p-10">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div><p className="text-sm font-medium text-indigo-600">Workspace overview</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Dashboard</h1><p className="mt-2 text-sm text-slate-500">Track projects, test coverage and the latest execution status from one place.</p></div>
-      </div>
-      {error && <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Could not refresh dashboard data: {error}</div>}
-      <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metrics.map(({ label, value, icon: Icon, helper }) => <Card key={label} className="p-5"><div className="flex items-start justify-between"><div><p className="text-sm font-medium text-slate-500">{label}</p><p className="mt-2 text-3xl font-bold text-slate-900">{loading ? <Skeleton className="h-9 w-14" /> : value}</p></div><span className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-50 text-indigo-600"><Icon size={19} /></span></div><p className="mt-3 text-xs text-slate-400">{helper}</p></Card>)}</div>
-      <div className="mt-9 flex items-center justify-between"><div><h2 className="text-lg font-semibold">Recent Projects</h2><p className="mt-1 text-sm text-slate-500">Open a project to review its suites and current test status.</p></div><Link to="/projects" className="flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700">View all <ArrowRight size={15} /></Link></div>
-      <Card className="mt-4 overflow-hidden">{data.recentProjects.length === 0 && !loading ? <div className="px-6 py-12 text-center"><FolderKanban className="mx-auto text-slate-300" size={34} /><h3 className="mt-3 font-semibold">No projects yet</h3><p className="mt-1 text-sm text-slate-500">Create your first project to start organizing tests.</p><Link to="/projects" className="mt-4 inline-flex text-sm font-semibold text-indigo-600">Go to Projects</Link></div> : <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50 text-slate-500"><tr>{["Project", "Suites", "Cases", "Pass Rate", "Last Run"].map(label => <th className="px-5 py-3 font-medium" key={label}>{label}</th>)}</tr></thead><tbody>{loading ? <DashboardTableSkeleton /> : data.recentProjects.map(project => <tr className="cursor-pointer border-t border-slate-100 hover:bg-indigo-50/60" key={project.id} onClick={() => navigate(`/projects/${project.id}`)}><td className="px-5 py-4"><div className="font-semibold text-slate-900">{project.name}</div><div className="mt-0.5 max-w-xs truncate text-xs text-slate-500">{project.baseUrl}</div></td><td className="px-5">{project.suites}</td><td className="px-5">{project.cases}</td><td className="px-5"><Badge status={project.passRate === 100 ? "Passed" : project.failed > 0 ? "Failed" : ""}>{project.passRate}%</Badge></td><td className="px-5 text-slate-500">{project.lastRun ? new Date(project.lastRun).toLocaleString() : "Not run"}</td></tr>)}</tbody></table></div>}</Card>
-    </div>
+    <PageContainer>
+      <PageHeader
+        title="Dashboard"
+        description="Test health across your projects: what's failing, what's flaky and what ran recently."
+        actions={
+          <>
+            <SegmentedControl
+              aria-label="Time range"
+              size="sm"
+              options={DASHBOARD_RANGES}
+              value={range}
+              onChange={(value) => setParam("range", value)}
+            />
+            <Select
+              aria-label="Project"
+              className="w-44"
+              triggerClassName="h-8"
+              value={projectId}
+              onChange={(value) => setParam("project", value)}
+              options={projectOptions}
+              disabled={loading}
+            />
+            {/* The onboarding checklist has its own CTAs; don't repeat one in the header. */}
+            {firstRun ? null : (
+              <Button asChild>
+                <Link to={runSuiteHref}>
+                  <Play aria-hidden />
+                  Run suite
+                </Link>
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      {data?.errors.length ? (
+        <Alert variant="error" title="Some dashboard data could not load">
+          {data.errors.join(" · ")}
+        </Alert>
+      ) : null}
+
+      {firstRun ? (
+        <OnboardingChecklist steps={steps} />
+      ) : (
+        <>
+          <KpiStrip
+            current={derived?.current ?? null}
+            previous={derived?.previous ?? null}
+            series={derived?.series ?? null}
+            periodLabel={periodLabel}
+            loading={loading}
+            onFailingClick={() => document.getElementById("needs-attention")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          />
+
+          {/* Dashboard = now/attention. Trends and per-suite analysis live in Reports. */}
+          <div className="grid gap-4 xl:grid-cols-12">
+            <Panel id="needs-attention" className="xl:col-span-8" title="Needs attention" viewAllHref="/runs" bodyClassName="max-h-[360px] overflow-y-auto">
+              <NeedsAttentionList items={derived?.attention ?? []} now={now} loading={loading} rerun={rerun} onRerun={startRerun} />
+            </Panel>
+            <RunnersPanel
+              className="xl:col-span-4"
+              data={runners.data}
+              loading={runners.loading}
+              unavailable={runners.unavailable}
+              error={runners.error}
+              projectNames={runners.projectNames}
+              onViewAll={openRunners}
+              />
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-12">
+            <Panel className="xl:col-span-8" title="Recent runs" viewAllHref="/runs" bodyClassName="border-0 bg-transparent">
+              <RecentRunsTable
+                runs={derived?.recent ?? []}
+                projectNames={projectNames}
+                now={now}
+                loading={loading}
+                onOpen={(run) => {
+                  const href = groupedRunHref(run);
+                  if (href) navigate(href);
+                }}
+                onCancel={cancelStaleRun}
+              />
+            </Panel>
+            <Panel className="xl:col-span-4" title="Project health" viewAllHref="/projects" bodyClassName="border-0 bg-transparent">
+              <ProjectHealthList active={derived?.health.active ?? []} idle={derived?.health.idle ?? []} now={now} loading={loading} />
+            </Panel>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Panel title="Slowest tests" description={`Median duration, last ${periodLabel}`}>
+              <SlowestTestsList items={derived?.slowest ?? []} loading={loading} />
+            </Panel>
+            <Panel title="Flakiest tests" description={`Pass ↔ fail flips, last ${periodLabel}`}>
+              <FlakiestTestsList items={derived?.flakiest ?? []} loading={loading} />
+            </Panel>
+          </div>
+        </>
+      )}
+    </PageContainer>
   );
 }
 
-function Skeleton({ className = "" }: { className?: string }) {
-  return <span aria-hidden="true" className={`block animate-pulse rounded bg-slate-200 ${className}`} />;
-}
-
-function DashboardTableSkeleton() {
+/** QA command centre. URL state: `?range=24h|7d|30d&project=<id>`. */
+export function DashboardPage() {
+  // useSearchParams needs a Suspense boundary on statically rendered routes.
   return (
-    <>
-      {[0, 1, 2].map((row) => (
-        <tr key={row} className="border-t border-slate-100">
-          <td className="px-5 py-4"><Skeleton className="h-4 w-36" /><Skeleton className="mt-2 h-3 w-52" /></td>
-          <td className="px-5"><Skeleton className="h-4 w-8" /></td>
-          <td className="px-5"><Skeleton className="h-4 w-8" /></td>
-          <td className="px-5"><Skeleton className="h-6 w-16 rounded-full" /></td>
-          <td className="px-5"><Skeleton className="h-4 w-32" /></td>
-        </tr>
-      ))}
-    </>
+    <Suspense fallback={<PageSkeleton />}>
+      <DashboardContent />
+    </Suspense>
   );
 }
 

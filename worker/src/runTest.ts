@@ -1,6 +1,15 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { chromium, type Page } from "playwright";
+import type { Browser, BrowserContext, BrowserContextOptions, Page } from "playwright";
+import {
+  AuthProfileError,
+  type StorageState,
+  ensureAuthenticatedSession,
+  loadAuthProfile,
+  pageTheScriptOpens,
+  saveStorageState,
+  stateChanged,
+} from "./authProfiles.js";
 import { applyEnvironment, retargetUrl, scriptBody } from "./playback.js";
 
 async function accessibilityAudit(repoRoot: string): Promise<string> {
@@ -24,15 +33,36 @@ export type RunOutcome = {
   duration_ms: number;
   screenshot_path: string | null;
   screenshot_error: string | null;
+  cancelled?: boolean;
+  timed_out?: boolean;
 };
 
-export async function runRecordedTest(
-  repoRoot: string,
-  configPath: string,
-  options?: { isCancelled?: () => Promise<boolean>; environmentBaseUrl?: string | null; runId?: string | null }
-): Promise<RunOutcome> {
+export type RunOptions = {
+  browser: Browser;
+  /**
+   * Provides the test's context (e.g. a warm spare from BrowserPool). Defaults to
+   * browser.newContext. The context belongs to this test only and is closed when it ends.
+   */
+  newContext?: (options: BrowserContextOptions) => Promise<BrowserContext>;
+  isCancelled?: () => Promise<boolean>;
+  environmentBaseUrl?: string | null;
+  runId?: string | null;
+  /** Whole test, including auth session setup. */
+  testTimeoutMs: number;
+  /** Default for each Playwright action and navigation. */
+  stepTimeoutMs: number;
+  /** Set by the caller to abort (e.g. shutdown). */
+  signal?: AbortSignal;
+};
+
+export class TestNotStartedError extends Error {}
+
+export async function runRecordedTest(repoRoot: string, configPath: string, options: RunOptions): Promise<RunOutcome> {
   const started = Date.now();
   const caseDir = path.resolve(repoRoot, path.dirname(configPath));
+  if (!caseDir.startsWith(path.resolve(repoRoot) + path.sep)) {
+    return outcome(configPath, false, "Test not started: the configuration path is outside the workspace.", 0);
+  }
   const metaPath = path.join(caseDir, "testflow.meta.json");
   let meta: Record<string, unknown> = {};
   try {
@@ -49,7 +79,7 @@ export async function runRecordedTest(
     const fallback = path.join(caseDir, "test_recorded.py");
     source = await readFile(fallback, "utf8");
   }
-  const environmentBaseUrl = (options?.environmentBaseUrl || "").trim();
+  const environmentBaseUrl = (options.environmentBaseUrl || "").trim();
   if (environmentBaseUrl) {
     source = applyEnvironment(source, environmentBaseUrl);
     const current = String(meta.resolvedStartUrl || environmentBaseUrl);
@@ -60,53 +90,95 @@ export async function runRecordedTest(
     }
   }
   const body = scriptBody(source);
-  const projectId = path.basename(path.dirname(caseDir));
-  const profileId = String(meta.authProfileId || "").trim();
-  const storageState = profileId
-    ? path.join(repoRoot, "automation", "auth-profiles", projectId, profileId, "storage_state.json")
-    : undefined;
-  if (profileId && !(await exists(storageState))) {
-    return outcome(configPath, false, "Authenticated session file is missing for this auth profile.", 0);
-  }
-  const auditJs = await accessibilityAudit(repoRoot);
+  // Capability toggles saved on the test case. Off unless the tester enabled them.
+  const accessibilityEnabled = meta.accessibilityEnabled === true;
+  const networkCheckEnabled = meta.networkCheckEnabled === true;
+  const auditJs = accessibilityEnabled ? await accessibilityAudit(repoRoot) : "";
 
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 720 },
-    storageState: await exists(storageState) ? storageState : undefined,
-  });
-  const page = await context.newPage();
+  let context: BrowserContext | null = null;
+  let page: Page | null = null;
+  let timedOut = false;
+  let cancelled = false;
+  const stop = async () => {
+    if (context) await context.close().catch(() => undefined);
+  };
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void stop();
+  }, options.testTimeoutMs);
   const cancelTimer = setInterval(() => {
-    void options?.isCancelled?.().then((cancelled) => {
-      if (cancelled) void browser.close();
+    void options.isCancelled?.().then((value) => {
+      if (value) {
+        cancelled = true;
+        void stop();
+      }
     });
   }, 1000);
-  const networkFailures: { method: string; url: string; status: number; resourceType: string }[] = [];
-  const seenNetwork = new Set<string>();
-  page.on("response", (response) => {
-    try {
-      if (response.status() < 400) return;
-      const method = response.request().method();
-      const signature = `${method} ${response.url()} ${response.status()}`;
-      if (seenNetwork.has(signature)) return;
-      seenNetwork.add(signature);
-      networkFailures.push({
-        method,
-        url: response.url(),
-        status: response.status(),
-        resourceType: response.request().resourceType(),
-      });
-    } catch {
-      return;
-    }
-  });
+  const onAbort = () => {
+    cancelled = true;
+    void stop();
+  };
+  options.signal?.addEventListener("abort", onAbort);
 
+  const networkFailures: { method: string; url: string; status: number; resourceType: string }[] = [];
   let success = false;
   let errorMessage: string | null = null;
   let shots: StepShots | null = null;
+  let screenshotPath: string | null = null;
+  let screenshotError: string | null = null;
   try {
+    // Auth Profile session: restored, validated and renewed in memory (ADR-004).
+    let storageState: StorageState | undefined;
+    const profileId = String(meta.authProfileId || "").trim();
+    if (profileId) {
+      const projectId = path.basename(path.dirname(caseDir));
+      try {
+        const profile = await loadAuthProfile(repoRoot, projectId, profileId);
+        const target = pageTheScriptOpens(source, String(meta.resolvedStartUrl || ""));
+        const session = await ensureAuthenticatedSession(options.browser, profile, target, (message) =>
+          console.log(`[auth] job=${options.runId || "-"} ${message}`)
+        );
+        if (stateChanged(profile.storageState, session.state)) await saveStorageState(repoRoot, profile, session.state);
+        console.log(`[auth] job=${options.runId || "-"} outcome=${session.outcome}`);
+        storageState = session.state;
+      } catch (error) {
+        if (error instanceof AuthProfileError) throw new TestNotStartedError(`Test not started: ${error.message}`);
+        throw error;
+      }
+    }
+    if (timedOut || cancelled) throw new Error("stopped");
+
+    const contextOptions: BrowserContextOptions = {
+      viewport: { width: 1280, height: 720 },
+      ...(storageState ? { storageState: storageState as never } : {}),
+    };
+    context = await (options.newContext ? options.newContext(contextOptions) : options.browser.newContext(contextOptions));
+    if (timedOut || cancelled) throw new Error("stopped");
+    context.setDefaultTimeout(options.stepTimeoutMs);
+    context.setDefaultNavigationTimeout(options.stepTimeoutMs);
+    page = await context.newPage();
+    const seenNetwork = new Set<string>();
+    page.on("response", (response) => {
+      if (!networkCheckEnabled) return;
+      try {
+        if (response.status() < 400) return;
+        const method = response.request().method();
+        const signature = `${method} ${response.url()} ${response.status()}`;
+        if (seenNetwork.has(signature)) return;
+        seenNetwork.add(signature);
+        networkFailures.push({
+          method,
+          url: response.url(),
+          status: response.status(),
+          resourceType: response.request().resourceType(),
+        });
+      } catch {
+        return;
+      }
+    });
+
     await seedStorage(page, meta);
-    shots = await startStepShots(page, repoRoot, options?.runId || "");
+    shots = await startStepShots(page, repoRoot, options.runId || "");
     const run = new Function(
       "page",
       "expect",
@@ -127,28 +199,38 @@ export async function runRecordedTest(
         throw new Error(`Expected text not found: ${expected}`);
       }
     }
-    const rawViolations = (await page.evaluate(auditJs)) as { rule?: string; message?: string; target?: string }[];
-    const violations = uniqueViolations(rawViolations);
-    if (violations.length > 0) throw new Error(formatViolations(violations));
-    if (networkFailures.length > 0) throw new Error(formatNetwork(networkFailures));
+    await assertStorage(page, meta);
+    if (accessibilityEnabled) {
+      const rawViolations = (await page.evaluate(auditJs)) as { rule?: string; message?: string; target?: string }[];
+      const violations = uniqueViolations(rawViolations);
+      if (violations.length > 0) throw new Error(formatViolations(violations));
+    }
+    if (networkCheckEnabled && networkFailures.length > 0) throw new Error(formatNetwork(networkFailures));
+    if (timedOut || cancelled) throw new Error("stopped");
     success = true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    errorMessage = message.slice(0, 3000);
+    errorMessage = timedOut
+      ? `Timed out after ${options.testTimeoutMs} ms.`
+      : cancelled
+        ? "Cancelled"
+        : message.slice(0, 3000);
+  } finally {
+    clearTimeout(timer);
+    clearInterval(cancelTimer);
+    options.signal?.removeEventListener("abort", onAbort);
   }
-  let screenshotPath: string | null = null;
-  let screenshotError: string | null = null;
   try {
-    screenshotPath = await captureFinalScreenshot(page, repoRoot, options?.runId || "");
+    if (page && !timedOut && !cancelled) screenshotPath = await captureFinalScreenshot(page, repoRoot, options.runId || "");
   } catch (error) {
     screenshotError = error instanceof Error ? error.message : String(error);
     console.error(`Screenshot capture failed: ${screenshotError}`);
   } finally {
     if (shots) await shots.finish(Boolean(screenshotPath)).catch(() => undefined);
-    clearInterval(cancelTimer);
-    await browser.close().catch(() => undefined);
+    await stop();
   }
-  return outcome(configPath, success, errorMessage, Date.now() - started, screenshotPath, screenshotError);
+  const result = outcome(configPath, success, errorMessage, Date.now() - started, screenshotPath, screenshotError);
+  return { ...result, cancelled: cancelled && !success, timed_out: timedOut };
 }
 
 type StepShots = {
@@ -281,16 +363,6 @@ function formatNetwork(failures: { method: string; url: string; status: number; 
   return lines.join("\n");
 }
 
-async function exists(filePath: string | undefined): Promise<boolean> {
-  if (!filePath) return false;
-  try {
-    await readFile(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function seedStorage(page: Page, meta: Record<string, unknown>): Promise<void> {
   const seeds = Array.isArray(meta.storageSeeds) ? meta.storageSeeds : [];
   if (seeds.length === 0) return;
@@ -309,4 +381,40 @@ async function seedStorage(page: Page, meta: Record<string, unknown>): Promise<v
       store.setItem(entry.key, entry.value || "");
     }
   }, web.map((entry) => ({ kind: String(entry.kind), key: String(entry.key), value: String(entry.value || "") })));
+}
+
+type StorageEntry = { kind: string; key: string; value: string };
+
+/** Same rules as automation/framework/browser_storage.normalize_entries. */
+export function storageEntries(raw: unknown): StorageEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const cleaned: StorageEntry[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    const kind = String(record.kind || "").trim();
+    const key = String(record.key || "").trim();
+    if (!["localStorage", "sessionStorage", "cookie"].includes(kind) || !key) continue;
+    cleaned.push({ kind, key, value: String(record.value ?? "") });
+  }
+  return cleaned;
+}
+
+/** Check configured storage/cookie values after the recorded actions ran. */
+async function assertStorage(page: Page, meta: Record<string, unknown>): Promise<void> {
+  for (const entry of storageEntries(meta.storageAssertions)) {
+    let actual: string | null = null;
+    if (entry.kind === "cookie") {
+      const cookie = (await page.context().cookies()).find((item) => item.name === entry.key);
+      actual = cookie ? cookie.value : null;
+    } else {
+      actual = await page.evaluate(
+        ([area, key]) => (area === "sessionStorage" ? window.sessionStorage : window.localStorage).getItem(key),
+        [entry.kind, entry.key] as const
+      );
+    }
+    const label = entry.kind === "cookie" ? `cookie "${entry.key}"` : `${entry.kind} key "${entry.key}"`;
+    if (actual === null) throw new Error(`Expected ${label} to equal "${entry.value}", but it was not set.`);
+    if (actual !== entry.value) throw new Error(`Expected ${label} to equal "${entry.value}", but received "${actual}".`);
+  }
 }

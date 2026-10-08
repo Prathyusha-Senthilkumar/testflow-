@@ -1,11 +1,179 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Plus, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { Check, Plus, PlusCircle, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useNavigate, useParams } from "@/lib/navigation";
 import { suggestedSuites, testCases } from "@/lib/demoData";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { PageContainer, PageHeader } from "@/components/layout/page-header";
 import { CreateSuiteModal } from "@/components/suites/CreateSuiteModal";
-export function ReviewSuiteSuggestionsPage(){const {id='demo-project'}=useParams();const navigate=useNavigate();const [accepted,setAccepted]=useState<string[]>(suggestedSuites.map(s=>s.id));const [open,setOpen]=useState(false);return <div className="p-6 lg:p-8"><div className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-3xl font-bold">Review Suite Suggestions <span className="rounded-lg bg-slate-200 px-2 py-1 font-mono text-xs font-normal text-slate-600">AI CLUSTERING</span></h1><p className="mt-1 text-sm text-slate-500">Review and organize the suggested test suite groupings before adding them to your project repository.</p></div><div className="flex gap-2"><button className="rounded-lg-lg bg-indigo-50 px-4 py-2 text-sm font-medium"><SlidersHorizontal size={15} className="mr-1 inline"/>Detection Rules</button><button onClick={()=>setOpen(true)} className="rounded-lg-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"><Plus size={15} className="mr-1 inline"/>Create Suite Manually</button></div></div><div className="mt-6 rounded-lg border-l-4 border-indigo-600 bg-indigo-50 p-4"><div className="flex flex-wrap items-center justify-between gap-4"><div className="flex items-center gap-3"><Sparkles className="text-indigo-600"/><div><b>3 Suggested Suites detected</b><span className="ml-2 rounded-lg bg-slate-200 px-2 py-1 font-mono text-xs text-slate-600">Cluster Engine v2.4</span><p className="mt-1 text-sm text-slate-500">Based on recent admissions & auth coverage. Suggested suites are temporary until confirmed below.</p></div></div><div className="flex gap-2 text-xs"><span className="rounded-lg bg-white px-3 py-2 text-sm"><b>6</b> Total Assignments</span><span className="rounded-lg bg-white px-3 py-2 text-sm"><b>1</b> Multi-suite Link</span></div></div></div><div className="mt-5 space-y-5">{suggestedSuites.map(s=><div key={s.id} className="overflow-hidden rounded-xl bg-white shadow-sm"><div className="flex flex-wrap items-center gap-3 p-4"><h2 className="text-lg font-semibold">{s.name}</h2><span className="rounded-lg-full bg-teal-100 px-2 py-1 font-mono text-[10px] font-bold tracking-wide text-teal-800 text-sm">SUGGESTED</span><span className="text-xs text-slate-500">· {s.cases.length} test cases</span><div className="ml-auto flex gap-2"><button onClick={()=>setAccepted(v=>v.filter(x=>x!==s.id))} className="px-3 py-1.5 text-sm text-slate-500"><X size={14} className="mr-1 inline"/>Reject Suite</button><button onClick={()=>setAccepted(v=>v.includes(s.id)?v.filter(x=>x!==s.id):[...v,s.id])} className={`rounded-lg-lg px-3 py-1.5 text-sm font-medium ${accepted.includes(s.id)?'bg-indigo-600 text-white':'bg-slate-100'}`}><Check size={14} className="mr-1 inline"/>{accepted.includes(s.id)?'Accepted':'Accept'}</button></div><p className="w-full text-sm text-slate-500">{s.description}</p></div><table className="w-full text-sm"><thead className="bg-indigo-50 text-xs uppercase text-slate-600"><tr><th className="px-4 py-2 text-left">ID</th><th className="px-4 py-2 text-left">Test Case Title</th><th className="px-4 py-2 text-left">Status</th><th className="px-4 py-2 text-left">Automation Type</th><th className="px-4 py-2 text-right">Actions</th></tr></thead><tbody>{s.cases.map(cid=>{const t=testCases.find(x=>x.id===cid)??testCases[0];return <tr key={cid} className="border-t"><td className="px-4 py-3 font-mono text-xs text-indigo-700">{cid}</td><td className="px-4 py-3 font-medium">{t.name}</td><td className="px-4 py-3"><StatusBadge status={t.status}/></td><td className="px-4 py-3 text-slate-600">{t.automation}</td><td className="px-4 py-3 text-right"><select className="rounded-lg-lg bg-indigo-50 px-2 py-1 text-xs"><option>Move to Suite</option></select><button className="ml-2 text-slate-400">×</button></td></tr>})}</tbody></table><div className="flex items-center justify-between border-t px-4 py-3 text-sm"><button className="font-medium text-indigo-600">⊕ Add Test Case to this Suite</button><span className="text-xs text-slate-400">Test cases can belong to multiple suites.</span></div></div>)}</div><div className="sticky bottom-0 mt-8 flex items-center justify-between border-t bg-white/95 px-2 py-4 backdrop-blur text-sm"><span className="text-sm"><span className="mr-2 inline-block h-2 w-2 rounded-full bg-indigo-600"/><b>3 suggested suites</b> (6 test case assignments) reviewed</span><div className="flex gap-2"><button onClick={()=>navigate(`/projects/${id}/suites`)} className="rounded-lg bg-slate-100 px-4 py-2 text-sm">Cancel</button><button onClick={()=>navigate(`/projects/${id}/suites`)} className="rounded-lg-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">◉ Confirm Suites ({accepted.length})</button></div></div><CreateSuiteModal open={open} onClose={()=>setOpen(false)} onSubmit={()=>setOpen(false)}/></div>}
+
+/** Demo-data review screen for clustered suite suggestions (no API yet). */
+export function ReviewSuiteSuggestionsPage() {
+  const { id = "demo-project" } = useParams();
+  const navigate = useNavigate();
+  const [accepted, setAccepted] = useState<string[]>(suggestedSuites.map((s) => s.id));
+  const [open, setOpen] = useState(false);
+
+  return (
+    <PageContainer className="pb-0">
+      <PageHeader
+        title="Review suite suggestions"
+        description="Review and organize the suggested test suite groupings before adding them to your project."
+        meta={<Badge variant="outline" className="font-mono">AI clustering</Badge>}
+        actions={
+          <>
+            <Button variant="outline">
+              <SlidersHorizontal />
+              Detection rules
+            </Button>
+            <Button onClick={() => setOpen(true)}>
+              <Plus />
+              Create suite manually
+            </Button>
+          </>
+        }
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border bg-surface px-4 py-3">
+        <div className="flex items-start gap-3">
+          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-info-soft text-info">
+            <Sparkles className="size-4" aria-hidden />
+          </span>
+          <div>
+            <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+              3 suggested suites detected
+              <Badge variant="outline" className="font-mono">Cluster Engine v2.4</Badge>
+            </p>
+            <p className="mt-0.5 text-[13px] text-muted-foreground">
+              Based on recent admissions & auth coverage. Suggestions are temporary until confirmed below.
+            </p>
+          </div>
+        </div>
+        <dl className="flex gap-4 text-[13px]">
+          <div className="flex items-baseline gap-1.5">
+            <dt className="text-muted-foreground">Total assignments</dt>
+            <dd className="font-semibold tabular-nums">6</dd>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <dt className="text-muted-foreground">Multi-suite links</dt>
+            <dd className="font-semibold tabular-nums">1</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div className="space-y-4">
+        {suggestedSuites.map((s) => {
+          const isAccepted = accepted.includes(s.id);
+          return (
+            <Card key={s.id} className={cn("overflow-hidden transition-colors duration-150", isAccepted && "border-primary/40")}>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-3">
+                <h2 className="text-[15px] font-semibold">{s.name}</h2>
+                <Badge variant="info">Suggested</Badge>
+                <span className="text-xs text-muted-foreground tabular-nums">{s.cases.length} test cases</span>
+                <div className="ml-auto flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setAccepted((v) => v.filter((x) => x !== s.id))}>
+                    <X />
+                    Reject
+                  </Button>
+                  <Button
+                    variant={isAccepted ? "default" : "outline"}
+                    size="sm"
+                    aria-pressed={isAccepted}
+                    onClick={() => setAccepted((v) => (v.includes(s.id) ? v.filter((x) => x !== s.id) : [...v, s.id]))}
+                  >
+                    <Check />
+                    {isAccepted ? "Accepted" : "Accept"}
+                  </Button>
+                </div>
+                <p className="w-full text-[13px] text-muted-foreground">{s.description}</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] text-[13px]">
+                  <thead className="text-xs text-muted-foreground">
+                    <tr className="border-b border-border">
+                      <th className="h-9 px-4 text-left font-medium">ID</th>
+                      <th className="h-9 px-4 text-left font-medium">Test case</th>
+                      <th className="h-9 px-4 text-left font-medium">Status</th>
+                      <th className="h-9 px-4 text-left font-medium">Automation</th>
+                      <th className="h-9 px-4 text-right font-medium">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {s.cases.map((cid) => {
+                      const t = testCases.find((x) => x.id === cid) ?? testCases[0];
+                      return (
+                        <tr key={cid} className="border-b border-border-subtle last:border-0 hover:bg-elevated/60">
+                          <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{cid}</td>
+                          <td className="px-4 py-2 font-medium">{t.name}</td>
+                          <td className="px-4 py-2">
+                            <StatusBadge status={t.status} />
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground">{t.automation}</td>
+                          <td className="px-4 py-2">
+                            <div className="flex items-center justify-end gap-1">
+                              {/* Demo page: moving cases between suggestions is not implemented (same as before). */}
+                              <Select
+                                aria-label={`Move ${cid} to suite`}
+                                size="sm"
+                                className="w-40"
+                                triggerClassName="h-7 text-xs"
+                                placeholder="Move to suite"
+                                value=""
+                                options={suggestedSuites.filter((other) => other.id !== s.id).map((other) => ({ value: other.id, label: other.name }))}
+                              />
+                              <Button variant="ghost" size="icon-sm" aria-label={`Remove ${cid} from suggestion`}>
+                                <X />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between border-t border-border px-4 py-2">
+                <Button variant="link" size="sm">
+                  <PlusCircle />
+                  Add test case to this suite
+                </Button>
+                <span className="text-xs text-faint">Test cases can belong to multiple suites.</span>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t border-border bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+        <span className="flex items-center gap-2 text-[13px]">
+          <span aria-hidden className="size-2 rounded-full bg-primary" />
+          <span>
+            <b className="font-semibold">3 suggested suites</b>{" "}
+            <span className="text-muted-foreground">(6 test case assignments) reviewed</span>
+          </span>
+        </span>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => navigate(`/projects/${id}/suites`)}>
+            Cancel
+          </Button>
+          <Button onClick={() => navigate(`/projects/${id}/suites`)}>
+            <Check />
+            Confirm suites <span className="tabular-nums">({accepted.length})</span>
+          </Button>
+        </div>
+      </div>
+
+      <CreateSuiteModal open={open} onClose={() => setOpen(false)} onSubmit={() => setOpen(false)} />
+    </PageContainer>
+  );
+}
 
 export default ReviewSuiteSuggestionsPage;
