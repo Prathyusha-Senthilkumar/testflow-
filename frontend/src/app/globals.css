@@ -70,6 +70,9 @@
   --brand: #07184f;
   /* Links, highlights, active icons, the logo tick. */
   --brand-accent: #2f4fc4;
+  /* App-icon tile (favicon, nav logo): same in both themes. */
+  --brand-tile-fg: #ffffff;
+  --brand-tick: #8ea2f0;
 
   /* Status */
   --success: #15803d;

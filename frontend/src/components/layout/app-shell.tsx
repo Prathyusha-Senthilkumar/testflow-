@@ -174,7 +174,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
               <SheetHeader className="h-14 justify-center border-b border-border px-4 py-0">
                 <SheetTitle asChild>
                   <div>
-                    <AttestLogo markClassName="size-6" />
+                    <AttestLogo variant="tile" markClassName="size-7" />
                   </div>
                 </SheetTitle>
                 <SheetDescription className="sr-only">Main navigation</SheetDescription>

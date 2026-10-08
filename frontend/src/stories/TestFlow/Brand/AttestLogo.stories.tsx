@@ -23,6 +23,17 @@ export const Sizes: Story = {
   ),
 };
 /** On a primary fill (app icon, splash). */
+/** App-icon tile: matches the favicon; used in the sidebar, top bar and sign-in pages. */
+export const Tile: Story = {
+  render: () => (
+    <div className="flex items-center gap-6">
+      <AttestMark variant="tile" className="size-16" title="Attest" />
+      <AttestMark variant="tile" className="size-7" />
+      <AttestLogo variant="tile" markClassName="size-7" />
+    </div>
+  ),
+};
+
 export const OnPrimary: Story = {
   render: () => (
     <div className="flex items-center gap-6">

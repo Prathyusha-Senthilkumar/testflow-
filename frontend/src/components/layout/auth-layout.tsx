@@ -28,7 +28,7 @@ export function AuthLayout({ title, description, children, footer }: AuthLayoutP
           <ThemeToggle />
         </div>
         <main className="flex flex-1 flex-col items-center justify-center px-4 py-12">
-          <AttestLogo markClassName="size-9" wordmarkClassName="text-2xl" className="gap-2.5" />
+          <AttestLogo variant="tile" markClassName="size-10" wordmarkClassName="text-2xl" className="gap-3" />
           <section
             aria-labelledby="auth-title"
             className="mt-8 w-full max-w-[400px] rounded-lg border border-border bg-surface p-6 sm:p-7"
