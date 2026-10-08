@@ -125,3 +125,24 @@ def test_without_migration_reads_work_and_setting_is_a_clear_409():
         service.set_default(project_id, staging.id)
     assert exc.value.status_code == 409
     assert "20261009_default_environment.sql" in exc.value.detail
+
+
+def test_environment_named_default_can_be_deleted_when_another_exists():
+    project_id = _project()
+    named_default = _envs(project_id)[0]
+    assert named_default["name"] == "Default"
+    staging = _create_env(project_id, "Staging")
+    res = client.delete(f"/api/projects/{project_id}/environments/{named_default['id']}")
+    assert res.status_code in (200, 204), res.text
+    envs = _envs(project_id)
+    # Not recreated by the next list, and the remaining one becomes the default.
+    assert [env["id"] for env in envs] == [staging["id"]]
+    assert _defaults(envs) == [staging["id"]]
+
+
+def test_last_environment_cannot_be_deleted():
+    project_id = _project()
+    only = _envs(project_id)[0]
+    res = client.delete(f"/api/projects/{project_id}/environments/{only['id']}")
+    assert res.status_code == 400
+    assert "at least one environment" in res.json()["message"]

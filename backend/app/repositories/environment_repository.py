@@ -29,6 +29,11 @@ def _is_missing_column(exc: Exception) -> bool:
     )
 
 
+_LAST_ENVIRONMENT_MESSAGE = (
+    "A project needs at least one environment. Add another one before deleting this one."
+)
+
+
 class EnvironmentRepository:
     def __init__(self):
         self.demo_environments: Dict[str, List[EnvironmentSummary]] = {
@@ -57,17 +62,19 @@ class EnvironmentRepository:
         )
 
     def _db_default(self, project_id: str) -> EnvironmentSummary | None:
+        """The flagged default, else the oldest environment. Works before the is_default migration."""
         res = (
             self.db.from_("environments")
             .select("*")
             .eq("project_id", project_id)
-            .eq("name", DEFAULT_ENVIRONMENT_NAME)
-            .limit(1)
+            .order("created_at")
             .execute()
         )
-        if res.data:
-            return self._map_row(res.data[0])
-        return None
+        rows = res.data or []
+        if not rows:
+            return None
+        flagged = next((row for row in rows if row.get("is_default")), None)
+        return self._map_row(flagged or rows[0])
 
     # ---- CRUD -------------------------------------------------------------
     def list_by_project(self, project_id: str) -> List[EnvironmentSummary]:
@@ -122,8 +129,13 @@ class EnvironmentRepository:
         return default
 
     def ensure_default(self, project_id: str, base_url: str | None) -> EnvironmentSummary:
+        """Return the project's default environment, creating one named "Default" only when the
+        project has no environments at all. The name is just a starting label: it can be renamed
+        or deleted like any other environment once another exists."""
         if not self.db:
             existing = self.demo_environments.get(project_id, [])
+            if existing and not any(env.id == DEFAULT_ENVIRONMENT_ID for env in existing):
+                return next((env for env in existing if env.isDefault), existing[0])
             for env in existing:
                 if env.id == DEFAULT_ENVIRONMENT_ID:
                     if base_url and env.baseUrl != base_url:
@@ -215,18 +227,24 @@ class EnvironmentRepository:
 
     def delete(self, project_id: str, environment_id: str) -> None:
         if not self.db:
-            if environment_id == DEFAULT_ENVIRONMENT_ID:
-                raise HTTPException(status_code=400, detail="The Default environment cannot be deleted")
             environments = self.demo_environments.get(project_id, [])
+            if len(environments) <= 1 and any(env.id == environment_id for env in environments):
+                raise HTTPException(status_code=400, detail=_LAST_ENVIRONMENT_MESSAGE)
             next_list = [env for env in environments if env.id != environment_id]
             if len(next_list) == len(environments):
                 raise HTTPException(status_code=404, detail="Environment not found")
             self.demo_environments[project_id] = next_list
             return
 
-        env = self.find_by_id(project_id, environment_id)
-        if env.name == DEFAULT_ENVIRONMENT_NAME:
-            raise HTTPException(status_code=400, detail="The Default environment cannot be deleted")
+        self.find_by_id(project_id, environment_id)
+        count = (
+            self.db.from_("environments")
+            .select("id", count="exact")
+            .eq("project_id", project_id)
+            .execute()
+        ).count
+        if (count or 0) <= 1:
+            raise HTTPException(status_code=400, detail=_LAST_ENVIRONMENT_MESSAGE)
         self.db.from_("environments").delete().eq("project_id", project_id).eq(
             "id", environment_id
         ).execute()
