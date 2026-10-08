@@ -12,6 +12,9 @@ class EnvironmentSummary(BaseModel):
     projectId: str = Field(..., alias="projectId")
     name: str
     baseUrl: str = Field(..., alias="baseUrl")
+    # The project's default environment. False for every row until the
+    # 20261009_default_environment migration is applied; callers then fall back to the oldest.
+    isDefault: bool = Field(False, alias="isDefault")
 
 
 class CreateEnvironmentDto(BaseModel):

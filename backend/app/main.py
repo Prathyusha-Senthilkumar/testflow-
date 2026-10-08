@@ -41,18 +41,24 @@ async def lifespan(_app: FastAPI):
 
     if not is_configured():
         logger.warning("event=secret_key_missing TESTFLOW_SECRET_KEY is not a valid Fernet key; Auth Profiles will fail")
-    from app.services.batch_queue import consume_forever
+    from app.services.batch_queue import consume_forever, promote_scheduled_forever
 
     from app.services.run_sweep_service import sweep_forever
 
     thread = threading.Thread(target=consume_forever, name="batch-queue", daemon=True)
     thread.start()
     logger.info("Batch queue consumer started")
+    schedule_stop = threading.Event()
+    threading.Thread(
+        target=promote_scheduled_forever, args=(schedule_stop,), name="scheduled-batches", daemon=True
+    ).start()
+    logger.info("Scheduled batch promoter started")
     sweep_stop = threading.Event()
     threading.Thread(target=sweep_forever, args=(sweep_stop,), name="stuck-run-sweep", daemon=True).start()
     logger.info("Stuck-run sweep started")
     yield
     sweep_stop.set()
+    schedule_stop.set()
 
 
 app = FastAPI(

@@ -1,16 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
   ExternalLink,
   FileCheck2,
   Layers,
-  MoreHorizontal,
-  Play,
+  Pencil,
   Plus,
-  Settings2,
   Sparkles,
   Trash2,
   XCircle,
@@ -27,19 +25,18 @@ import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataTable, createDataTableColumns } from "@/components/ui/data-table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Stat, StatGroup } from "@/components/common/Stat";
 import { PageContainer, PageHeader, SectionHeader } from "@/components/layout/page-header";
 import { usePublishEntityName } from "@/components/layout/shell-context";
 import { ProjectFormModal } from "@/components/projects/ProjectFormModal";
 import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
+import { RunMenuButton } from "@/components/runs/RunMenuButton";
+import { ScheduleRunDialog, type ScheduleRunInput } from "@/components/runs/ScheduleRunDialog";
+import { ScheduledBatchList } from "@/components/runs/ScheduledBatchList";
+import { useScheduledBatches } from "@/hooks/useScheduledBatches";
+import { defaultEnvironment as pickDefaultEnvironment } from "@/lib/environments";
+import { formatInTimeZone } from "@/lib/scheduleTime";
 
 const suiteColumns = createDataTableColumns<SuiteSummary>();
 
@@ -85,10 +82,11 @@ export function ProjectOverviewPage() {
   const [suiteCategory, setSuiteCategory] = useState<"all" | SuiteCategory>("all");
   const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
   const [environmentId, setEnvironmentId] = useState("");
-  const [suiteDialogId, setSuiteDialogId] = useState<string | null>(null);
   const [startingSuiteId, setStartingSuiteId] = useState<string | null>(null);
-  const [cancellingSuite, setCancellingSuite] = useState(false);
-  const cancelSuiteStart = useRef(false);
+  /** What "Schedule run…" was opened for: the whole project or one suite row. */
+  const [scheduleTarget, setScheduleTarget] = useState<{ kind: "project" } | { kind: "suite"; id: string; name: string } | null>(null);
+  const defaultEnvironment = pickDefaultEnvironment(environments);
+  const scheduled = useScheduledBatches({ projectId }, { enabled: Boolean(projectId) });
 
   usePublishEntityName("project", project?.id, project?.name);
 
@@ -98,52 +96,68 @@ export function ProjectOverviewPage() {
     api.environments(projectId).then(setEnvironments).catch(() => setEnvironments([]));
   }, [projectId]);
 
-  async function runProject() {
-    if (!projectId || startingProject || !environmentId) return;
+  function warnNoEnvironment() {
+    toast.error("No environments configured", {
+      description: "Add an environment to this project before running tests.",
+      action: { label: "Environments", onClick: () => navigate(`/projects/${projectId}/environments`) },
+    });
+  }
+
+  /** "Run with options…": the dialog with category and environment, preselected with the default. */
+  function openProjectRunOptions() {
+    setError("");
+    setSuiteCategory("all");
+    setEnvironmentId(defaultEnvironment?.id ?? "");
+    setProjectDialogOpen(true);
+  }
+
+  /** Main click runs all categories on the default; "Run on" items run once on that environment. */
+  async function runProject(category: SuiteCategory | undefined, targetEnvironmentId: string | undefined) {
+    if (!projectId || startingProject) return;
+    if (!targetEnvironmentId) {
+      if (projectDialogOpen) return;
+      warnNoEnvironment();
+      return;
+    }
     setStartingProject(true);
     setError("");
     try {
-      const started = await api.startProjectRun(
-        projectId,
-        suiteCategory === "all" ? undefined : suiteCategory,
-        environmentId
-      );
+      const started = await api.startProjectRun(projectId, category, targetEnvironmentId);
       setProjectDialogOpen(false);
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start the project run");
+      const message = err instanceof Error ? err.message : "Could not start the project run";
+      if (projectDialogOpen) setError(message);
+      else toast.error(message);
       setStartingProject(false);
     }
   }
 
-  async function runSuite() {
-    if (!projectId || !suiteDialogId || startingSuiteId || !environmentId) return;
-    const suiteId = suiteDialogId;
-    cancelSuiteStart.current = false;
-    setCancellingSuite(false);
+  async function runSuite(suiteId: string, targetEnvironmentId: string | undefined) {
+    if (!projectId || startingSuiteId) return;
+    if (!targetEnvironmentId) {
+      warnNoEnvironment();
+      return;
+    }
     setStartingSuiteId(suiteId);
     setError("");
     try {
-      const started = await api.startSuiteRun(projectId, suiteId, environmentId);
-      if (cancelSuiteStart.current) {
-        await api.cancelBatchRun(started.batchId);
-      }
-      setSuiteDialogId(null);
+      const started = await api.startSuiteRun(projectId, suiteId, targetEnvironmentId);
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start the suite run");
+      toast.error(err instanceof Error ? err.message : "Could not start the suite run");
       setStartingSuiteId(null);
-      setCancellingSuite(false);
     }
   }
 
-  function cancelSuiteDialog() {
-    if (startingSuiteId) {
-      cancelSuiteStart.current = true;
-      setCancellingSuite(true);
-      return;
-    }
-    setSuiteDialogId(null);
+  async function scheduleRun(input: ScheduleRunInput) {
+    if (!projectId || !scheduleTarget) return;
+    const created =
+      scheduleTarget.kind === "suite"
+        ? await api.scheduleSuiteRun(projectId, scheduleTarget.id, input)
+        : await api.scheduleProjectRun(projectId, input.category && input.category !== "all" ? input.category : undefined, input);
+    toast.success(`Scheduled for ${formatInTimeZone(created.scheduledFor, created.timeZone || input.timeZone)}`);
+    await scheduled.refresh();
   }
 
   const editValue = useMemo<ProjectInput | undefined>(
@@ -244,23 +258,28 @@ export function ProjectOverviewPage() {
         id: "actions",
         header: () => <span className="sr-only">Actions</span>,
         cell: ({ row }) => (
-          <Button
+          <RunMenuButton
             size="sm"
             variant="outline"
-            onClick={(event) => {
-              event.stopPropagation();
-              setError("");
-              setSuiteDialogId(row.original.id);
-            }}
+            label="Run suite"
+            runningLabel="Starting…"
+            onRun={() => void runSuite(row.original.id, defaultEnvironment?.id)}
+            environments={environments}
+            selectedEnvironmentId={defaultEnvironment?.id}
+            defaultEnvironmentId={defaultEnvironment?.id}
+            onRunOn={(envId) => void runSuite(row.original.id, envId)}
+            title={defaultEnvironment ? `Run on ${defaultEnvironment.name}` : undefined}
+            onSchedule={() => setScheduleTarget({ kind: "suite", id: row.original.id, name: row.original.name })}
+            running={startingSuiteId === row.original.id}
             disabled={startingSuiteId === row.original.id}
-          >
-            <Play /> {startingSuiteId === row.original.id ? "Starting…" : "Run suite"}
-          </Button>
+            scheduleDisabled={environments.length === 0}
+          />
         ),
         meta: { align: "right" },
       }),
     ],
-    [startingSuiteId]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run handlers are recreated each render but only read the state listed here
+    [startingSuiteId, environments, defaultEnvironment]
   );
 
   if (loading) return <OverviewSkeleton />;
@@ -274,7 +293,7 @@ export function ProjectOverviewPage() {
     );
   }
 
-  const dialogOpen = projectDialogOpen || suiteDialogId !== null;
+  const dialogOpen = projectDialogOpen;
 
   const topSuites = project.suitesList.slice(0, OVERVIEW_SUITE_LIMIT);
 
@@ -296,32 +315,29 @@ export function ProjectOverviewPage() {
         }
         actions={
           <>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" aria-label="More project actions">
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onSelect={() => setEditOpen(true)}>
-                  <Settings2 /> Edit project
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={() => void deleteProject()}>
-                  <Trash2 /> Delete project
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              onClick={() => {
-                setError("");
-                setSuiteCategory("smoke");
-                setProjectDialogOpen(true);
-              }}
-              disabled={startingProject || project.cases === 0}
-            >
-              <Play /> {startingProject ? "Starting project…" : "Run project"}
+            <Button variant="outline" onClick={() => setEditOpen(true)}>
+              <Pencil />
+              Edit
             </Button>
+            <Button variant="outline" onClick={() => void deleteProject()} className="hover:border-destructive/40 hover:text-destructive">
+              <Trash2 />
+              Delete
+            </Button>
+            <RunMenuButton
+              label="Run project"
+              runningLabel="Starting project…"
+              onRun={() => void runProject(undefined, defaultEnvironment?.id)}
+              environments={environments}
+              selectedEnvironmentId={defaultEnvironment?.id}
+              defaultEnvironmentId={defaultEnvironment?.id}
+              onRunOn={(envId) => void runProject(undefined, envId)}
+              onRunWithOptions={environments.length > 0 ? openProjectRunOptions : undefined}
+              onSchedule={() => setScheduleTarget({ kind: "project" })}
+              title={defaultEnvironment ? `Run on ${defaultEnvironment.name}` : "Add an environment to run this project"}
+              running={startingProject && !projectDialogOpen}
+              disabled={startingProject || project.cases === 0}
+              scheduleDisabled={project.cases === 0 || environments.length === 0}
+            />
           </>
         }
       />
@@ -363,6 +379,12 @@ export function ProjectOverviewPage() {
           <Link to={`/projects/${project.id}/suites/review`}>Review suggestions</Link>
         </Button>
       </div>
+
+      <ScheduledBatchList
+        items={scheduled.items}
+        showTarget
+        onCancel={(item) => void scheduled.cancel(item)}
+      />
 
       <section className="space-y-3">
         {/* Overview shows the top suites only; the full list lives on the Suites page (count is on the tile above). */}
@@ -415,7 +437,11 @@ export function ProjectOverviewPage() {
             <Button variant="outline" disabled={startingProject} onClick={() => setProjectDialogOpen(false)}>
               Cancel
             </Button>
-            <Button loading={startingProject} disabled={startingProject || !environmentId} onClick={runProject}>
+            <Button
+              loading={startingProject}
+              disabled={startingProject || !environmentId}
+              onClick={() => void runProject(suiteCategory === "all" ? undefined : suiteCategory, environmentId)}
+            >
               {startingProject ? "Starting…" : "Run project"}
             </Button>
           </>
@@ -436,27 +462,24 @@ export function ProjectOverviewPage() {
         </div>
       </Modal>
 
-      <Modal
-        open={suiteDialogId !== null}
-        onClose={cancelSuiteDialog}
-        title="Run test suite"
-        description={project.suitesList.find((suite) => suite.id === suiteDialogId)?.name}
-        footer={
-          <>
-            <Button variant={startingSuiteId ? "destructive" : "outline"} disabled={cancellingSuite} onClick={cancelSuiteDialog}>
-              {startingSuiteId ? (cancellingSuite ? "Cancelling…" : "Cancel run") : "Cancel"}
-            </Button>
-            <Button loading={startingSuiteId !== null} disabled={startingSuiteId !== null || !environmentId} onClick={runSuite}>
-              {startingSuiteId ? "Starting…" : "Run suite"}
-            </Button>
-          </>
+      <ScheduleRunDialog
+        open={scheduleTarget !== null}
+        onClose={() => setScheduleTarget(null)}
+        title={scheduleTarget?.kind === "suite" ? "Schedule suite run" : "Schedule project run"}
+        description={scheduleTarget?.kind === "suite" ? scheduleTarget.name : project.name}
+        environments={environments}
+        environmentId={defaultEnvironment?.id}
+        categoryOptions={
+          scheduleTarget?.kind === "project"
+            ? [
+                { value: "all", label: "All categories" },
+                ...SUITE_CATEGORIES.map((category) => ({ value: category, label: SUITE_CATEGORY_LABELS[category] })),
+              ]
+            : undefined
         }
-      >
-        <div className="space-y-4">
-          <EnvironmentField environments={environments} value={environmentId} onChange={setEnvironmentId} />
-          {error ? <Alert variant="error">{error}</Alert> : null}
-        </div>
-      </Modal>
+        category="all"
+        onSubmit={scheduleRun}
+      />
 
       <ProjectFormModal
         open={editOpen}

@@ -184,3 +184,19 @@ def consume_forever() -> None:
             print(f"Batch queue error: {exc}", flush=True)
             logger.exception("Batch queue consumer error")
             time.sleep(1)
+
+
+SCHEDULE_POLL_SECONDS = 5
+
+
+def promote_scheduled_forever(stop: threading.Event) -> None:
+    """Start due suite/project schedules. Runs beside consume_forever so a stuck queue read never delays them."""
+    from app.services.execution_service import get_execution_service
+
+    service = get_execution_service()
+    while not stop.is_set():
+        try:
+            service.promote_due_batches()
+        except Exception:
+            logger.exception("event=scheduled_batch_promote_error")
+        stop.wait(SCHEDULE_POLL_SECONDS)

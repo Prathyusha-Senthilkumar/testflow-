@@ -22,6 +22,7 @@ from app.schemas.execution import (
     ExecutionResultPayload,
     ExecutionState,
     ExecutionStatusResponse,
+    ScheduledBatch,
     ScheduledExecution,
     StartExecutionRequest,
 )
@@ -100,6 +101,12 @@ class ExecutionService:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         time_zone = self._validate_time_zone(request.time_zone)
+        if not environment_base_url and request.environment_id:
+            if not request.project_id:
+                raise HTTPException(status_code=400, detail="projectId is required with environmentId.")
+            environment_base_url = (
+                _require_project_environment(request.project_id, request.environment_id).baseUrl or None
+            )
         if not environment_base_url and request.project_id and request.test_case_id:
             environment_base_url = _case_environment_base_url(request.project_id, request.test_case_id)
         queue_service = get_queue_service()
@@ -310,6 +317,210 @@ class ExecutionService:
             run_by=run_by,
             prefetched_cases={str(case.id): case for case in project_cases},
         )
+
+    # ---- Scheduled suite and project runs ---------------------------------
+
+    def schedule_suite(
+        self,
+        project_id: str,
+        suite_id: str,
+        environment_id: str,
+        run_at: datetime,
+        time_zone: Optional[str] = None,
+        run_by: Optional[tuple[str, str]] = None,
+    ) -> ScheduledBatch:
+        """Save a suite run for later. Cases are resolved when it fires, so later additions run too."""
+        from app.repositories.project_repository import project_repository
+        from app.repositories.test_suite_repository import test_suite_repository
+
+        scheduled, zone = self._validate_schedule(run_at, time_zone)
+        project = project_repository.find_base(project_id)
+        environment = _require_project_environment(project_id, environment_id)
+        suite = test_suite_repository.find_by_id(project_id, suite_id)
+        return self._save_schedule(
+            "suite",
+            project_id,
+            project.name,
+            environment,
+            scheduled,
+            zone,
+            run_by,
+            suite_id=suite.id,
+            suite_name=suite.name,
+        )
+
+    def schedule_project(
+        self,
+        project_id: str,
+        environment_id: str,
+        run_at: datetime,
+        time_zone: Optional[str] = None,
+        suite_category: Optional[str] = None,
+        run_by: Optional[tuple[str, str]] = None,
+    ) -> ScheduledBatch:
+        from app.repositories.project_repository import project_repository
+        from app.schemas.test_case import EXECUTION_CATEGORIES
+
+        scheduled, zone = self._validate_schedule(run_at, time_zone)
+        project = project_repository.find_base(project_id)
+        environment = _require_project_environment(project_id, environment_id)
+        category = (suite_category or "").strip() or None
+        if category and category not in EXECUTION_CATEGORIES:
+            raise HTTPException(status_code=400, detail="Choose a valid test category.")
+        return self._save_schedule(
+            "project",
+            project_id,
+            project.name,
+            environment,
+            scheduled,
+            zone,
+            run_by,
+            suite_category=category,
+        )
+
+    def list_scheduled_batches(
+        self, project_id: Optional[str] = None, suite_id: Optional[str] = None
+    ) -> list[ScheduledBatch]:
+        from app.repositories.scheduled_batch_repository import scheduled_batch_repository
+
+        items: list[ScheduledBatch] = []
+        for record in scheduled_batch_repository.list_pending():
+            if project_id and record.get("projectId") != project_id:
+                continue
+            if suite_id and record.get("suiteId") != suite_id:
+                continue
+            items.append(_scheduled_batch(record))
+        items.sort(key=lambda item: item.scheduled_for)
+        return items
+
+    def cancel_scheduled_batch(self, schedule_id: str) -> None:
+        from app.repositories.scheduled_batch_repository import scheduled_batch_repository
+
+        if not scheduled_batch_repository.claim(schedule_id):
+            raise HTTPException(status_code=404, detail="Scheduled run not found")
+        scheduled_batch_repository.delete_record(schedule_id)
+        _logger.info("event=scheduled_batch_cancelled schedule_id=%s", schedule_id)
+
+    def promote_due_batches(self, now: Optional[datetime] = None) -> list[str]:
+        """Start every due schedule this process manages to claim. Returns the new batch ids.
+
+        ZREM is the claim: when several backend processes race, only the one that removed the id
+        runs it, so a schedule never fires twice.
+        """
+        from app.repositories.scheduled_batch_repository import scheduled_batch_repository
+
+        now = now or datetime.now(timezone.utc)
+        started: list[str] = []
+        for schedule_id in scheduled_batch_repository.due_ids(now):
+            if not scheduled_batch_repository.claim(schedule_id):
+                continue
+            record = scheduled_batch_repository.find(schedule_id)
+            scheduled_batch_repository.delete_record(schedule_id)
+            if record is None:
+                _logger.error("event=scheduled_batch_record_missing schedule_id=%s", schedule_id)
+                continue
+            try:
+                batch = self._fire_schedule(record)
+            except HTTPException as exc:
+                _logger.error(
+                    "event=scheduled_batch_failed schedule_id=%s batch_type=%s project_id=%s reason=%s",
+                    schedule_id,
+                    record.get("batchType"),
+                    record.get("projectId"),
+                    _public_reason(exc.detail),
+                )
+                continue
+            except Exception:
+                _logger.exception(
+                    "event=scheduled_batch_failed schedule_id=%s batch_type=%s project_id=%s",
+                    schedule_id,
+                    record.get("batchType"),
+                    record.get("projectId"),
+                )
+                continue
+            _logger.info(
+                "event=scheduled_batch_started schedule_id=%s batch_id=%s batch_type=%s",
+                schedule_id,
+                batch.batch_id,
+                batch.batch_type,
+            )
+            started.append(batch.batch_id)
+        return started
+
+    def _fire_schedule(self, record: dict) -> BatchExecutionStatus:
+        run_by = None
+        if record.get("runById"):
+            run_by = (str(record["runById"]), str(record.get("runBy") or ""))
+        project_id = str(record.get("projectId") or "")
+        environment_id = str(record.get("environmentId") or "")
+        if record.get("batchType") == "suite":
+            return self.start_suite(
+                project_id, str(record.get("suiteId") or ""), environment_id, run_by=run_by
+            )
+        return self.start_project(
+            project_id, record.get("suiteCategory"), environment_id, run_by=run_by
+        )
+
+    def _validate_schedule(
+        self, run_at: Optional[datetime], time_zone: Optional[str]
+    ) -> tuple[datetime, Optional[str]]:
+        if run_at is None:
+            raise HTTPException(status_code=400, detail="Choose a date and time for this run.")
+        if run_at.tzinfo is None:
+            raise HTTPException(status_code=400, detail="Include a timezone offset in the run time.")
+        zone = self._validate_time_zone(time_zone)
+        scheduled = self._validate_run_at(run_at)
+        assert scheduled is not None
+        return scheduled, zone
+
+    @staticmethod
+    def _save_schedule(
+        batch_type: str,
+        project_id: str,
+        project_name: Optional[str],
+        environment,
+        scheduled: datetime,
+        time_zone: Optional[str],
+        run_by: Optional[tuple[str, str]],
+        suite_id: Optional[str] = None,
+        suite_name: Optional[str] = None,
+        suite_category: Optional[str] = None,
+    ) -> ScheduledBatch:
+        from app.repositories.scheduled_batch_repository import scheduled_batch_repository
+
+        record = {
+            "id": uuid.uuid4().hex,
+            "batchType": batch_type,
+            "projectId": project_id,
+            "projectName": project_name,
+            "suiteId": suite_id,
+            "suiteName": suite_name,
+            "suiteCategory": suite_category,
+            "environmentId": environment.id,
+            "environmentName": environment.name,
+            "scheduledFor": scheduled.isoformat(),
+            "timeZone": time_zone,
+            "runBy": run_by[1] if run_by else None,
+            "runById": run_by[0] if run_by else None,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            scheduled_batch_repository.save(record, scheduled)
+        except Exception as exc:
+            _logger.error(
+                "event=scheduled_batch_save_failed batch_type=%s project_id=%s error=%s",
+                batch_type,
+                project_id,
+                exc.__class__.__name__,
+            )
+            raise HTTPException(status_code=503, detail="Could not save the schedule. Try again.") from exc
+        _logger.info(
+            "event=scheduled_batch_created schedule_id=%s batch_type=%s project_id=%s",
+            record["id"],
+            batch_type,
+            project_id,
+        )
+        return _scheduled_batch(record)
 
     def list_grouped_runs(self) -> list[GroupedRun]:
         """Suite and project batches from Redis, plus individual runs not in those batches."""
@@ -686,6 +897,24 @@ class ExecutionService:
             return "passed", None, duration_ms, test_run_id
         reason = status.error or stored.get("errorMessage") or "The test did not pass."
         return "failed", reason, duration_ms, test_run_id
+
+
+def _scheduled_batch(record: dict) -> ScheduledBatch:
+    return ScheduledBatch(
+        id=str(record["id"]),
+        batch_type=record.get("batchType") or "project",
+        project_id=str(record.get("projectId") or ""),
+        suite_id=record.get("suiteId"),
+        suite_category=record.get("suiteCategory"),
+        environment_id=str(record.get("environmentId") or ""),
+        environment_name=record.get("environmentName"),
+        project_name=record.get("projectName"),
+        suite_name=record.get("suiteName"),
+        scheduled_for=_parse_time(record.get("scheduledFor")) or datetime.now(timezone.utc),
+        time_zone=record.get("timeZone"),
+        run_by=record.get("runBy"),
+        created_at=_parse_time(record.get("createdAt")) or datetime.now(timezone.utc),
+    )
 
 
 def _is_cancelled_case(entry: dict, stored: dict) -> bool:

@@ -19,6 +19,8 @@ WORKERS_SEEN_KEY = "testflow:workers:seen"
 PROCESSING_PREFIX = "testflow:processing:"
 QUEUE_KEY = "testflow:queue"
 SCHEDULE_KEY = "testflow:scheduled"
+# Scheduled suite/project runs (scheduled_batch_repository.SCHEDULE_KEY) count as scheduled too.
+SCHEDULED_BATCHES_KEY = "testflow:scheduled-batches"
 
 
 @dataclass
@@ -45,7 +47,8 @@ class WorkerStatusRepository:
             pipe.hgetall(WORKERS_SEEN_KEY)
             pipe.llen(QUEUE_KEY)
             pipe.zcard(SCHEDULE_KEY)
-            raw_ids, raw_seen, queued, scheduled = pipe.execute()
+            pipe.zcard(SCHEDULED_BATCHES_KEY)
+            raw_ids, raw_seen, queued, scheduled, scheduled_batches = pipe.execute()
 
         worker_ids = sorted(_text(item) for item in raw_ids or [])
         seen = {_text(key): _int(value) for key, value in (raw_seen or {}).items()}
@@ -67,7 +70,7 @@ class WorkerStatusRepository:
             heartbeats=heartbeats,
             last_seen_ms={worker_id: seen.get(worker_id) for worker_id in worker_ids},
             queued=int(queued or 0),
-            scheduled=int(scheduled or 0),
+            scheduled=int(scheduled or 0) + int(scheduled_batches or 0),
             processing=sum(processing_by_worker.values()),
             processing_by_worker=processing_by_worker,
         )

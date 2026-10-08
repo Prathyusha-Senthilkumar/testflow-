@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, FileCheck2, ListMinus, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, FileCheck2, ListMinus, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateDraftTestCase } from "@/hooks/useCreateDraftTestCase";
+import { useScheduledBatches } from "@/hooks/useScheduledBatches";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { api, type EnvironmentSummary, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
-import { Modal } from "@/components/ui/modal";
-import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataTable, createDataTableColumns } from "@/components/ui/data-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -20,6 +19,11 @@ import { usePublishEntityName } from "@/components/layout/shell-context";
 import { AddTestCasesModal } from "@/components/suites/AddTestCasesModal";
 import { EditSuiteModal } from "@/components/suites/EditSuiteModal";
 import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
+import { RunMenuButton } from "@/components/runs/RunMenuButton";
+import { ScheduleRunDialog, type ScheduleRunInput } from "@/components/runs/ScheduleRunDialog";
+import { ScheduledBatchList } from "@/components/runs/ScheduledBatchList";
+import { formatInTimeZone } from "@/lib/scheduleTime";
+import { defaultEnvironment } from "@/lib/environments";
 
 const column = createDataTableColumns<TestCaseSummary>();
 
@@ -35,12 +39,11 @@ export function TestSuiteDetailPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [runOpen, setRunOpen] = useState(false);
   const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
-  const [environmentId, setEnvironmentId] = useState("");
   const [starting, setStarting] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const cancelStart = useRef(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const projectDefault = defaultEnvironment(environments);
+  const scheduled = useScheduledBatches({ projectId, suiteId }, { enabled: Boolean(projectId && suiteId) });
 
   const inSuite = useMemo(
     () => new Set((suite?.testCases ?? []).map((testCase) => testCase.id)),
@@ -117,31 +120,31 @@ export function TestSuiteDetailPage() {
     }
   }
 
-  async function runSuite() {
-    if (!projectId || !suiteId || starting || !environmentId) return;
-    cancelStart.current = false;
-    setCancelling(false);
+  /** Runs now: the main button on the project default, a "Run on" item once on that environment. */
+  async function runSuite(targetEnvironmentId: string | undefined) {
+    if (!projectId || !suiteId || starting) return;
+    if (!targetEnvironmentId) {
+      toast.error("No environments configured", {
+        description: "Add an environment to this project before running tests.",
+        action: { label: "Environments", onClick: () => navigate(`/projects/${projectId}/environments`) },
+      });
+      return;
+    }
     setStarting(true);
     setError("");
     try {
-      const started = await api.startSuiteRun(projectId, suiteId, environmentId);
-      if (cancelStart.current) await api.cancelBatchRun(started.batchId);
-      setRunOpen(false);
+      const started = await api.startSuiteRun(projectId, suiteId, targetEnvironmentId);
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start the suite run");
       setStarting(false);
-      setCancelling(false);
     }
   }
 
-  function closeRunDialog() {
-    if (starting) {
-      cancelStart.current = true;
-      setCancelling(true);
-      return;
-    }
-    setRunOpen(false);
+  async function scheduleSuite(input: ScheduleRunInput) {
+    const created = await api.scheduleSuiteRun(projectId, suiteId, input);
+    toast.success(`Scheduled for ${formatInTimeZone(created.scheduledFor, created.timeZone || input.timeZone)}`);
+    await scheduled.refresh();
   }
 
   async function handleDelete() {
@@ -287,15 +290,27 @@ export function TestSuiteDetailPage() {
               <Trash2 />
               Delete
             </Button>
-            <Button onClick={() => setRunOpen(true)}>
-              <Play />
-              Run suite
-            </Button>
+            <RunMenuButton
+              label="Run suite"
+              runningLabel="Starting…"
+              onRun={() => void runSuite(projectDefault?.id)}
+              environments={environments}
+              selectedEnvironmentId={projectDefault?.id}
+              defaultEnvironmentId={projectDefault?.id}
+              onRunOn={(id) => void runSuite(id)}
+              onSchedule={() => setScheduleOpen(true)}
+              running={starting}
+              disabled={starting}
+              scheduleDisabled={environments.length === 0}
+              title={projectDefault ? `Run on ${projectDefault.name}` : "Add an environment to run this suite"}
+            />
           </>
         }
       />
 
       {error ? <Alert variant="error">{error}</Alert> : null}
+
+      <ScheduledBatchList items={scheduled.items} onCancel={(item) => void scheduled.cancel(item)} />
 
       <section className="flex flex-col gap-3">
         <SectionHeader
@@ -364,41 +379,15 @@ export function TestSuiteDetailPage() {
         onSubmit={handleAdd}
       />
 
-      <Modal
-        open={runOpen}
-        onClose={closeRunDialog}
-        title="Run test suite"
+      <ScheduleRunDialog
+        open={scheduleOpen}
+        onClose={() => setScheduleOpen(false)}
+        title="Schedule suite run"
         description={suite.name}
-        footer={
-          <>
-            <Button variant="outline" disabled={cancelling} onClick={closeRunDialog}>
-              {starting ? (cancelling ? "Cancelling…" : "Cancel run") : "Cancel"}
-            </Button>
-            <Button loading={starting} disabled={starting || !environmentId} onClick={runSuite}>
-              {starting ? "Starting…" : (
-                <>
-                  <Play />
-                  Run suite
-                </>
-              )}
-            </Button>
-          </>
-        }
-      >
-        {environments.length === 0 ? (
-          <Alert variant="warning" title="No environments configured">
-            Add an environment to this project before running tests.
-          </Alert>
-        ) : (
-          <Select
-            label="Environment"
-            value={environmentId}
-            onChange={setEnvironmentId}
-            placeholder="Select environment"
-            options={environments.map((environment) => ({ value: environment.id, label: environment.name }))}
-          />
-        )}
-      </Modal>
+        environments={environments}
+        environmentId={projectDefault?.id}
+        onSubmit={scheduleSuite}
+      />
 
       <EditSuiteModal
         open={editOpen}

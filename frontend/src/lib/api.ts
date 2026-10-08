@@ -245,6 +245,31 @@ export type ScheduledExecution = {
   timeZone?: string | null;
 };
 
+/** A suite or project run waiting to start. Its test cases are resolved when it fires. */
+export type ScheduledBatch = {
+  id: string;
+  batchType: "suite" | "project";
+  projectId: string;
+  suiteId?: string | null;
+  suiteCategory?: string | null;
+  environmentId: string;
+  environmentName?: string | null;
+  projectName?: string | null;
+  suiteName?: string | null;
+  scheduledFor: string;
+  timeZone?: string | null;
+  runBy?: string | null;
+  createdAt: string;
+};
+
+export type ScheduleBatchInput = {
+  environmentId: string;
+  /** ISO instant with offset. */
+  runAt: string;
+  /** IANA timezone the tester picked. */
+  timeZone: string;
+};
+
 export type ReportRun = {
   id: string;
   projectId?: string | null;
@@ -414,6 +439,8 @@ export type StartExecutionInput = {
   headed?: boolean | null;
   runAt?: string;
   timeZone?: string;
+  /** One-off environment for this run; the test case's saved environment is unchanged. */
+  environmentId?: string;
 };
 
 /* ----------------------------------------------------------- global search */
@@ -598,6 +625,9 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
+  /** Returns the project's environments with the new default flagged. 409 until the migration is applied. */
+  setDefaultEnvironment: (projectId: string, environmentId: string) =>
+    request<EnvironmentSummary[]>(`/projects/${projectId}/environments/${environmentId}/default`, { method: "POST" }),
   deleteEnvironment: (projectId: string, environmentId: string) =>
     request<void>(`/projects/${projectId}/environments/${environmentId}`, { method: "DELETE" }),
   authProfiles: (projectId: string) =>
@@ -716,6 +746,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ projectId, suiteCategory, environmentId }),
     }),
+  scheduleSuiteRun: (projectId: string, suiteId: string, input: ScheduleBatchInput) =>
+    request<ScheduledBatch>("/executions/suites/schedule", {
+      method: "POST",
+      body: JSON.stringify({ projectId, suiteId, ...input }),
+    }),
+  scheduleProjectRun: (projectId: string, suiteCategory: string | undefined, input: ScheduleBatchInput) =>
+    request<ScheduledBatch>("/executions/projects/schedule", {
+      method: "POST",
+      body: JSON.stringify({ projectId, suiteCategory, ...input }),
+    }),
+  scheduledBatches: (filter: { projectId?: string; suiteId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filter.projectId) params.set("projectId", filter.projectId);
+    if (filter.suiteId) params.set("suiteId", filter.suiteId);
+    const query = params.toString();
+    return request<ScheduledBatch[]>(`/executions/scheduled-batches${query ? `?${query}` : ""}`, {}, { live: true });
+  },
+  cancelScheduledBatch: (scheduleId: string) =>
+    request<void>(`/executions/scheduled-batches/${scheduleId}`, { method: "DELETE" }),
   getBatchRun: (batchId: string) =>
     request<BatchExecutionStatus>(`/executions/batches/${batchId}`, {}, { live: true }),
   cancelBatchRun: (batchId: string) =>
@@ -727,9 +776,10 @@ export const api = {
   rerunTestRun: (runId: string) =>
     request<ExecutionStatus>(`/test-runs/${runId}/rerun`, { method: "POST" }),
   getExecution: (jobId: string) => request<ExecutionStatus>(`/executions/${jobId}`, {}, { live: true }),
-  scheduledExecutions: (testCaseId: string) =>
+  /** Upcoming single-test runs; all of them when no test case is given. */
+  scheduledExecutions: (testCaseId?: string) =>
     request<ScheduledExecution[]>(
-      `/executions/scheduled?testCaseId=${encodeURIComponent(testCaseId)}`,
+      testCaseId ? `/executions/scheduled?testCaseId=${encodeURIComponent(testCaseId)}` : "/executions/scheduled",
       {},
       { live: true }
     ),
@@ -806,6 +856,8 @@ export type EnvironmentSummary = {
   projectId: string;
   name: string;
   baseUrl: string;
+  /** The project's default. All false until the default-environment migration runs; then use the oldest. */
+  isDefault?: boolean;
 };
 
 export type AuthProfileInput = {

@@ -39,6 +39,15 @@ def create_environment(
     return service.create(project_id, input_dto)
 
 
+@router.post("/{environment_id}/default", response_model=List[EnvironmentSummary])
+def set_default_environment(
+    project_id: str,
+    environment_id: str,
+    service: EnvironmentsService = Depends(get_environments_service),
+):
+    return service.set_default(project_id, environment_id)
+
+
 @router.patch("/{environment_id}", response_model=EnvironmentSummary)
 def update_environment(
     project_id: str,

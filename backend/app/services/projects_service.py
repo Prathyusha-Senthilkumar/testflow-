@@ -31,6 +31,10 @@ class ProjectsService:
         normalized = self._validate_and_normalize(input_dto)
         project = self.repository.create(normalized)
         environment_repository.ensure_default(project.id, project.baseUrl)
+        from app.services.environments_service import EnvironmentsService
+
+        # The project's first environment is its default.
+        EnvironmentsService(environment_repository, self.repository).ensure_default_flag(project.id)
         return project
 
     def delete(self, id: str) -> None:

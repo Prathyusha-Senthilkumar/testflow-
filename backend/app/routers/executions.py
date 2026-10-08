@@ -7,6 +7,9 @@ from app.dependencies.auth import current_actor
 from app.schemas.execution import (
     BatchExecutionStatus,
     ExecutionStatusResponse,
+    ScheduleProjectBatchRequest,
+    ScheduleSuiteBatchRequest,
+    ScheduledBatch,
     ScheduledExecution,
     StartExecutionRequest,
     StartProjectBatchRequest,
@@ -70,6 +73,56 @@ def start_project_execution(
         body.environment_id,
         run_by=actor,
     )
+
+
+@router.post("/suites/schedule", response_model=ScheduledBatch)
+def schedule_suite_execution(
+    body: ScheduleSuiteBatchRequest,
+    actor: Optional[tuple[str, str]] = Depends(current_actor),
+    service: ExecutionService = Depends(get_execution_service),
+):
+    return service.schedule_suite(
+        body.project_id,
+        body.suite_id,
+        body.environment_id,
+        body.run_at,
+        body.time_zone,
+        run_by=actor,
+    )
+
+
+@router.post("/projects/schedule", response_model=ScheduledBatch)
+def schedule_project_execution(
+    body: ScheduleProjectBatchRequest,
+    actor: Optional[tuple[str, str]] = Depends(current_actor),
+    service: ExecutionService = Depends(get_execution_service),
+):
+    return service.schedule_project(
+        body.project_id,
+        body.environment_id,
+        body.run_at,
+        body.time_zone,
+        suite_category=body.suite_category,
+        run_by=actor,
+    )
+
+
+@router.get("/scheduled-batches", response_model=List[ScheduledBatch])
+def list_scheduled_batches(
+    projectId: Optional[str] = None,
+    suiteId: Optional[str] = None,
+    service: ExecutionService = Depends(get_execution_service),
+):
+    return service.list_scheduled_batches(projectId, suiteId)
+
+
+@router.delete("/scheduled-batches/{schedule_id}", status_code=204)
+def cancel_scheduled_batch(
+    schedule_id: str,
+    service: ExecutionService = Depends(get_execution_service),
+):
+    service.cancel_scheduled_batch(schedule_id)
+    return Response(status_code=204)
 
 
 @router.post("/batches/{batch_id}/cancel", response_model=BatchExecutionStatus)

@@ -3,7 +3,7 @@
 import { LoadingArea } from "@/components/common/LoadingArea";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { CalendarClock, ChevronDown, Copy, Ellipsis, FileQuestion, Pencil, Save, Trash2, Upload } from "lucide-react";
+import { CalendarClock, ChevronDown, Copy, FileQuestion, Pencil, Save, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "@/lib/navigation";
 import {
@@ -33,13 +33,6 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PageContainer, PageHeader, SectionHeader } from "@/components/layout/page-header";
 import { testCaseLabel, usePublishEntityName } from "@/components/layout/shell-context";
@@ -52,7 +45,8 @@ import { StoragePanel } from "@/components/test-cases/StoragePanel";
 import { StepsTab } from "@/components/test-cases/StepsTab";
 import { RunsChart } from "@/components/test-cases/RunsChart";
 import { RunsTab, type RunRow } from "@/components/test-cases/RunsTab";
-import { RunSplitButton } from "@/components/test-cases/RunSplitButton";
+import { RunMenuButton } from "@/components/runs/RunMenuButton";
+import { defaultEnvironment } from "@/lib/environments";
 import { RunSummaryStrip } from "@/components/test-cases/RunSummaryStrip";
 import { resolveExpectedResult, testCaseStatusLabel, whenVisible } from "@/components/test-cases/testCaseFormat";
 
@@ -97,7 +91,7 @@ function newAssertionId() {
 
 function DetailSkeleton() {
   return (
-    <PageContainer width="detail">
+    <PageContainer>
       <LoadingArea
         loading
         label="Loading test case…"
@@ -679,15 +673,14 @@ export function TestCaseDetailPage() {
   /** Starts a run in place: the live row shows in the Runs tab and the user stays on the page. */
   async function handleRun(environmentOverride?: string) {
     if (!projectId || !testCaseId || !hasScript) return;
-    const runEnvironmentId = environmentOverride ?? environmentId;
-    if (environmentOverride) setEnvironmentId(environmentOverride);
     setRunning(true);
     setError("");
     setLastResult(null);
     setRunPhase("Preparing test...");
     setTab("runs");
     try {
-      const updated = await patch(basePayload({ environmentId: runEnvironmentId }));
+      // A run picked from "Run on" is one-off: the test keeps its own environment.
+      const updated = await patch(basePayload({ environmentId }));
       setTestCase(updated);
       const scriptFile = updated.testFile ?? testCase?.testFile;
       if (!scriptFile) {
@@ -698,6 +691,7 @@ export function TestCaseDetailPage() {
         testCaseId: updated.id,
         testCaseCode: updated.code,
         scriptPath: scriptFile,
+        environmentId: environmentOverride,
       });
       toast("Run queued", { description: `${updated.code} · ${updated.name}` });
       // Pick up the queued run in the history (polling continues while it is live).
@@ -893,7 +887,7 @@ export function TestCaseDetailPage() {
 
   if (error && !testCase) {
     return (
-      <PageContainer width="detail">
+      <PageContainer>
         <Alert
           variant="error"
           title="Could not load this test case"
@@ -911,7 +905,7 @@ export function TestCaseDetailPage() {
 
   if (!testCase) {
     return (
-      <PageContainer width="detail">
+      <PageContainer>
         <EmptyState
           variant="panel"
           icon={FileQuestion}
@@ -928,9 +922,7 @@ export function TestCaseDetailPage() {
   }
 
   const busy = saving || recording || running;
-  const runnableEnvironments = environments.filter((env) =>
-    applicableEnvironmentIds.length ? applicableEnvironmentIds.includes(env.id) : true
-  );
+  const projectDefaultEnvironment = defaultEnvironment(environments);
   const hasLiveRun = caseRuns.some((run) => isLive(run.status));
   const runRows: RunRow[] =
     running && !hasLiveRun
@@ -997,7 +989,7 @@ export function TestCaseDetailPage() {
   );
 
   return (
-    <PageContainer width="detail" className={cn(editing && "pb-24")}>
+    <PageContainer className={cn(editing && "pb-24")}>
       <PageHeader
         title={title}
         description={description}
@@ -1017,38 +1009,28 @@ export function TestCaseDetailPage() {
         }
         actions={
           <>
-            <RunSplitButton
-              onRun={(envId) => void handleRun(envId)}
-              running={running}
-              disabled={!hasScript || recording || running}
-              environments={runnableEnvironments}
-              environmentId={environmentId}
-              onEnvironmentChange={setEnvironmentId}
-            />
             {!editing ? (
               <Button variant="outline" onClick={startEditing}>
                 <Pencil />
                 Edit
               </Button>
             ) : null}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="More actions">
-                  <Ellipsis />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onSelect={openSchedule} disabled={!hasScript}>
-                  <CalendarClock />
-                  Schedule a run
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={() => void handleDelete()}>
-                  <Trash2 />
-                  Delete test case
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button variant="outline" onClick={() => void handleDelete()} className="hover:border-destructive/40 hover:text-destructive">
+              <Trash2 />
+              Delete
+            </Button>
+            <RunMenuButton
+              // A test with no saved environment runs on the project default.
+              onRun={() => void handleRun(environmentId ? undefined : projectDefaultEnvironment?.id)}
+              environments={environments}
+              selectedEnvironmentId={environmentId || projectDefaultEnvironment?.id}
+              defaultEnvironmentId={projectDefaultEnvironment?.id}
+              onRunOn={(envId) => void handleRun(envId)}
+              onSchedule={openSchedule}
+              running={running}
+              disabled={!hasScript || recording || running}
+              title={environmentName ? `Run on ${environmentName}` : "Run test"}
+            />
           </>
         }
       />

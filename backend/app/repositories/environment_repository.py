@@ -13,6 +13,22 @@ from app.schemas.environment import (
 )
 
 
+class DefaultColumnMissing(Exception):
+    """environments.is_default does not exist yet (20261009_default_environment.sql not applied)."""
+
+
+def _is_missing_column(exc: Exception) -> bool:
+    """PostgREST reports an unknown column as PGRST204 (writes) or 42703 (filters/selects)."""
+    message = str(exc)
+    code = str(getattr(exc, "code", "") or "")
+    return (
+        code in ("PGRST204", "42703")
+        or "PGRST204" in message
+        or "42703" in message
+        or ("is_default" in message and "column" in message)
+    )
+
+
 class EnvironmentRepository:
     def __init__(self):
         self.demo_environments: Dict[str, List[EnvironmentSummary]] = {
@@ -37,6 +53,7 @@ class EnvironmentRepository:
             projectId=str(row.get("project_id")),
             name=str(row.get("name")),
             baseUrl=str(row.get("base_url")),
+            isDefault=bool(row.get("is_default")),
         )
 
     def _db_default(self, project_id: str) -> EnvironmentSummary | None:
@@ -213,6 +230,33 @@ class EnvironmentRepository:
         self.db.from_("environments").delete().eq("project_id", project_id).eq(
             "id", environment_id
         ).execute()
+
+    def set_default_flag(self, project_id: str, environment_id: str) -> None:
+        """Clear the project's current default, then flag this environment.
+
+        Clearing first keeps the unique partial index (project_id) where is_default satisfied.
+        Raises DefaultColumnMissing when the migration has not been applied.
+        """
+        if not self.db:
+            environments = self.demo_environments.get(project_id, [])
+            if not any(env.id == environment_id for env in environments):
+                raise HTTPException(status_code=404, detail="Environment not found")
+            self.demo_environments[project_id] = [
+                env.model_copy(update={"isDefault": env.id == environment_id}) for env in environments
+            ]
+            return
+
+        try:
+            self.db.from_("environments").update({"is_default": False}).eq("project_id", project_id).eq(
+                "is_default", True
+            ).execute()
+            self.db.from_("environments").update({"is_default": True}).eq("project_id", project_id).eq(
+                "id", environment_id
+            ).execute()
+        except Exception as exc:
+            if _is_missing_column(exc):
+                raise DefaultColumnMissing() from exc
+            raise
 
     def _replace(self, project_id: str, environment_id: str, updated: EnvironmentSummary) -> None:
         environments = self.demo_environments.get(project_id, [])
