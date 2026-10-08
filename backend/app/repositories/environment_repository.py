@@ -13,6 +13,22 @@ from app.schemas.environment import (
 )
 
 
+class DefaultColumnMissing(Exception):
+    """environments.is_default does not exist yet (20261009_default_environment.sql not applied)."""
+
+
+def _is_missing_column(exc: Exception) -> bool:
+    """PostgREST reports an unknown column as PGRST204 (writes) or 42703 (filters/selects)."""
+    message = str(exc)
+    code = str(getattr(exc, "code", "") or "")
+    return (
+        code in ("PGRST204", "42703")
+        or "PGRST204" in message
+        or "42703" in message
+        or ("is_default" in message and "column" in message)
+    )
+
+
 class EnvironmentRepository:
     def __init__(self):
         self.demo_environments: Dict[str, List[EnvironmentSummary]] = {
@@ -37,28 +53,28 @@ class EnvironmentRepository:
             projectId=str(row.get("project_id")),
             name=str(row.get("name")),
             baseUrl=str(row.get("base_url")),
+            isDefault=bool(row.get("is_default")),
         )
 
     def _db_default(self, project_id: str) -> EnvironmentSummary | None:
+        """The flagged default, else the oldest environment. Works before the is_default migration."""
         res = (
             self.db.from_("environments")
             .select("*")
             .eq("project_id", project_id)
-            .eq("name", DEFAULT_ENVIRONMENT_NAME)
-            .limit(1)
+            .order("created_at")
             .execute()
         )
-        if res.data:
-            return self._map_row(res.data[0])
-        return None
+        rows = res.data or []
+        if not rows:
+            return None
+        flagged = next((row for row in rows if row.get("is_default")), None)
+        return self._map_row(flagged or rows[0])
 
     # ---- CRUD -------------------------------------------------------------
     def list_by_project(self, project_id: str) -> List[EnvironmentSummary]:
         if not self.db:
-            self.ensure_default(project_id, None)
             return list(self.demo_environments.get(project_id, []))
-
-        self.ensure_default(project_id, None)
         res = (
             self.db.from_("environments")
             .select("*")
@@ -69,15 +85,16 @@ class EnvironmentRepository:
         return [self._map_row(row) for row in (res.data or [])]
 
     def find_by_id(self, project_id: str, environment_id: str) -> EnvironmentSummary:
+        if not environment_id or environment_id == DEFAULT_ENVIRONMENT_ID:
+            default = self.get_default(project_id)
+            if default is None:
+                raise HTTPException(status_code=404, detail="No environment configured for project")
+            return default
         if not self.db:
-            self.ensure_default(project_id, None)
             for env in self.demo_environments.get(project_id, []):
                 if env.id == environment_id:
                     return env
             raise HTTPException(status_code=404, detail="Environment not found")
-
-        if not environment_id or environment_id == DEFAULT_ENVIRONMENT_ID:
-            return self.get_default(project_id)
 
         res = (
             self.db.from_("environments")
@@ -90,62 +107,16 @@ class EnvironmentRepository:
             raise HTTPException(status_code=404, detail="Environment not found")
         return self._map_row(res.data[0])
 
-    def get_default(self, project_id: str, fallback_base_url: str | None = None) -> EnvironmentSummary:
+    def get_default(self, project_id: str) -> EnvironmentSummary | None:
+        """The project's default environment (flagged, else the oldest), or None when it has none.
+        Environments are never created implicitly: the first one a user adds becomes the default."""
         if not self.db:
-            self.ensure_default(project_id, fallback_base_url)
             environments = self.demo_environments.get(project_id, [])
-            for env in environments:
-                if env.id == DEFAULT_ENVIRONMENT_ID:
-                    return env
-            if environments:
-                return environments[0]
-            raise HTTPException(status_code=404, detail="No environment configured for project")
-
-        default = self.ensure_default(project_id, fallback_base_url)
-        return default
-
-    def ensure_default(self, project_id: str, base_url: str | None) -> EnvironmentSummary:
-        if not self.db:
-            existing = self.demo_environments.get(project_id, [])
-            for env in existing:
-                if env.id == DEFAULT_ENVIRONMENT_ID:
-                    if base_url and env.baseUrl != base_url:
-                        updated = env.model_copy(update={"baseUrl": base_url})
-                        self._replace(project_id, env.id, updated)
-                        return updated
-                    return env
-            resolved_base = base_url or "https://example.com"
-            default_env = EnvironmentSummary(
-                id=DEFAULT_ENVIRONMENT_ID,
-                projectId=project_id,
-                name=DEFAULT_ENVIRONMENT_NAME,
-                baseUrl=resolved_base,
-            )
-            self.demo_environments.setdefault(project_id, []).insert(0, default_env)
-            return default_env
-
-        existing = self._db_default(project_id)
-        if existing:
-            return existing
-        resolved_base = base_url or "https://example.com"
-        res = (
-            self.db.from_("environments")
-            .insert(
-                {
-                    "project_id": project_id,
-                    "name": DEFAULT_ENVIRONMENT_NAME,
-                    "base_url": resolved_base,
-                }
-            )
-            .execute()
-        )
-        if not res.data:
-            raise HTTPException(status_code=500, detail="Could not create default environment")
-        return self._map_row(res.data[0])
+            return next((env for env in environments if env.isDefault), environments[0] if environments else None)
+        return self._db_default(project_id)
 
     def create(self, project_id: str, input_dto: CreateEnvironmentDto) -> EnvironmentSummary:
         if not self.db:
-            self.ensure_default(project_id, None)
             new_id = f"env-{int(time.time() * 1000)}"
             env = EnvironmentSummary(
                 id=new_id,
@@ -198,8 +169,6 @@ class EnvironmentRepository:
 
     def delete(self, project_id: str, environment_id: str) -> None:
         if not self.db:
-            if environment_id == DEFAULT_ENVIRONMENT_ID:
-                raise HTTPException(status_code=400, detail="The Default environment cannot be deleted")
             environments = self.demo_environments.get(project_id, [])
             next_list = [env for env in environments if env.id != environment_id]
             if len(next_list) == len(environments):
@@ -207,12 +176,37 @@ class EnvironmentRepository:
             self.demo_environments[project_id] = next_list
             return
 
-        env = self.find_by_id(project_id, environment_id)
-        if env.name == DEFAULT_ENVIRONMENT_NAME:
-            raise HTTPException(status_code=400, detail="The Default environment cannot be deleted")
+        self.find_by_id(project_id, environment_id)
         self.db.from_("environments").delete().eq("project_id", project_id).eq(
             "id", environment_id
         ).execute()
+
+    def set_default_flag(self, project_id: str, environment_id: str) -> None:
+        """Clear the project's current default, then flag this environment.
+
+        Clearing first keeps the unique partial index (project_id) where is_default satisfied.
+        Raises DefaultColumnMissing when the migration has not been applied.
+        """
+        if not self.db:
+            environments = self.demo_environments.get(project_id, [])
+            if not any(env.id == environment_id for env in environments):
+                raise HTTPException(status_code=404, detail="Environment not found")
+            self.demo_environments[project_id] = [
+                env.model_copy(update={"isDefault": env.id == environment_id}) for env in environments
+            ]
+            return
+
+        try:
+            self.db.from_("environments").update({"is_default": False}).eq("project_id", project_id).eq(
+                "is_default", True
+            ).execute()
+            self.db.from_("environments").update({"is_default": True}).eq("project_id", project_id).eq(
+                "id", environment_id
+            ).execute()
+        except Exception as exc:
+            if _is_missing_column(exc):
+                raise DefaultColumnMissing() from exc
+            raise
 
     def _replace(self, project_id: str, environment_id: str, updated: EnvironmentSummary) -> None:
         environments = self.demo_environments.get(project_id, [])

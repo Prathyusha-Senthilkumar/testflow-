@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Globe, Pencil, Plus, SearchX, Trash2 } from "lucide-react";
+import { Globe, Pencil, Plus, SearchX, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useParams } from "@/lib/navigation";
 import { api, type EnvironmentInput, type EnvironmentSummary } from "@/lib/api";
@@ -20,13 +20,12 @@ import { usePublishEntityName } from "@/components/layout/shell-context";
 
 const emptyForm: EnvironmentInput = { name: "", baseUrl: "" };
 const envColumns = createDataTableColumns<EnvironmentSummary>();
-const DEFAULT_ENV_ID = "env-default";
 
 type EnvKindFilter = "" | "default" | "custom";
 const KIND_OPTIONS: { value: EnvKindFilter; label: string }[] = [
   { value: "", label: "All environments" },
   { value: "default", label: "Default only" },
-  { value: "custom", label: "Custom only" },
+  { value: "custom", label: "Others" },
 ];
 
 export function ProjectEnvironmentsPage() {
@@ -43,14 +42,17 @@ export function ProjectEnvironmentsPage() {
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<EnvKindFilter>("");
   const filtering = Boolean(search.trim() || kind);
+  // Before the migration nothing is flagged, and the oldest (first) environment is the default.
+  const defaultId = (environments.find((env) => env.isDefault) ?? environments[0])?.id;
+  const isDefault = (env: EnvironmentSummary) => env.id === defaultId;
   const visibleEnvironments = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return environments.filter((env) => {
-      if (kind === "default" && env.id !== DEFAULT_ENV_ID) return false;
-      if (kind === "custom" && env.id === DEFAULT_ENV_ID) return false;
+      if (kind === "default" && env.id !== defaultId) return false;
+      if (kind === "custom" && env.id === defaultId) return false;
       return !needle || env.name.toLowerCase().includes(needle) || env.baseUrl.toLowerCase().includes(needle);
     });
-  }, [environments, search, kind]);
+  }, [environments, search, kind, defaultId]);
   function clearFilters() {
     setSearch("");
     setKind("");
@@ -111,11 +113,25 @@ export function ProjectEnvironmentsPage() {
     }
   }
 
+  async function makeDefault(env: EnvironmentSummary) {
+    if (!projectId) return;
+    const previous = environments;
+    setEnvironments((current) => current.map((item) => ({ ...item, isDefault: item.id === env.id })));
+    try {
+      setEnvironments(await api.setDefaultEnvironment(projectId, env.id));
+      toast.success(`“${env.name}” is now the default environment`);
+    } catch (err) {
+      setEnvironments(previous);
+      toast.error(err instanceof Error ? err.message : "Could not change the default environment");
+    }
+  }
+
   async function removeEnvironment(environmentId: string) {
     if (!projectId) return;
     try {
       await api.deleteEnvironment(projectId, environmentId);
-      setEnvironments((current) => current.filter((item) => item.id !== environmentId));
+      // Deleting the default promotes another one on the server; reload to show it.
+      setEnvironments(await api.environments(projectId));
       toast.success("Environment deleted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not delete environment");
@@ -129,7 +145,7 @@ export function ProjectEnvironmentsPage() {
         cell: ({ row }) => (
           <span className="flex items-center gap-2 font-medium text-foreground">
             {row.original.name}
-            {row.original.id === DEFAULT_ENV_ID ? <Badge variant="outline">Default</Badge> : null}
+            {isDefault(row.original) ? <Badge variant="outline">Default</Badge> : null}
           </span>
         ),
       }),
@@ -143,33 +159,36 @@ export function ProjectEnvironmentsPage() {
         meta: { align: "right" },
         cell: ({ row }) => (
           <div className="reveal-on-hover flex justify-end gap-1">
+            {!isDefault(row.original) ? (
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => void makeDefault(row.original)}>
+                <Star className="size-3.5" /> Make default
+              </Button>
+            ) : null}
             <Button variant="ghost" size="icon-sm" aria-label={`Edit ${row.original.name}`} onClick={() => openEdit(row.original)}>
               <Pencil />
             </Button>
-            {row.original.id !== DEFAULT_ENV_ID ? (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="hover:text-destructive"
-                aria-label={`Delete ${row.original.name}`}
-                onClick={() => void removeEnvironment(row.original.id)}
-              >
-                <Trash2 />
-              </Button>
-            ) : null}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="hover:text-destructive"
+              aria-label={`Delete ${row.original.name}`}
+              onClick={() => void removeEnvironment(row.original.id)}
+            >
+              <Trash2 />
+            </Button>
           </div>
         ),
       }),
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers only close over projectId
-    [projectId]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers close over projectId and the list
+    [projectId, environments]
   );
 
   return (
     <PageContainer>
       <PageHeader
         title="Environments"
-        description="Base URLs that test case start paths resolve against."
+        description="Base URLs that test case start paths resolve against. Suite and project runs use the default environment."
         actions={
           // No environments yet: the empty state carries the only "Add environment" CTA.
           !loading && !error && environments.length === 0 ? undefined : (

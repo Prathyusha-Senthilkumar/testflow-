@@ -14,6 +14,11 @@ class StartExecutionRequest(BaseModel):
     project_id: Optional[str] = Field(None, alias="projectId")
     test_case_code: Optional[str] = Field(None, alias="testCaseCode")
     test_case_id: Optional[str] = Field(None, alias="testCaseId")
+    environment_id: Optional[str] = Field(
+        None,
+        alias="environmentId",
+        description="Run once on this project environment instead of the test case's own.",
+    )
     headed: Optional[bool] = None
     run_at: Optional[datetime] = Field(
         None,
@@ -137,3 +142,44 @@ class ScheduledExecution(BaseModel):
     test_case_id: Optional[str] = Field(None, alias="testCaseId")
     test_case_code: Optional[str] = Field(None, alias="testCaseCode")
     time_zone: Optional[str] = Field(None, alias="timeZone")
+
+
+class _ScheduleFields(BaseModel):
+    run_at: datetime = Field(
+        ...,
+        alias="runAt",
+        description="Timezone-aware instant when this run should start. Must be in the future.",
+    )
+    time_zone: Optional[str] = Field(
+        None,
+        alias="timeZone",
+        description="IANA timezone the tester selected. The instant is runAt.",
+    )
+
+
+class ScheduleSuiteBatchRequest(StartSuiteBatchRequest, _ScheduleFields):
+    pass
+
+
+class ScheduleProjectBatchRequest(StartProjectBatchRequest, _ScheduleFields):
+    pass
+
+
+class ScheduledBatch(BaseModel):
+    """A suite or project run waiting to start. Its test cases are resolved when it fires."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    id: str
+    batch_type: Literal["suite", "project"] = Field(..., alias="batchType")
+    project_id: str = Field(..., alias="projectId")
+    suite_id: Optional[str] = Field(None, alias="suiteId")
+    suite_category: Optional[str] = Field(None, alias="suiteCategory")
+    environment_id: str = Field(..., alias="environmentId")
+    environment_name: Optional[str] = Field(None, alias="environmentName")
+    project_name: Optional[str] = Field(None, alias="projectName")
+    suite_name: Optional[str] = Field(None, alias="suiteName")
+    scheduled_for: datetime = Field(..., alias="scheduledFor")
+    time_zone: Optional[str] = Field(None, alias="timeZone")
+    run_by: Optional[str] = Field(None, alias="runBy")
+    created_at: datetime = Field(..., alias="createdAt")

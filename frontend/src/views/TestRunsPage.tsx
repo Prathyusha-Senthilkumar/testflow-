@@ -6,8 +6,12 @@ import { friendlyRunError } from "@/lib/friendlyRunError";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { FileText, FolderKanban, History, Layers, RotateCcw, Search, Square } from "lucide-react";
 import { toast } from "sonner";
-import { useNavigate } from "@/lib/navigation";
-import { api, type GroupedRun } from "@/lib/api";
+import { useNavigate, useSearchParams } from "@/lib/navigation";
+import { api, type GroupedRun, type ScheduledExecution } from "@/lib/api";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScheduledRuns, type ScheduledRunRow } from "@/components/runs/ScheduledRuns";
+import { useScheduledBatches } from "@/hooks/useScheduledBatches";
+import { formatInTimeZone } from "@/lib/scheduleTime";
 import { suiteCategoryLabel } from "@/lib/suiteCategory";
 import { pollWhileVisible } from "@/hooks/useExecutionPolling";
 import { PageContainer, PageHeader } from "@/components/layout/page-header";
@@ -241,6 +245,37 @@ const columns: DataTableColumn<GroupedRun>[] = [
 
 export function TestRunsPage() {
   const navigate = useNavigate();
+  const confirm = useConfirm();
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get("tab") === "scheduled" ? "scheduled" : "history");
+  const batches = useScheduledBatches({});
+  const [scheduledCases, setScheduledCases] = useState<ScheduledExecution[]>([]);
+  const scheduledCount = scheduledCases.length + batches.items.length;
+
+  useEffect(() => {
+    api.scheduledExecutions().then(setScheduledCases).catch(() => setScheduledCases([]));
+  }, []);
+
+  async function cancelScheduled(row: ScheduledRunRow) {
+    if (row.kind === "batch") {
+      await batches.cancel(row.item);
+      return;
+    }
+    const item = row.item;
+    const label = item.testCaseCode || "this test";
+    const when = item.scheduledFor ? formatInTimeZone(item.scheduledFor, item.timeZone || "UTC") : "";
+    const cancelled = await confirm({
+      title: "Cancel scheduled run?",
+      description: `${label}${when ? ` will no longer run at ${when}` : " will no longer run"}.`,
+      confirmLabel: "Cancel run",
+      cancelLabel: "Keep it",
+      tone: "danger",
+      onConfirm: () => api.cancelScheduledExecution(item.jobId),
+    });
+    if (!cancelled) return;
+    setScheduledCases((current) => current.filter((entry) => entry.jobId !== item.jobId));
+    toast.success("Scheduled run cancelled");
+  }
   const [runs, setRuns] = useState<GroupedRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -293,10 +328,28 @@ export function TestRunsPage() {
 
   return (
     <PageContainer>
-      <PageHeader title="Test Runs" description="Execution history for individual, suite and project runs, newest first." />
+      <PageHeader title="Test Runs" description="Execution history and upcoming scheduled runs for test cases, suites and projects." />
 
       {error ? <Alert variant="error" title="Could not refresh test runs">{error}</Alert> : null}
 
+      <Tabs value={tab} onValueChange={setTab} className="gap-4">
+        <TabsList variant="line" className="h-auto w-full justify-start gap-1 rounded-none border-b border-border p-0">
+          <TabsTrigger value="history" className="h-9 flex-none rounded-none px-3 text-[13px] after:bottom-[-1px]">
+            History
+          </TabsTrigger>
+          <TabsTrigger value="scheduled" className="h-9 flex-none rounded-none px-3 text-[13px] after:bottom-[-1px]">
+            Scheduled
+            {scheduledCount > 0 ? (
+              <span className="ml-1.5 rounded-sm bg-elevated px-1.5 text-xs font-medium text-muted-foreground tabular-nums">{scheduledCount}</span>
+            ) : null}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="scheduled">
+          <ScheduledRuns cases={scheduledCases} batches={batches.items} onCancel={(row) => void cancelScheduled(row)} />
+        </TabsContent>
+
+        <TabsContent value="history">
       <div className="flex flex-col">
         <Toolbar
           sticky
@@ -360,6 +413,8 @@ export function TestRunsPage() {
           }
         />
       </div>
+        </TabsContent>
+      </Tabs>
     </PageContainer>
   );
 }

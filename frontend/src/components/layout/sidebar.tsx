@@ -4,10 +4,8 @@ import { Link, useLocation } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { AttestLogo, AttestMark } from "@/components/brand/attest-logo";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Skeleton } from "@/components/ui/skeleton";
 import { AccountMenu } from "@/components/layout/account-menu";
-import { useShell } from "@/components/layout/shell-context";
-import { SETTINGS_NAV, WORKSPACE_NAV, isNavActive, projectNav, type NavItem } from "@/components/layout/nav-items";
+import { SETTINGS_NAV, WORKSPACE_NAV, isNavActive, type NavItem } from "@/components/layout/nav-items";
 
 function SidebarLink({
   item,
@@ -67,7 +65,6 @@ export function SidebarBrand({ collapsed }: { collapsed: boolean }) {
 /** Navigation content, shared by the desktop sidebar and the mobile sheet. */
 export function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const { pathname } = useLocation();
-  const { project } = useShell();
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -80,20 +77,6 @@ export function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: bool
             </li>
           ))}
         </ul>
-        {project ? (
-          <>
-            <SectionLabel collapsed={collapsed}>
-              {project.name || <Skeleton className="inline-block h-3 w-24 align-middle" />}
-            </SectionLabel>
-            <ul className="space-y-0.5" aria-label="Project">
-              {projectNav(project.id).map((item) => (
-                <li key={item.to}>
-                  <SidebarLink item={item} active={isNavActive(item, pathname)} collapsed={collapsed} onNavigate={onNavigate} />
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
       </nav>
       <div className={cn("space-y-1 border-t border-border py-2", collapsed ? "flex flex-col items-center px-2.5" : "px-3")}>
         <SidebarLink item={SETTINGS_NAV} active={isNavActive(SETTINGS_NAV, pathname)} collapsed={collapsed} onNavigate={onNavigate} />

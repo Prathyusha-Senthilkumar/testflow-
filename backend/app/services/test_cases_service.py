@@ -55,8 +55,9 @@ class TestCasesService:
     def list_for_project(self, project_id: str) -> List[TestCaseSummary]:
         self._ensure_project_exists(project_id)
         cases = self.test_cases.list_by_project(project_id)
-        environments = {item.id: item for item in self.environments.list_for_project(project_id)}
-        default = environments.get(DEFAULT_ENVIRONMENT_ID) or next(iter(environments.values()), None)
+        listed = self.environments.list_for_project(project_id)
+        environments = {item.id: item for item in listed}
+        default = next((item for item in listed if item.isDefault), listed[0] if listed else None)
         attached: List[TestCaseSummary] = []
         for case in cases:
             env = environments.get(case.environmentId or "") or default
@@ -363,7 +364,9 @@ class TestCasesService:
 
     def _validate_environment_ids(self, project_id: str, environment_ids: Optional[List[str]]) -> None:
         for environment_id in environment_ids or []:
-            environment_repository.find_by_id(project_id, environment_id)
+            # The sentinel means "the project default"; there may be none yet.
+            if environment_id and environment_id != DEFAULT_ENVIRONMENT_ID:
+                environment_repository.find_by_id(project_id, environment_id)
 
     def _ensure_project_exists(self, project_id: str):
         return self.projects.find_base(project_id)

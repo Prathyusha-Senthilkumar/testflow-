@@ -23,7 +23,8 @@ export type NavItem = {
 
 export const WORKSPACE_NAV: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: Gauge, exact: true },
-  { to: "/projects", label: "Projects", icon: FolderKanban, exact: true },
+  // Stays active inside a project; its sections are tabs on the project pages.
+  { to: "/projects", label: "Projects", icon: FolderKanban },
   { to: "/runs", label: "Test Runs", icon: History },
   { to: "/reports", label: "Reports", icon: BarChart3 },
 ];

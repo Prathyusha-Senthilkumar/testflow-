@@ -30,7 +30,15 @@ class ProjectsService:
     def create(self, input_dto: CreateProjectDto) -> ProjectDetail:
         normalized = self._validate_and_normalize(input_dto)
         project = self.repository.create(normalized)
-        environment_repository.ensure_default(project.id, project.baseUrl)
+        from app.schemas.environment import DEFAULT_ENVIRONMENT_NAME, CreateEnvironmentDto
+        from app.services.environments_service import EnvironmentsService
+
+        # The project's first environment uses its base URL and becomes the default.
+        # It is an ordinary environment: it can be renamed or deleted later.
+        environment_name = (input_dto.environmentName or "").strip() or DEFAULT_ENVIRONMENT_NAME
+        EnvironmentsService(environment_repository, self.repository).create(
+            project.id, CreateEnvironmentDto(name=environment_name, baseUrl=project.baseUrl)
+        )
         return project
 
     def delete(self, id: str) -> None:
@@ -56,10 +64,7 @@ class ProjectsService:
             desc = input_dto.description.strip()
             normalized.description = desc if desc else None
 
-        updated = self.repository.update(id, normalized)
-        if input_dto.baseUrl is not None:
-            environment_repository.ensure_default(id, updated.baseUrl)
-        return updated
+        return self.repository.update(id, normalized)
 
     def _validate_and_normalize(self, input_dto: CreateProjectDto) -> CreateProjectDto:
         name = (input_dto.name or "").strip()

@@ -1,5 +1,7 @@
 "use client";
 
+import { useModifierKey } from "@/hooks/useModifierKey";
+
 import { friendlyRunError } from "@/lib/friendlyRunError";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Command as CommandPrimitive } from "cmdk";
@@ -157,6 +159,7 @@ function Results({ data, query, onOpen, projectId }: { data: SearchResponse; que
 
 /** The dropdown content: recent + quick actions, command mode, or grouped results. */
 export function GlobalSearchResults({ query, scope, state, recent, actions, onOpen, onAction, projectId }: ResultsPanelProps) {
+  const modKey = useModifierKey();
   const trimmed = query.trim();
   const commandMode = trimmed.startsWith(">");
   const searching = !commandMode && trimmed.length >= MIN_QUERY;
@@ -243,7 +246,7 @@ export function GlobalSearchResults({ query, scope, state, recent, actions, onOp
                 <CornerDownLeft />
               </Kbd>
               open
-              <Kbd className="ml-1.5 border border-border">⌘↵</Kbd>
+              <Kbd className="ml-1.5 border border-border">{modKey}↵</Kbd>
               all results
             </span>
           </CommandPrimitive.Item>
@@ -301,6 +304,7 @@ type GlobalSearchProps = {
  * quick actions (">" prefix). ⌘K or "/" focuses it.
  */
 export function GlobalSearch({ variant = "header", onNavigate, className }: GlobalSearchProps) {
+  const modKey = useModifierKey();
   const navigate = useNavigate();
   const account = useAccount();
   const recent = useRecentItems(account?.userId);
@@ -431,7 +435,7 @@ export function GlobalSearch({ variant = "header", onNavigate, className }: Glob
           <X className="size-3.5" aria-hidden />
         </button>
       ) : variant === "header" ? (
-        <Kbd className="shrink-0 border border-border bg-elevated">⌘K</Kbd>
+        <Kbd className="shrink-0 border border-border bg-elevated">{modKey === "⌘" ? "⌘K" : "Ctrl K"}</Kbd>
       ) : null}
       {state.status === "loading" ? <AttestLoader size="sm" label="Searching" className="mr-0.5" /> : null}
     </div>

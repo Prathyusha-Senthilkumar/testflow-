@@ -28,6 +28,8 @@ export function ProjectFormModal({
 }: Props) {
   const [form, setForm] = useState<ProjectInput>(initialValue ?? emptyProject);
   const [error, setError] = useState("");
+  // Editing passes the current values; only a new project gets the first-environment field.
+  const isCreate = !initialValue;
 
   useEffect(() => {
     if (open) {
@@ -53,6 +55,7 @@ export function ProjectFormModal({
       name: form.name.trim(),
       baseUrl: form.baseUrl.trim(),
       description: form.description?.trim(),
+      ...(isCreate ? { environmentName: form.environmentName?.trim() || undefined } : {}),
     });
   }
 
@@ -102,6 +105,15 @@ export function ProjectFormModal({
           placeholder="https://www.srmist.edu.in"
           className="font-mono text-[13px]"
         />
+        {isCreate ? (
+          <Input
+            label="Environment name"
+            value={form.environmentName ?? ""}
+            onChange={(event) => setForm((current) => ({ ...current, environmentName: event.target.value }))}
+            placeholder="Default"
+            hint="The first environment, on the Base URL above. It becomes the project's default. Leave blank for “Default”."
+          />
+        ) : null}
         {error ? (
           <p role="alert" className="text-xs text-destructive">
             {error}
