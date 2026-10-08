@@ -1,9 +1,8 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Play } from "lucide-react";
 import { toast } from "sonner";
-import { Link, useNavigate, useSearchParams } from "@/lib/navigation";
+import { useNavigate, useSearchParams } from "@/lib/navigation";
 import { api, type DashboardData, type GroupedRun, type ProjectSummary, type ReportRun } from "@/lib/api";
 import {
   DASHBOARD_RANGES,
@@ -26,7 +25,6 @@ import {
 } from "@/lib/dashboard";
 import { pollWhileVisible } from "@/hooks/useExecutionPolling";
 import { PageContainer, PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Alert } from "@/components/ui/alert";
@@ -245,7 +243,6 @@ function DashboardContent() {
   });
 
   const projectOptions = [{ value: "", label: "All projects" }, ...projects.map((item) => ({ value: item.id, label: item.name }))];
-  const runSuiteHref = projectId ? `/projects/${projectId}/suites` : "/projects";
   const periodLabel = RANGE_LABEL[range];
 
   return (
@@ -271,15 +268,6 @@ function DashboardContent() {
               options={projectOptions}
               disabled={loading}
             />
-            {/* The onboarding checklist has its own CTAs; don't repeat one in the header. */}
-            {firstRun ? null : (
-              <Button asChild>
-                <Link to={runSuiteHref}>
-                  <Play aria-hidden />
-                  Run suite
-                </Link>
-              </Button>
-            )}
           </>
         }
       />
