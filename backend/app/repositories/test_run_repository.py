@@ -302,6 +302,28 @@ class TestRunRepository:
         names = self.profile_names([str(rows[0].get("run_by") or "")])
         return self._report_row(rows[0], *self._report_lookups(rows), names)
 
+    def list_failed_since(self, completed_after: str, limit: int = 100) -> list[dict]:
+        """Failed runs completed after `completed_after` (ISO time), oldest first, as report rows."""
+        if not self.db:
+            return []
+        runs = (
+            self.db.from_("test_runs")
+            .select(
+                "id,test_case_id,status,started_at,completed_at,duration_ms,error_message,run_by,screenshot_path"
+            )
+            .eq("status", "Failed")
+            .gt("completed_at", completed_after)
+            .order("completed_at")
+            .limit(limit)
+            .execute()
+            .data
+            or []
+        )
+        if not runs:
+            return []
+        names = self.profile_names([str(run.get("run_by") or "") for run in runs])
+        return [self._report_row(run, *self._report_lookups(runs), names) for run in runs]
+
     def _report_lookups(self, runs: list[dict]) -> tuple[dict, dict, dict]:
         case_ids = list({str(run["test_case_id"]) for run in runs if run.get("test_case_id")})
         cases: dict[str, dict] = {}

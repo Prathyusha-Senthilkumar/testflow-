@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     # Fernet key for Auth Profile credentials and sessions. Required for Auth Profiles.
     TESTFLOW_SECRET_KEY: Optional[str] = None
 
+    # GitHub integration: REST API base (GitHub Enterprise can point elsewhere) and how often
+    # failed runs are checked for issues to open.
+    GITHUB_API_URL: str = "https://api.github.com"
+    GITHUB_ISSUE_POLL_SECONDS: int = 30
+
     # Runs left in Queued/Running longer than this are marked Failed by the sweep.
     STUCK_RUN_AFTER_MINUTES: int = 60
     STUCK_RUN_SWEEP_SECONDS: int = 300

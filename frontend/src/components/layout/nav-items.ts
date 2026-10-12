@@ -7,6 +7,7 @@ import {
   History,
   Layers,
   LayoutDashboard,
+  Plug,
   Server,
   Settings,
   ShieldCheck,
@@ -42,6 +43,7 @@ export function projectNav(projectId: string): NavItem[] {
     { to: `${base}/suites`, label: "Suites", icon: Layers },
     { to: `${base}/environments`, label: "Environments", icon: Globe },
     { to: `${base}/auth-profiles`, label: "Auth Profiles", icon: ShieldCheck },
+    { to: `${base}/integrations`, label: "Integrations", icon: Plug },
   ];
 }
 
