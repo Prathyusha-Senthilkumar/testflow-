@@ -51,8 +51,10 @@ const columns = [
     id: "detail",
     header: "Detail",
     enableSorting: false,
+    // Takes the leftover width and truncates, so the Status column always stays in view.
+    meta: { className: "w-full max-w-0", headerClassName: "w-full" },
     cell: (info) => (
-      <span className="block max-w-[420px] truncate text-muted-foreground" title={info.getValue() || undefined}>
+      <span className="block truncate text-muted-foreground" title={info.getValue() || undefined}>
         {info.getValue() ? friendlyRunError(info.getValue()) : "—"}
       </span>
     ),
@@ -104,6 +106,7 @@ export function RunsTab({ projectId, runs, loading, header, onRun, canRun }: Run
         data={rows}
         loading={loading}
         getRowId={(row) => row.id}
+        containerClassName="overflow-x-auto"
         onRowClick={(row) => {
           if (!row.live) navigate(`/projects/${projectId}/results/${row.id}`);
         }}
