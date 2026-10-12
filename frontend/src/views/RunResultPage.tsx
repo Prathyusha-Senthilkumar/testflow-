@@ -6,12 +6,14 @@ import { AdminDetails } from "@/components/common/AdminDetails";
 import { friendlyRunError } from "@/lib/friendlyRunError";
 import { LoadingArea } from "@/components/common/LoadingArea";
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeft, Download, ImageOff, RotateCcw, Square } from "lucide-react";
+import { ArrowLeft, ChevronDown, Download, FileCode2, FileText, ImageOff, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useNavigate, useParams, useSearchParams } from "@/lib/navigation";
 import { api, type ReportRun, type RunScreenshot } from "@/lib/api";
 import { formatDuration, formatExecutedAt } from "@/lib/reportCsv";
-import { downloadRunReport, splitFailure } from "@/lib/runReport";
+import { downloadRunPdf, downloadRunReport, splitFailure } from "@/lib/runReport";
+import { useRunGitHubIssue } from "@/hooks/useRunGitHubIssue";
+import { RunGitHubIssue } from "@/components/integrations/RunGitHubIssue";
 import { pollWhileVisible } from "@/hooks/useExecutionPolling";
 import { StepScreenshots } from "@/components/runs/StepScreenshots";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
@@ -23,6 +25,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TestResultPage } from "@/views/TestResultPage";
 
@@ -62,6 +65,7 @@ export function RunResultPage() {
   const [busy, setBusy] = useState(false);
   const [screenshots, setScreenshots] = useState<RunScreenshot[]>([]);
   const [reportBusy, setReportBusy] = useState(false);
+  const githubIssue = useRunGitHubIssue(runId, run?.status === "Failed");
 
   useEffect(() => {
     if (!runId) return;
@@ -165,10 +169,14 @@ export function RunResultPage() {
     }
   }
 
-  async function downloadReport() {
+  async function downloadReport(format: "pdf" | "html") {
     if (!run) return;
     setReportBusy(true);
     try {
+      if (format === "pdf") {
+        await downloadRunPdf({ testName: run.testName || "Test run", runId: run.id });
+        return;
+      }
       await downloadRunReport({
         testName: run.testName || "Test run",
         projectName: run.projectName,
@@ -233,10 +241,23 @@ export function RunResultPage() {
               </Button>
             )}
             {!active ? (
-              <Button variant="outline" loading={reportBusy} onClick={downloadReport}>
-                {reportBusy ? null : <Download aria-hidden />}
-                {reportBusy ? "Generating report…" : "Download report"}
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" loading={reportBusy} disabled={reportBusy}>
+                    {reportBusy ? null : <Download aria-hidden />}
+                    {reportBusy ? "Generating report…" : "Download report"}
+                    {reportBusy ? null : <ChevronDown className="-mr-1 size-3.5 text-muted-foreground" aria-hidden />}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-40 p-1">
+                  <DropdownMenuItem onSelect={() => void downloadReport("pdf")} className="gap-1.5 px-2 py-1 text-[13px]">
+                    <FileText className="size-3.5" aria-hidden /> PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void downloadReport("html")} className="gap-1.5 px-2 py-1 text-[13px]">
+                    <FileCode2 className="size-3.5" aria-hidden /> HTML
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : null}
             {active ? (
               <Button variant="danger" loading={busy} onClick={cancelRun}>
@@ -292,18 +313,34 @@ export function RunResultPage() {
           </>
         }
         aside={
-          <Card>
-            <CardHeader>
-              <CardTitle>Execution result</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <dl className="space-y-2.5 text-[13px]">
-                <Row label="Executed" value={formatExecutedAt(run.completedAt || run.startedAt) || "—"} />
-                <Row label="Duration" value={formatDuration(run.durationMs) || "—"} numeric />
-                <Row label="Run by" value={run.runBy || "—"} />
-              </dl>
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Execution result</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <dl className="space-y-2.5 text-[13px]">
+                  <Row label="Executed" value={formatExecutedAt(run.completedAt || run.startedAt) || "—"} />
+                  <Row label="Duration" value={formatDuration(run.durationMs) || "—"} numeric />
+                  <Row label="Run by" value={run.runBy || "—"} />
+                </dl>
+              </CardContent>
+            </Card>
+            {githubIssue.status?.connected ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>GitHub issue</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <RunGitHubIssue
+                    status={githubIssue.status}
+                    creating={githubIssue.creating}
+                    onCreate={() => void githubIssue.create()}
+                  />
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
         }
       />
     </PageContainer>

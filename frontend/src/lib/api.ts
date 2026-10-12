@@ -632,6 +632,22 @@ export const api = {
     request<EnvironmentSummary[]>(`/projects/${projectId}/environments/${environmentId}/default`, { method: "POST" }),
   deleteEnvironment: (projectId: string, environmentId: string) =>
     request<void>(`/projects/${projectId}/environments/${environmentId}`, { method: "DELETE" }),
+  /** The project's GitHub repo link. Never includes the token, only its last characters. */
+  githubConnection: (projectId: string) =>
+    request<GitHubConnection>(`/projects/${projectId}/github`, {}, { live: true }),
+  /** Connects or updates the link. `token` is required the first time; omit it to keep the stored one. 409 until the migration is applied. */
+  saveGithubConnection: (projectId: string, input: GitHubConnectionInput) =>
+    request<GitHubConnection>(`/projects/${projectId}/github`, { method: "PUT", body: JSON.stringify(input) }),
+  /** Deletes the stored token; with `revoke`, GitHub also revokes it. */
+  disconnectGithub: (projectId: string, options: { revoke?: boolean } = {}) =>
+    request<GitHubDisconnectResult>(`/projects/${projectId}/github${options.revoke ? "?revoke=true" : ""}`, {
+      method: "DELETE",
+    }),
+  runGithubIssue: (runId: string) =>
+    request<RunGitHubIssueStatus>(`/test-runs/${encodeURIComponent(runId)}/github-issue`, {}, { live: true }),
+  /** Files the GitHub issue for a failed run now (or retries a failed attempt). */
+  createRunGithubIssue: (runId: string) =>
+    request<RunGitHubIssueStatus>(`/test-runs/${encodeURIComponent(runId)}/github-issue`, { method: "POST" }),
   authProfiles: (projectId: string) =>
     request<AuthProfileSummary[]>(`/projects/${projectId}/auth-profiles`),
   createAuthProfile: (projectId: string, input: AuthProfileInput) =>
@@ -1029,4 +1045,42 @@ export type SuiteSummary = {
 export type ProjectDetail = ProjectSummary & {
   description: string | null;
   suitesList: SuiteSummary[];
+};
+
+export type GitHubConnection = {
+  connected: boolean;
+  owner: string | null;
+  repo: string | null;
+  repoUrl: string | null;
+  /** Last characters of the stored token, e.g. "…a1b2". */
+  tokenHint: string | null;
+  autoCreateIssues: boolean;
+  connectedAt: string | null;
+};
+
+export type GitHubConnectionInput = {
+  /** "owner/name" or a github.com URL. */
+  repo: string;
+  token?: string;
+  autoCreateIssues?: boolean;
+};
+
+export type GitHubDisconnectResult = { revoked: boolean; message: string };
+
+export type GitHubIssueState = "open" | "closed" | "pending" | "error";
+
+export type RunGitHubIssue = {
+  number: number;
+  url: string;
+  state: GitHubIssueState;
+  createdAt: string;
+  /** True when this run was added as a comment on an issue opened for an earlier failure. */
+  commented?: boolean;
+  /** Why filing failed, with what to change (state "error" only). */
+  error?: string | null;
+};
+
+export type RunGitHubIssueStatus = {
+  issue: RunGitHubIssue | null;
+  connected: boolean;
 };

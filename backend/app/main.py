@@ -26,6 +26,7 @@ from app.routers.health import router as health_router
 from app.routers.search import router as search_router
 from app.routers.notifications import router as notifications_router
 from app.routers.workers import router as workers_router
+from app.routers.github import router as github_router
 from app.dependencies.auth import auth_bypass_enabled, require_user
 
 logger = logging.getLogger("testflow.api")
@@ -56,7 +57,13 @@ async def lifespan(_app: FastAPI):
     sweep_stop = threading.Event()
     threading.Thread(target=sweep_forever, args=(sweep_stop,), name="stuck-run-sweep", daemon=True).start()
     logger.info("Stuck-run sweep started")
+    from app.services.github_service import poll_issues_forever
+
+    github_stop = threading.Event()
+    threading.Thread(target=poll_issues_forever, args=(github_stop,), name="github-issues", daemon=True).start()
+    logger.info("GitHub issue poller started")
     yield
+    github_stop.set()
     sweep_stop.set()
     schedule_stop.set()
 
@@ -149,6 +156,7 @@ api_router.include_router(account_router)
 api_router.include_router(search_router)
 api_router.include_router(notifications_router)
 api_router.include_router(workers_router)
+api_router.include_router(github_router)
 
 app.include_router(public_api_router)
 app.include_router(api_router)

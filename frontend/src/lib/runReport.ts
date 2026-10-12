@@ -1,5 +1,5 @@
 import { friendlyStepLabel } from "@/lib/stepLabel";
-import { stepScreenshotSrc, type RunScreenshot } from "@/lib/api";
+import { apiAssetUrl, authHeaders, stepScreenshotSrc, type RunScreenshot } from "@/lib/api";
 
 export type RunReportInput = {
   testName: string;
@@ -36,7 +36,7 @@ export async function downloadRunReport(input: RunReportInput): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-function reportFileName(input: RunReportInput): string {
+function reportFileName(input: Pick<RunReportInput, "testName" | "runId">): string {
   const slug = (input.testName || "test")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -119,4 +119,24 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** Downloads the server-rendered PDF report for a run (authenticated blob download). */
+export async function downloadRunPdf(input: Pick<RunReportInput, "testName" | "runId">): Promise<void> {
+  const response = await fetch(apiAssetUrl(`/test-runs/${encodeURIComponent(input.runId)}/report.pdf`), {
+    headers: await authHeaders(),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(String(payload.message ?? payload.detail ?? "Could not generate the PDF report"));
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = reportFileName(input).replace(/\.html$/, ".pdf");
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
