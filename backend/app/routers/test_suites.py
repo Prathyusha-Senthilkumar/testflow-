@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Response
 from app.repositories.project_repository import project_repository
 from app.repositories.test_case_repository import test_case_repository
 from app.repositories.test_suite_repository import test_suite_repository
+from app.schemas.archive import ArchiveRequest
 from app.schemas.test_suite import (
     AddTestCasesToSuiteDto,
     CreateTestSuiteDto,
@@ -12,6 +13,7 @@ from app.schemas.test_suite import (
     TestSuiteSummary,
     UpdateTestSuiteDto,
 )
+from app.services.archive_service import archive_service
 from app.services.test_suites_service import TestSuitesService
 
 router = APIRouter(prefix="/projects/{project_id}/test-suites", tags=["test-suites"])
@@ -59,6 +61,11 @@ def update_test_suite(
     service: TestSuitesService = Depends(get_test_suites_service),
 ):
     return service.update(project_id, suite_id, input_dto)
+
+
+@router.post("/{suite_id}/archive", response_model=TestSuiteSummary)
+def archive_test_suite(project_id: str, suite_id: str, body: ArchiveRequest):
+    return archive_service.set_suite(project_id, suite_id, body.archived)
 
 
 @router.delete("/{suite_id}", status_code=204)

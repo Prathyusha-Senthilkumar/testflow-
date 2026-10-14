@@ -412,6 +412,34 @@ class TestCaseRepository:
                 max_num = max(max_num, int(match.group(1)))
         return f"TC-{max_num + 1:03d}"
 
+    def set_archived(self, project_id: str, test_case_id: str, archived: bool) -> None:
+        self.find_by_id(project_id, test_case_id)
+        self.set_archived_ids(project_id, [test_case_id], archived)
+
+    def set_archived_ids(self, project_id: str, test_case_ids: List[str], archived: bool) -> None:
+        ids = [item for item in test_case_ids if item]
+        if not ids:
+            return
+        if not self.db:
+            cases = self.demo_cases.get(project_id, [])
+            wanted = set(ids)
+            self.demo_cases[project_id] = [
+                case.model_copy(update={"archived": archived}) if case.id in wanted else case for case in cases
+            ]
+            return
+        try:
+            self.db.from_("test_cases").update({"archived": archived}).in_("id", ids).execute()
+        except Exception as exc:
+            if "archived" in str(exc).lower():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Apply supabase/migrations/20261013_archive.sql in the Supabase SQL editor, then try again.",
+                ) from exc
+            raise
+
+    def list_ids_for_project(self, project_id: str) -> List[str]:
+        return [case.id for case in self.list_by_project(project_id)]
+
     def _map_row(self, row: dict) -> TestCaseSummary:
         raw_assertions = row.get("assertions") or []
         assertions = [AssertionConfig(**item) for item in raw_assertions] if raw_assertions else []
@@ -442,6 +470,7 @@ class TestCaseRepository:
             expectedResult=expected_result,
             isDraft=bool(row.get("is_draft", True)),
             publishedVersion=int(row.get("published_version") or 0),
+            archived=bool(row.get("archived")),
             assertions=[],
         )
 

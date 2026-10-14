@@ -60,6 +60,7 @@ class TestSuiteSummary(BaseModel):
     categories: List[SuiteCategory] = Field(default_factory=lambda: ["regression"])
     caseCount: int = 0
     createdAt: Optional[str] = None
+    archived: bool = False
 
 
 class TestSuiteDetail(TestSuiteSummary):

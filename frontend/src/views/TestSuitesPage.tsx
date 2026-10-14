@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { Layers, Plus, SearchX, Trash2 } from "lucide-react";
+import { Archive, Layers, Plus, SearchX, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useNavigate, useParams } from "@/lib/navigation";
-import { api, type TestSuiteSummary } from "@/lib/api";
+import { api, type TestCaseSummary, type TestSuiteSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { SearchInput } from "@/components/ui/search-input";
 import { Toolbar } from "@/components/ui/toolbar";
 import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS } from "@/lib/suiteCategory";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { DataTable, createDataTableColumns } from "@/components/ui/data-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -30,11 +31,19 @@ function suiteCategories(suite: TestSuiteSummary): string[] {
   return suite.categories?.length ? suite.categories : suite.category ? [suite.category] : [];
 }
 
+function formatWhen(value?: string | null): string {
+  if (!value) return "Not run";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Not run" : parsed.toLocaleString();
+}
+
 export function TestSuitesPage() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const { id: projectId = "" } = useParams();
   const [suites, setSuites] = useState<TestSuiteSummary[]>([]);
+  const [cases, setCases] = useState<TestCaseSummary[]>([]);
+  const [runs, setRuns] = useState<Array<{ testCaseId: string; startedAt?: string | null; completedAt?: string | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -58,12 +67,27 @@ export function TestSuitesPage() {
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
-    api
-      .testSuites(projectId)
-      .then(setSuites)
+    Promise.all([api.testSuites(projectId), api.testCases(projectId), api.latestCaseRuns(projectId)])
+      .then(([suiteRows, caseRows, runRows]) => {
+        setSuites(suiteRows);
+        setCases(caseRows);
+        setRuns(runRows);
+      })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [projectId]);
+
+  async function toggleArchive(event: MouseEvent, suite: TestSuiteSummary) {
+    event.stopPropagation();
+    if (!projectId) return;
+    try {
+      const next = await api.archiveTestSuite(projectId, suite.id, !suite.archived);
+      setSuites((current) => current.map((item) => (item.id === suite.id ? { ...item, ...next } : item)));
+      toast.success(next.archived ? "Suite archived" : "Suite restored");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update the suite");
+    }
+  }
 
   async function handleDelete(event: MouseEvent, suiteId: string, name: string) {
     event.stopPropagation();
@@ -102,11 +126,29 @@ export function TestSuitesPage() {
   }
 
   // handleDelete closes over projectId only; columns rebuild when it changes.
+  const lastRunBySuite = useMemo(() => {
+    const suiteOfCase = new Map(cases.map((testCase) => [testCase.id, testCase.suiteId]));
+    const latest = new Map<string, string>();
+    for (const run of runs) {
+      const suiteId = suiteOfCase.get(run.testCaseId);
+      const when = run.completedAt || run.startedAt;
+      if (!suiteId || !when) continue;
+      const current = latest.get(suiteId);
+      if (!current || new Date(when).getTime() > new Date(current).getTime()) latest.set(suiteId, when);
+    }
+    return latest;
+  }, [cases, runs]);
+
   const columns = useMemo(
     () => [
       column.accessor("name", {
         header: "Name",
-        cell: (info) => <span className="font-medium text-foreground">{info.getValue()}</span>,
+        cell: (info) => (
+          <span className="inline-flex items-center gap-2 font-medium text-foreground">
+            {info.getValue()}
+            {info.row.original.archived ? <Badge variant="outline">Archived</Badge> : null}
+          </span>
+        ),
       }),
       column.accessor((suite) => (suite.categories?.length ? suite.categories : suite.category ? [suite.category] : []).join(", "), {
         id: "category",
@@ -125,13 +167,35 @@ export function TestSuitesPage() {
         meta: { align: "right" },
         cell: (info) => <span className="text-muted-foreground">{info.getValue()}</span>,
       }),
+      column.accessor((suite) => lastRunBySuite.get(suite.id) ?? "", {
+        id: "lastRun",
+        header: "Last run",
+        cell: (info) => (
+          <span className="text-[13px] text-muted-foreground tabular-nums">{formatWhen(lastRunBySuite.get(info.row.original.id))}</span>
+        ),
+      }),
       column.display({
         id: "actions",
         header: () => <span className="sr-only">Actions</span>,
-        meta: { align: "right", className: "w-12" },
+        meta: { align: "right", className: "w-20" },
         cell: (info) => {
           const suite = info.row.original;
           return (
+            <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={suite.archived ? `Unarchive ${suite.name}` : `Archive ${suite.name}`}
+                  onClick={(event) => void toggleArchive(event, suite)}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  <Archive />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{suite.archived ? "Unarchive suite" : "Archive suite"}</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -147,12 +211,13 @@ export function TestSuitesPage() {
               </TooltipTrigger>
               <TooltipContent>Delete suite</TooltipContent>
             </Tooltip>
+            </>
           );
         },
       }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleDelete is recreated each render but only reads projectId
-    [projectId]
+    [projectId, lastRunBySuite]
   );
 
   return (

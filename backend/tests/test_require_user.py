@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from auth_helpers import TEST_USER_ID, auth_headers, make_token
 from app.config import settings
+from app.dependencies.auth import decode_access_token
 from app.main import app
 from app.services import account_service, signed_urls
 
@@ -84,6 +85,23 @@ def test_auth_disabled_only_bypasses_in_demo_mode(monkeypatch):
     monkeypatch.setattr(settings, "USE_DEMO_DATA", False)
     # Enforced again: no token -> 401 before any storage access.
     assert client.get("/api/projects").status_code == 401
+
+
+def test_hs256_without_secret_is_checked_with_the_auth_server(monkeypatch):
+    monkeypatch.setattr(settings, "SUPABASE_JWT_SECRET", None)
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "service-key")
+
+    def fake_auth_request(method, path, body=None, user_token=None):
+        assert method == "GET"
+        assert path == "/auth/v1/user"
+        assert user_token
+        return {"id": TEST_USER_ID, "email": "t@example.com", "user_metadata": {"full_name": "T"}}
+
+    monkeypatch.setattr(account_service, "_auth_request", fake_auth_request)
+    claims = decode_access_token(make_token())
+    assert claims["sub"] == TEST_USER_ID
+    assert claims["email"] == "t@example.com"
 
 
 def test_no_verification_key_is_503(monkeypatch):

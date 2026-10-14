@@ -152,6 +152,7 @@ class ProjectRepository:
             name=str(row.get("name")),
             baseUrl=str(row.get("base_url")),
             description=row.get("description"),
+            archived=bool(row.get("archived")),
         )
 
     def find_by_id(self, id: str) -> ProjectDetail:
@@ -178,7 +179,7 @@ class ProjectRepository:
                 raise HTTPException(status_code=404, detail="Project not found")
             self._resolve_overview_names(overview_rows)
             project_summary = self._project_summary_from_overview(overview_rows[0])
-            suite_rows = self.db.from_("test_suites").select("id,name,category,categories").eq("project_id", id).execute().data or []
+            suite_rows = self.db.from_("test_suites").select("id,name,category,categories,archived").eq("project_id", id).execute().data or []
             suite_overview_rows = self.db.from_("suite_overview").select("*").eq("project_id", id).execute().data or []
             self._resolve_overview_names(suite_overview_rows)
             overview_by_id = {str(row.get("id")): row for row in suite_overview_rows}
@@ -193,6 +194,7 @@ class ProjectRepository:
                     failed=int(agg.get("failed") or 0), notRun=int(agg.get("not_run") or 0),
                     passRate=float(agg.get("pass_rate") or 0), lastRun=agg.get("last_run"),
                     lastRunBy=agg.get("last_run_by"),
+                    archived=bool(suite.get("archived")),
                 ))
             suites_list.sort(key=lambda item: item.name.lower())
             return ProjectDetail(**project_summary.model_dump(by_alias=True), suitesList=suites_list)
@@ -239,6 +241,7 @@ class ProjectRepository:
             passed=int(row.get("passed") or 0), failed=int(row.get("failed") or 0),
             passRate=float(row.get("pass_rate") or 0), lastRun=row.get("last_run"),
             lastRunBy=row.get("last_run_by"),
+            archived=bool(row.get("archived")),
         )
 
     # ---- Base-table aggregation helpers -----------------------------------
@@ -335,6 +338,7 @@ class ProjectRepository:
             passRate=agg["pass_rate"],
             lastRun=agg["last_run"],
             lastRunBy=(run_by_names or {}).get(agg.get("last_run_by") or "") or None,
+            archived=bool(row.get("archived")),
         )
 
     def _suite_summary_from_base(
@@ -360,7 +364,25 @@ class ProjectRepository:
             passRate=agg["pass_rate"],
             lastRun=agg["last_run"],
             lastRunBy=(run_by_names or {}).get(agg.get("last_run_by") or "") or None,
+            archived=bool(suite_row.get("archived")),
         )
+
+    def set_archived(self, project_id: str, archived: bool) -> None:
+        if not self.db:
+            project = self.demo_projects.get(project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            self.demo_projects[project_id] = project.model_copy(update={"archived": archived})
+            return
+        try:
+            self.db.from_("projects").update({"archived": archived}).eq("id", project_id).execute()
+        except Exception as exc:
+            if "archived" in str(exc).lower():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Apply supabase/migrations/20261013_archive.sql in the Supabase SQL editor, then try again.",
+                ) from exc
+            raise
 
     def delete(self, id: str) -> None:
         self.find_by_id(id)

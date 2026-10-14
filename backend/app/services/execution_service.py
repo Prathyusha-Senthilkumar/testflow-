@@ -109,6 +109,19 @@ class ExecutionService:
             )
         if not environment_base_url and request.project_id and request.test_case_id:
             environment_base_url = _case_environment_base_url(request.project_id, request.test_case_id)
+        if request.project_id:
+            from app.repositories.project_repository import project_repository
+            from app.repositories.test_case_repository import test_case_repository
+
+            project = project_repository.find_base(request.project_id)
+            if project.archived:
+                raise HTTPException(status_code=400, detail="This project is archived. Unarchive it before running.")
+            if request.test_case_id:
+                case = test_case_repository.find_by_id(request.project_id, request.test_case_id)
+                if case.archived:
+                    raise HTTPException(
+                        status_code=400, detail="This test case is archived. Unarchive it before running."
+                    )
         queue_service = get_queue_service()
         run_at = self._validate_run_at(request.run_at)
         job_id = queue_service.new_job_id()
@@ -261,10 +274,20 @@ class ExecutionService:
         from app.repositories.project_repository import project_repository
         from app.repositories.test_suite_repository import test_suite_repository
 
-        project_repository.find_base(project_id)
+        project = project_repository.find_base(project_id)
+        if project.archived:
+            raise HTTPException(status_code=400, detail="This project is archived. Unarchive it before running.")
         environment = _require_project_environment(project_id, environment_id)
-        test_suite_repository.find_by_id(project_id, suite_id)
-        case_ids = test_suite_repository.list_case_ids(project_id, suite_id)
+        suite = test_suite_repository.find_by_id(project_id, suite_id)
+        if suite.archived:
+            raise HTTPException(status_code=400, detail="This suite is archived. Unarchive it before running.")
+        member_ids = test_suite_repository.list_case_ids(project_id, suite_id)
+        from app.repositories.test_case_repository import test_case_repository
+
+        archived_ids = {case.id for case in test_case_repository.list_by_project(project_id) if case.archived}
+        case_ids = [case_id for case_id in member_ids if case_id not in archived_ids]
+        if not case_ids:
+            raise HTTPException(status_code=400, detail="This suite has no test cases that can run.")
         return self._start_batch(
             "suite",
             project_id,
@@ -287,9 +310,13 @@ class ExecutionService:
         from app.schemas.test_case import EXECUTION_CATEGORIES
         from app.schemas.test_suite import SUITE_CATEGORY_LABELS
 
-        project_repository.find_base(project_id)
+        project = project_repository.find_base(project_id)
+        if project.archived:
+            raise HTTPException(status_code=400, detail="This project is archived. Unarchive it before running.")
         environment = _require_project_environment(project_id, environment_id)
-        project_cases = test_case_repository.list_by_project(project_id)
+        project_cases = [case for case in test_case_repository.list_by_project(project_id) if not case.archived]
+        if not project_cases:
+            raise HTTPException(status_code=400, detail="This project has no test cases that can run.")
 
         if suite_category:
             if suite_category not in EXECUTION_CATEGORIES:
@@ -704,6 +731,17 @@ class ExecutionService:
                 continue
 
             script = (case.testFile or "").replace("\\", "/").strip()
+            if case.archived:
+                stored_cases.append({
+                    "testCaseId": case.id,
+                    "testCaseCode": case.code,
+                    "name": case.name,
+                    "jobId": None,
+                    "skippedReason": "Archived",
+                    "enqueueError": None,
+                    "dispatchPending": False,
+                })
+                continue
             runnable = case.automationStatus == "Automated" and bool(script)
             suite_snapshot = suite_lookup.get(case.id, ("", "Suite"))
             if suite_id:

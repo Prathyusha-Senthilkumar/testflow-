@@ -58,6 +58,7 @@ class TestCaseSummary(BaseModel):
     networkCheckEnabled: bool = Field(default=False, alias="networkCheckEnabled")
     isDraft: bool = Field(default=True, alias="isDraft")
     publishedVersion: int = Field(default=0, alias="publishedVersion")
+    archived: bool = False
     assertions: List[AssertionConfig] = Field(default_factory=list)
 
 

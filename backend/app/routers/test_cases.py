@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, Response
 from app.repositories.project_repository import project_repository
 from app.repositories.test_case_repository import test_case_repository
 from app.services.test_cases_service import TestCasesService
+from app.schemas.archive import ArchiveRequest
 from app.schemas.test_case import TestCaseSummary, CreateTestCaseDto, UpdateTestCaseDto
+from app.services.archive_service import archive_service
 from app.schemas.test_case_version import TestCaseVersionDetail, TestCaseVersionSummary
 from app.schemas.test_script import TestScriptDto, TestScriptResponse
 
@@ -45,6 +47,11 @@ def create_test_case(
     service: TestCasesService = Depends(get_test_cases_service),
 ):
     return service.create(project_id, input_dto)
+
+
+@router.post("/{test_case_id}/archive", response_model=TestCaseSummary)
+def archive_test_case(project_id: str, test_case_id: str, body: ArchiveRequest):
+    return archive_service.set_case(project_id, test_case_id, body.archived)
 
 
 @router.delete("/{test_case_id}", status_code=204)

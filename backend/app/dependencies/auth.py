@@ -50,32 +50,61 @@ def _bearer_token(request: Request) -> str:
 
 
 def decode_access_token(token: str) -> dict:
-    """Verified claims, or HTTPException(401). Raises 503 when no verification key is configured."""
+    """Verified claims, or HTTPException(401). Raises 503 when no verification key is configured.
+
+    HS256 tokens are checked with SUPABASE_JWT_SECRET. ES256/RS256 tokens are checked
+    against the project's JWKS. When that local check cannot be done, Supabase Auth
+    confirms the access token.
+    """
     options = {"require": ["exp", "sub"]}
     try:
-        secret = (settings.SUPABASE_JWT_SECRET or "").strip()
-        if secret:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Sign in required.") from exc
+    alg = str(header.get("alg") or "")
+    try:
+        if alg == "HS256":
+            secret = (settings.SUPABASE_JWT_SECRET or "").strip()
+            if not secret:
+                return _claims_from_auth_server(token)
             return jwt.decode(token, secret, algorithms=["HS256"], audience=AUDIENCE, options=options)
-        base = (settings.SUPABASE_URL or "").strip().rstrip("/")
-        if not base:
-            logger.error("event=auth_misconfigured reason=no_jwt_secret_or_supabase_url")
-            raise HTTPException(status_code=503, detail="Sign-in is not configured on the server.")
-        signing_key = _jwks_client(f"{base}/auth/v1/.well-known/jwks.json").get_signing_key_from_jwt(token)
-        return jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=_ASYMMETRIC_ALGORITHMS,
-            audience=AUDIENCE,
-            options=options,
-        )
+        if alg in _ASYMMETRIC_ALGORITHMS:
+            base = (settings.SUPABASE_URL or "").strip().rstrip("/")
+            if not base:
+                logger.error("event=auth_misconfigured reason=no_jwt_secret_or_supabase_url")
+                raise HTTPException(status_code=503, detail="Sign-in is not configured on the server.")
+            signing_key = _jwks_client(f"{base}/auth/v1/.well-known/jwks.json").get_signing_key_from_jwt(token)
+            return jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=_ASYMMETRIC_ALGORITHMS,
+                audience=AUDIENCE,
+                options=options,
+            )
+        raise HTTPException(status_code=401, detail="Sign in required.")
     except jwt.ExpiredSignatureError as exc:
         raise HTTPException(status_code=401, detail="Your session has expired. Sign in again.") from exc
     except jwt.PyJWKClientConnectionError as exc:
         logger.error("event=auth_jwks_unreachable")
         raise HTTPException(status_code=503, detail="Could not reach the sign-in service.") from exc
     except jwt.PyJWTError as exc:
+        if alg in _ASYMMETRIC_ALGORITHMS:
+            logger.info("event=auth_token_local_verify_failed reason=%s", exc.__class__.__name__)
+            return _claims_from_auth_server(token)
         logger.info("event=auth_token_rejected reason=%s", exc.__class__.__name__)
         raise HTTPException(status_code=401, detail="Sign in required.") from exc
+
+
+def _claims_from_auth_server(token: str) -> dict:
+    """Claims for an access token Supabase Auth accepts. The token itself is never logged."""
+    from app.services.account_service import _auth_request
+
+    user = _auth_request("GET", "/auth/v1/user", user_token=token)
+    user_id = str(user.get("id") or "").strip() if isinstance(user, dict) else ""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Sign in required.")
+    metadata = user.get("user_metadata") if isinstance(user.get("user_metadata"), dict) else {}
+    return {"sub": user_id, "email": str(user.get("email") or ""), "user_metadata": metadata}
 
 
 def _user_from_claims(claims: dict) -> AuthenticatedUser:

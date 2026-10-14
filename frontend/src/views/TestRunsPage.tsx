@@ -4,17 +4,17 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { WaitingHint } from "@/components/runs/WaitingHint";
 import { friendlyRunError } from "@/lib/friendlyRunError";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { FileText, FolderKanban, History, Layers, RotateCcw, Search, Square } from "lucide-react";
+import { ArrowLeft, FileText, FolderKanban, History, Layers, RotateCcw, Search, Square } from "lucide-react";
 import { toast } from "sonner";
-import { useNavigate, useSearchParams } from "@/lib/navigation";
-import { api, type GroupedRun, type ScheduledExecution } from "@/lib/api";
+import { Link, useNavigate, useSearchParams } from "@/lib/navigation";
+import { api, type GroupedRun, type ReportRun, type ScheduledExecution, type TestSuiteSummary } from "@/lib/api";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScheduledRuns, type ScheduledRunRow } from "@/components/runs/ScheduledRuns";
 import { useScheduledBatches } from "@/hooks/useScheduledBatches";
 import { formatInTimeZone } from "@/lib/scheduleTime";
 import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS, suiteCategoryLabel } from "@/lib/suiteCategory";
 import { pollWhileVisible } from "@/hooks/useExecutionPolling";
-import { PageContainer, PageHeader } from "@/components/layout/page-header";
+import { PageContainer, PageHeader, SectionHeader } from "@/components/layout/page-header";
 import { DataTable, createDataTableColumns, type DataTableColumn } from "@/components/ui/data-table";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -92,6 +92,164 @@ function formatWhen(value?: string | null): string {
   return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString();
 }
 
+type HistoryRun = GroupedRun & {
+  projectName?: string | null;
+  testCaseId?: string | null;
+  suiteId?: string | null;
+  times?: number;
+  /** Built from saved case runs. There is no batch page for this row. */
+  historyOnly?: boolean;
+};
+
+const CLUSTER_GAP_MS = 10 * 60 * 1000;
+
+function startedMs(value?: string | null): number {
+  const time = new Date(value || 0).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function clusterRuns(runs: ReportRun[], keyOf: (run: ReportRun) => string | null): ReportRun[][] {
+  const byKey = new Map<string, ReportRun[]>();
+  for (const run of runs) {
+    const key = keyOf(run);
+    if (!key) continue;
+    const list = byKey.get(key) ?? [];
+    list.push(run);
+    byKey.set(key, list);
+  }
+  const clusters: ReportRun[][] = [];
+  for (const list of byKey.values()) {
+    const ordered = [...list].sort((a, b) => startedMs(a.startedAt) - startedMs(b.startedAt));
+    let current: ReportRun[] = [];
+    let last = 0;
+    for (const run of ordered) {
+      const time = startedMs(run.startedAt);
+      if (current.length === 0 || time - last <= CLUSTER_GAP_MS) current.push(run);
+      else {
+        clusters.push(current);
+        current = [run];
+      }
+      last = time;
+    }
+    if (current.length > 0) clusters.push(current);
+  }
+  return clusters;
+}
+
+function historyStatus(runs: Array<{ status: string; errorMessage?: string | null }>): string {
+  const statuses = runs.map((run) => (run.status === "Not Run" && run.errorMessage === "Cancelled" ? "Cancelled" : run.status));
+  if (statuses.some((status) => status === "Failed")) return "Failed";
+  if (statuses.some((status) => status === "Running")) return "Running";
+  if (statuses.some((status) => status === "Queued")) return "Queued";
+  if (statuses.some((status) => status === "Passed")) return "Completed";
+  if (statuses.every((status) => status === "Cancelled")) return "Cancelled";
+  return "Skipped";
+}
+
+function historyRow(runType: "suite" | "project", cluster: ReportRun[]): HistoryRun | null {
+  if (cluster.length < 2) return null;
+  const ordered = [...cluster].sort((a, b) => startedMs(a.startedAt) - startedMs(b.startedAt));
+  const first = ordered[0];
+  const startedAt = first.startedAt || null;
+  const end = ordered.reduce((latest, run) => Math.max(latest, startedMs(run.completedAt || run.startedAt)), 0);
+  const start = startedMs(startedAt);
+  const passed = ordered.filter((run) => run.status === "Passed").length;
+  const failed = ordered.filter((run) => run.status === "Failed").length;
+  const skipped = ordered.filter((run) => run.status !== "Passed" && run.status !== "Failed" && run.status !== "Running" && run.status !== "Queued").length;
+  const idKey = runType === "suite" ? first.suiteId : first.projectId;
+  return {
+    id: `history-${runType}-${idKey}-${startedAt}`,
+    runType,
+    title: runType === "suite" ? first.suiteName || "Suite" : first.projectName || "Project",
+    status: historyStatus(ordered),
+    startedAt,
+    durationMs: end > start ? end - start : null,
+    projectId: first.projectId,
+    projectName: first.projectName,
+    suiteId: runType === "suite" ? first.suiteId : null,
+    total: ordered.length,
+    completed: ordered.length,
+    passed,
+    failed,
+    skipped,
+    historyOnly: true,
+  };
+}
+
+function coveredByBatch(grouped: GroupedRun[], row: HistoryRun): boolean {
+  const started = startedMs(row.startedAt);
+  return grouped.some((run) => {
+    if (run.runType !== row.runType || (run.projectId || "") !== (row.projectId || "")) return false;
+    if (row.runType === "suite" && run.title !== row.title) return false;
+    return Math.abs(startedMs(run.startedAt) - started) <= CLUSTER_GAP_MS;
+  });
+}
+
+function countKey(run: HistoryRun): string {
+  if (run.runType === "individual") return `case:${run.testCaseId || run.code || run.title}`;
+  if (run.runType === "project") return `project:${run.projectId || run.title}`;
+  return `suite:${run.projectId || ""}:${run.title}`;
+}
+
+function withExecutionCounts(rows: HistoryRun[]): HistoryRun[] {
+  const counts = new Map<string, number>();
+  for (const run of rows) counts.set(countKey(run), (counts.get(countKey(run)) ?? 0) + 1);
+  return rows.map((run) => ({ ...run, times: counts.get(countKey(run)) ?? 1 }));
+}
+
+function mergeHistory(grouped: GroupedRun[], reports: ReportRun[]): HistoryRun[] {
+  const reportById = new Map(reports.map((run) => [run.id, run]));
+  const projectNames = new Map<string, string>();
+  for (const run of reports) {
+    if (run.projectId && run.projectName) projectNames.set(run.projectId, run.projectName);
+  }
+  const seen = new Set<string>();
+  const rows: HistoryRun[] = grouped.map((run) => {
+    seen.add(run.id);
+    const saved = reportById.get(run.id);
+    const projectName =
+      run.runType === "project" ? run.title : saved?.projectName || (run.projectId ? projectNames.get(run.projectId) : null) || null;
+    return {
+      ...run,
+      projectName,
+      testCaseId: saved?.testCaseId || null,
+      title: run.runType === "individual" ? saved?.testName || run.title : run.title,
+      code: run.code || saved?.testCaseCode || null,
+      startedAt: run.startedAt || saved?.startedAt || null,
+    };
+  });
+  for (const run of reports) {
+    if (seen.has(run.id)) continue;
+    rows.push({
+      id: run.id,
+      runType: "individual",
+      title: run.testName || "Test case",
+      code: run.testCaseCode,
+      testCaseId: run.testCaseId,
+      status: run.status === "Not Run" && run.errorMessage === "Cancelled" ? "Cancelled" : run.status,
+      startedAt: run.startedAt,
+      durationMs: run.durationMs,
+      projectId: run.projectId,
+      projectName: run.projectName,
+      errorMessage: run.errorMessage,
+    });
+  }
+  for (const cluster of clusterRuns(reports, (run) => (run.projectId && run.suiteId ? `${run.projectId}:${run.suiteId}` : null))) {
+    const row = historyRow("suite", cluster);
+    if (row && !coveredByBatch(grouped, row)) rows.push(row);
+  }
+  for (const cluster of clusterRuns(reports, (run) => run.projectId || null)) {
+    const row = historyRow("project", cluster);
+    if (row && !coveredByBatch(grouped, row)) rows.push(row);
+  }
+  rows.sort((a, b) => {
+    const left = new Date(b.startedAt || 0).getTime();
+    const right = new Date(a.startedAt || 0).getTime();
+    return (Number.isNaN(left) ? 0 : left) - (Number.isNaN(right) ? 0 : right);
+  });
+  return withExecutionCounts(rows);
+}
+
 function summary(run: GroupedRun): string {
   if (run.runType === "individual") return friendlyRunError(run.errorMessage) || "—";
   const parts = [
@@ -110,8 +268,7 @@ function progress(run: GroupedRun): string {
   return `${run.completed ?? 0} / ${run.total}`;
 }
 
-function RunActions({ run }: { run: GroupedRun }) {
-  const navigate = useNavigate();
+function RunActions({ run }: { run: HistoryRun }) {
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const active = isLive(run);
@@ -144,14 +301,12 @@ function RunActions({ run }: { run: GroupedRun }) {
     setBusy(true);
     try {
       if (run.runType === "individual") {
-        const started = await api.rerunTestRun(run.id);
-        if (started.testRunId && (started.projectId || run.projectId)) {
-          navigate(`/projects/${started.projectId || run.projectId}/results/${started.testRunId}?from=runs`);
-        }
+        await api.rerunTestRun(run.id);
+        toast.success("Run started", { description: run.title });
         return;
       }
-      const started = await api.rerunBatch(run.id);
-      navigate(`/runs/batches/${started.batchId}`);
+      await api.rerunBatch(run.id);
+      toast.success("Run started", { description: run.title });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not rerun");
     } finally {
@@ -178,9 +333,51 @@ function RunActions({ run }: { run: GroupedRun }) {
   );
 }
 
-const col = createDataTableColumns<GroupedRun>();
+type SuiteHistoryRow = {
+  id: string;
+  name: string;
+  category: string;
+  caseCount: number;
+  startedAt: string | null;
+  times: number;
+  status: string;
+};
 
-const columns: DataTableColumn<GroupedRun>[] = [
+const suiteCol = createDataTableColumns<SuiteHistoryRow>();
+
+const suiteColumns: DataTableColumn<SuiteHistoryRow>[] = [
+  suiteCol.accessor("name", {
+    header: "Suite",
+    cell: ({ getValue }) => <span className="font-medium text-foreground">{getValue<string>()}</span>,
+  }),
+  suiteCol.accessor("category", {
+    header: "Category",
+    cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>() || "—"}</span>,
+  }),
+  suiteCol.accessor("caseCount", {
+    header: "Test cases",
+    meta: { align: "right" },
+    cell: ({ getValue }) => <span className="tabular-nums text-muted-foreground">{getValue<number>()}</span>,
+  }),
+  suiteCol.accessor((row) => row.startedAt ?? "", {
+    id: "startedAt",
+    header: "Last run",
+    cell: ({ row }) => <span className="tabular-nums text-muted-foreground">{formatWhen(row.original.startedAt)}</span>,
+  }),
+  suiteCol.accessor("times", {
+    header: "Times run",
+    meta: { align: "right" },
+    cell: ({ getValue }) => <span className="tabular-nums text-foreground">{getValue<number>()}</span>,
+  }),
+  suiteCol.accessor("status", {
+    header: "Status",
+    cell: ({ getValue }) => <RunStatusBadge status={getValue()} />,
+  }),
+];
+
+const col = createDataTableColumns<HistoryRun>();
+
+const columns: DataTableColumn<HistoryRun>[] = [
   col.accessor("runType", {
     header: "Type",
     cell: ({ row }) => {
@@ -193,6 +390,23 @@ const columns: DataTableColumn<GroupedRun>[] = [
       );
     },
   }),
+  col.accessor((run) => run.projectName || "", {
+    id: "project",
+    header: "Project",
+    cell: ({ row }) => {
+      const run = row.original;
+      if (!run.projectId) return <span className="text-muted-foreground">{run.projectName || "—"}</span>;
+      return (
+        <Link
+          to={`/runs?project=${run.projectId}`}
+          className="text-foreground hover:underline"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {run.projectName || "Open project"}
+        </Link>
+      );
+    },
+  }),
   col.accessor("title", {
     header: "Name",
     meta: { className: "max-w-[22rem] whitespace-normal" },
@@ -201,7 +415,17 @@ const columns: DataTableColumn<GroupedRun>[] = [
       return (
         <div className="min-w-0">
           <div className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate font-medium text-foreground">{run.title}</span>
+            {run.projectId && run.testCaseId ? (
+              <Link
+                to={`/projects/${run.projectId}/test-cases/${run.testCaseId}`}
+                className="truncate font-medium text-foreground hover:underline"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {run.title}
+              </Link>
+            ) : (
+              <span className="truncate font-medium text-foreground">{run.title}</span>
+            )}
             {run.code ? <span className="shrink-0 font-mono text-xs text-muted-foreground">{run.code}</span> : null}
           </div>
           {(run.runType === "project" && run.suiteCategory) || run.environmentName ? (
@@ -235,6 +459,12 @@ const columns: DataTableColumn<GroupedRun>[] = [
     id: "startedAt",
     header: "Started",
     cell: ({ row }) => <span className="text-muted-foreground tabular-nums">{formatWhen(row.original.startedAt)}</span>,
+  }),
+  col.accessor((run) => run.times ?? 1, {
+    id: "times",
+    header: "Times run",
+    meta: { align: "right" },
+    cell: ({ getValue }) => <span className="tabular-nums text-foreground">{getValue<number>()}</span>,
   }),
   col.accessor((run) => run.durationMs ?? -1, {
     id: "duration",
@@ -307,7 +537,7 @@ export function TestRunsPage() {
     setScheduledCases((current) => current.filter((entry) => entry.jobId !== item.jobId));
     toast.success("Scheduled run cancelled");
   }
-  const [runs, setRuns] = useState<GroupedRun[]>([]);
+  const [runs, setRuns] = useState<HistoryRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -321,9 +551,9 @@ export function TestRunsPage() {
     // Poll only while some run is queued/running; pauses while the tab is hidden.
     const stop = pollWhileVisible(async () => {
       try {
-        const items = await api.groupedRuns();
+        const [items, reports] = await Promise.all([api.groupedRuns(), api.reportRuns().catch(() => [] as ReportRun[])]);
         if (cancelled) return false;
-        setRuns(items);
+        setRuns(mergeHistory(items, reports));
         setError("");
         return items.some(isLive);
       } catch (err) {
@@ -339,6 +569,55 @@ export function TestRunsPage() {
     };
   }, []);
 
+  const openedProjectId = searchParams.get("project");
+  const [projectSuites, setProjectSuites] = useState<TestSuiteSummary[]>([]);
+  const [suitesLoading, setSuitesLoading] = useState(false);
+
+  useEffect(() => {
+    if (!openedProjectId) {
+      setProjectSuites([]);
+      return;
+    }
+    let cancelled = false;
+    setSuitesLoading(true);
+    api
+      .testSuites(openedProjectId)
+      .then((suites) => {
+        if (!cancelled) setProjectSuites(suites);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectSuites([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSuitesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openedProjectId]);
+  const openedProjectName = runs.find((run) => run.projectId === openedProjectId)?.projectName || "Project";
+  const openedRuns = useMemo(
+    () => (openedProjectId ? runs.filter((run) => run.projectId === openedProjectId) : []),
+    [runs, openedProjectId]
+  );
+  const openedSuites = useMemo(() => {
+    const suiteRuns = openedRuns.filter((run) => run.runType === "suite");
+    return projectSuites.map((suite) => {
+      const related = suiteRuns.filter((run) => run.suiteId === suite.id || run.title === suite.name);
+      const latest = [...related].sort((a, b) => startedMs(b.startedAt) - startedMs(a.startedAt))[0];
+      const categories = suite.categories?.length ? suite.categories : suite.category ? [suite.category] : [];
+      return {
+        id: suite.id,
+        name: suite.name,
+        category: categories.join(", "),
+        caseCount: suite.caseCount,
+        startedAt: latest?.startedAt ?? null,
+        times: latest?.times ?? related.length,
+        status: latest?.status ?? "Not run",
+      };
+    });
+  }, [projectSuites, openedRuns]);
+
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return runs.filter((run) => {
@@ -347,13 +626,25 @@ export function TestRunsPage() {
       if (categoryFilter !== "all" && run.suiteCategory !== categoryFilter) return false;
       if (!matchesDate(run.startedAt, dateFilter)) return false;
       if (!needle) return true;
-      return [TYPE_LABELS[run.runType], run.title, run.code, run.status, summary(run)]
+      return [TYPE_LABELS[run.runType], run.projectName, run.title, run.code, run.status, summary(run)]
         .filter(Boolean)
         .some((field) => String(field).toLowerCase().includes(needle));
     });
   }, [runs, query, typeFilter, statusFilter, categoryFilter, dateFilter]);
 
-  function openRun(run: GroupedRun) {
+  function openRun(run: HistoryRun) {
+    if (run.runType === "project" && run.projectId) {
+      navigate(`/runs?project=${run.projectId}`);
+      return;
+    }
+    if (run.historyOnly) {
+      if (run.runType === "suite" && run.projectId && run.suiteId) {
+        navigate(`/projects/${run.projectId}/suites/${run.suiteId}`);
+        return;
+      }
+      if (run.projectId) navigate(`/runs?project=${run.projectId}`);
+      return;
+    }
     if (run.runType === "individual") {
       if (run.projectId) navigate(`/projects/${run.projectId}/results/${run.id}?from=runs`);
       return;
@@ -396,6 +687,46 @@ export function TestRunsPage() {
         </TabsContent>
 
         <TabsContent value="history">
+      {openedProjectId ? (
+        <div className="flex flex-col gap-8">
+          <SectionHeader
+            title={openedProjectName}
+            actions={
+              <Button variant="outline" size="sm" onClick={() => navigate("/runs")}>
+                <ArrowLeft />
+                Back to test runs
+              </Button>
+            }
+          />
+          <section className="flex flex-col gap-3">
+            <SectionHeader title="Test suites" count={suitesLoading ? undefined : openedSuites.length} />
+            <DataTable
+              columns={suiteColumns}
+              data={openedSuites}
+              getRowId={(suite) => suite.id}
+              loading={suitesLoading}
+              loadingLabel="Loading test suites…"
+              onRowClick={(suite) => navigate(`/projects/${openedProjectId}/suites/${suite.id}`)}
+              rowLabel={(suite) => `Open suite ${suite.name}`}
+              empty={<EmptyState size="sm" icon={Layers} title="No test suites in this project" />}
+            />
+          </section>
+          <section className="flex flex-col gap-3">
+            <SectionHeader title="Run history" count={loading ? undefined : openedRuns.length} />
+            <DataTable
+              columns={columns}
+              data={openedRuns}
+              getRowId={(run) => `${run.runType}-${run.id}`}
+              loading={loading}
+              loadingLabel="Loading project run history…"
+              minWidth={960}
+              onRowClick={openRun}
+              rowLabel={(run) => `Open ${TYPE_LABELS[run.runType]} run ${run.title}`}
+              empty={<EmptyState size="sm" icon={History} title="No runs for this project yet" />}
+            />
+          </section>
+        </div>
+      ) : (
       <div className="flex flex-col">
         <Toolbar
           sticky
@@ -478,6 +809,7 @@ export function TestRunsPage() {
           }
         />
       </div>
+      )}
         </TabsContent>
       </Tabs>
     </PageContainer>

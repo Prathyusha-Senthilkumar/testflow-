@@ -3,12 +3,14 @@ from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 from app.repositories.project_repository import ProjectRepository, project_repository
 from app.services.projects_service import ProjectsService
+from app.schemas.archive import ArchiveRequest
 from app.schemas.project import (
     ProjectSummary,
     ProjectDetail,
     CreateProjectDto,
     UpdateProjectDto,
 )
+from app.services.archive_service import archive_service
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -60,6 +62,11 @@ def create_project(
 def delete_project(id: str, service: ProjectsService = Depends(get_projects_service)):
     service.delete(id)
     return Response(status_code=204)
+
+
+@router.post("/{id}/archive", response_model=ProjectDetail)
+def archive_project(id: str, body: ArchiveRequest):
+    return archive_service.set_project(id, body.archived)
 
 
 @router.patch("/{id}", response_model=ProjectDetail)

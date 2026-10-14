@@ -685,6 +685,18 @@ export const api = {
   updateProject: (id: string, input: Partial<ProjectInput>) =>
     request<ProjectDetail>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: "DELETE" }),
+  archiveProject: (id: string, archived: boolean) =>
+    request<ProjectDetail>(`/projects/${id}/archive`, { method: "POST", body: JSON.stringify({ archived }) }),
+  archiveTestSuite: (projectId: string, suiteId: string, archived: boolean) =>
+    request<TestSuiteSummary>(`/projects/${projectId}/test-suites/${suiteId}/archive`, {
+      method: "POST",
+      body: JSON.stringify({ archived }),
+    }),
+  archiveTestCase: (projectId: string, testCaseId: string, archived: boolean) =>
+    request<TestCaseSummary>(`/projects/${projectId}/test-cases/${testCaseId}/archive`, {
+      method: "POST",
+      body: JSON.stringify({ archived }),
+    }),
   testCases: (projectId: string) =>
     request<TestCaseSummary[]>(`/projects/${projectId}/test-cases`),
   testCase: (projectId: string, testCaseId: string) =>
@@ -834,6 +846,7 @@ export type TestSuiteSummary = {
   categories?: string[] | null;
   caseCount: number;
   createdAt?: string | null;
+  archived?: boolean;
 };
 
 export type TestSuiteDetail = TestSuiteSummary & {
@@ -965,6 +978,7 @@ export type TestCaseSummary = {
   startPath?: string;
   resolvedStartUrl?: string | null;
   suiteId?: string | null;
+  archived?: boolean;
   expectedResult?: string | null;
   storageSeeds?: StorageEntry[];
   storageAssertions?: StorageEntry[];
@@ -1026,6 +1040,7 @@ export type ProjectSummary = {
   passRate: number;
   lastRun: string | null;
   lastRunBy: string | null;
+  archived?: boolean;
 };
 
 export type SuiteSummary = {
@@ -1040,6 +1055,7 @@ export type SuiteSummary = {
   passRate: number;
   lastRun: string | null;
   lastRunBy: string | null;
+  archived?: boolean;
 };
 
 export type ProjectDetail = ProjectSummary & {

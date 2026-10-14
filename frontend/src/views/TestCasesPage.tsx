@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { FileCheck2, Play, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
+import { Archive, FileCheck2, Play, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateDraftTestCase } from "@/hooks/useCreateDraftTestCase";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -127,6 +127,18 @@ export function TestCasesPage() {
       .finally(() => setLoading(false));
   }, [projectId]);
 
+  async function toggleArchive(event: MouseEvent, testCaseId: string, archived: boolean) {
+    event.stopPropagation();
+    if (!projectId) return;
+    try {
+      const next = await api.archiveTestCase(projectId, testCaseId, !archived);
+      setCases((current) => current.map((item) => (item.id === testCaseId ? { ...item, ...next } : item)));
+      toast.success(next.archived ? "Test case archived" : "Test case restored");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update the test case");
+    }
+  }
+
   async function deleteTestCase(event: MouseEvent, testCaseId: string, name: string) {
     event.stopPropagation();
     if (!projectId) return;
@@ -182,7 +194,10 @@ export function TestCasesPage() {
         header: "Test case",
         cell: ({ row }) => (
           <div className="min-w-0 max-w-[26rem] whitespace-normal">
-            <div className="font-medium text-foreground">{row.original.name}</div>
+            <div className="font-medium text-foreground">
+              {row.original.name}
+              {row.original.archived ? <Badge variant="outline" className="ml-2">Archived</Badge> : null}
+            </div>
             {row.original.categories?.length ? (
               <div className="mt-1">
                 <SuiteCategoryBadges categories={row.original.categories} />
@@ -238,8 +253,18 @@ export function TestCasesPage() {
       caseColumns.display({
         id: "delete",
         header: () => <span className="sr-only">Delete</span>,
-        meta: { align: "right", className: "w-12" },
+        meta: { align: "right", className: "w-20" },
         cell: ({ row }) => (
+          <>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={row.original.archived ? `Unarchive ${row.original.name}` : `Archive ${row.original.name}`}
+            onClick={(event) => void toggleArchive(event, row.original.id, Boolean(row.original.archived))}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <Archive />
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -250,6 +275,7 @@ export function TestCasesPage() {
           >
             <Trash2 />
           </Button>
+          </>
         ),
       }),
     ],

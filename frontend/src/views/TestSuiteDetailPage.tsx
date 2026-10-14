@@ -22,6 +22,7 @@ import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
 import { RunMenuButton } from "@/components/runs/RunMenuButton";
 import { ScheduleRunDialog, type ScheduleRunInput } from "@/components/runs/ScheduleRunDialog";
 import { ScheduledBatchList } from "@/components/runs/ScheduledBatchList";
+import { ScopedRunHistory } from "@/components/runs/ScopedRunHistory";
 import { formatInTimeZone } from "@/lib/scheduleTime";
 import { defaultEnvironment } from "@/lib/environments";
 
@@ -282,6 +283,21 @@ export function TestSuiteDetailPage() {
         meta={<SuiteCategoryBadges categories={suite.categories} category={suite.category} />}
         actions={
           <>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (!projectId) return;
+                void api
+                  .archiveTestSuite(projectId, suite.id, !suite.archived)
+                  .then((next) => {
+                    setSuite((current) => (current ? { ...current, ...next } : current));
+                    toast.success(next.archived ? "Suite archived" : "Suite restored");
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not update the suite"));
+              }}
+            >
+              {suite.archived ? "Unarchive" : "Archive"}
+            </Button>
             <Button variant="outline" onClick={() => setEditOpen(true)}>
               <Pencil />
               Edit
@@ -311,6 +327,8 @@ export function TestSuiteDetailPage() {
       {error ? <Alert variant="error">{error}</Alert> : null}
 
       <ScheduledBatchList items={scheduled.items} onCancel={(item) => void scheduled.cancel(item)} />
+
+      <ScopedRunHistory projectId={projectId} suiteId={suiteId} />
 
       <section className="flex flex-col gap-3">
         <SectionHeader

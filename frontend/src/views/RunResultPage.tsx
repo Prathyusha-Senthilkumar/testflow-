@@ -6,10 +6,11 @@ import { AdminDetails } from "@/components/common/AdminDetails";
 import { friendlyRunError } from "@/lib/friendlyRunError";
 import { LoadingArea } from "@/components/common/LoadingArea";
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeft, ChevronDown, Download, FileCode2, FileText, ImageOff, RotateCcw, Square } from "lucide-react";
+import { ArrowLeft, ChevronDown, Download, FileCode2, FileText, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useNavigate, useParams, useSearchParams } from "@/lib/navigation";
-import { api, type ReportRun, type RunScreenshot } from "@/lib/api";
+import { api, type ReportRun, type RunScreenshot, type TestRunHistoryItem } from "@/lib/api";
+import { RunsTab } from "@/components/test-cases/RunsTab";
 import { formatDuration, formatExecutedAt } from "@/lib/reportCsv";
 import { downloadRunPdf, downloadRunReport, splitFailure } from "@/lib/runReport";
 import { useRunGitHubIssue } from "@/hooks/useRunGitHubIssue";
@@ -19,7 +20,6 @@ import { StepScreenshots } from "@/components/runs/StepScreenshots";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { DetailLayout, PageContainer, PageHeader } from "@/components/layout/page-header";
 import { runLabel, testCaseLabel, usePublishEntityName } from "@/components/layout/shell-context";
-import { EmptyState } from "@/components/common/EmptyState";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +64,8 @@ export function RunResultPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [screenshots, setScreenshots] = useState<RunScreenshot[]>([]);
+  const [history, setHistory] = useState<TestRunHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
   const githubIssue = useRunGitHubIssue(runId, run?.status === "Failed");
 
@@ -108,6 +110,17 @@ export function RunResultPage() {
       cancelled = true;
     };
   }, [runId, run?.status]);
+
+  useEffect(() => {
+    const testCaseId = run?.testCaseId;
+    if (!testCaseId) return;
+    setHistoryLoading(true);
+    api
+      .testRuns(20, testCaseId)
+      .then(setHistory)
+      .catch(() => setHistory([]))
+      .finally(() => setHistoryLoading(false));
+  }, [run?.testCaseId]);
 
   usePublishEntityName("project", run?.projectId, run?.projectName);
   usePublishEntityName("testCase", run?.testCaseId, run ? testCaseLabel(run.testCaseCode, run.testName) : null);
@@ -302,14 +315,24 @@ export function RunResultPage() {
               <div className="rounded-lg border border-border bg-surface">
                 <LoadingSpinner label={run.status === "Queued" ? "Waiting for a runner…" : "Running test…"} />
               </div>
-            ) : !showFailure ? (
-              <EmptyState
-                variant="panel"
-                icon={ImageOff}
-                title="No screenshots recorded"
-                description="This run did not capture step screenshots."
-              />
-            ) : null}
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>This run</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <dl className="space-y-2.5 text-[13px]">
+                    <Row label="Status" value={label} />
+                    <Row label="Executed" value={formatExecutedAt(run.completedAt || run.startedAt) || "—"} />
+                    <Row label="Duration" value={formatDuration(run.durationMs) || "—"} numeric />
+                    <Row label="Run by" value={run.runBy || "—"} />
+                  </dl>
+                  {run.screenshotPath ? (
+                    <p className="mt-3 text-[13px] text-muted-foreground">The screenshot from this run is no longer stored. The saved result is shown here.</p>
+                  ) : null}
+                </CardContent>
+              </Card>
+            )}
           </>
         }
         aside={
@@ -343,6 +366,12 @@ export function RunResultPage() {
           </div>
         }
       />
+      {run.testCaseId ? (
+        <section className="space-y-3">
+          <h2 className="text-[15px] font-semibold text-foreground">Run history</h2>
+          <RunsTab projectId={projectId || run.projectId || ""} runs={history} loading={historyLoading} />
+        </section>
+      ) : null}
     </PageContainer>
   );
 }

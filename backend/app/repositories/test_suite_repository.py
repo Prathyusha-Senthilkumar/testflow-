@@ -96,6 +96,7 @@ class TestSuiteRepository:
             categories=parse_suite_categories(row),
             caseCount=self._count_cases(suite_id) if case_count is None else case_count,
             createdAt=row.get("created_at"),
+            archived=bool(row.get("archived")),
         )
 
     # ---- CRUD -------------------------------------------------------------
@@ -242,6 +243,89 @@ class TestSuiteRepository:
         self.db.from_("test_suites").delete().eq("project_id", project_id).eq(
             "id", suite_id
         ).execute()
+
+    def set_archived(self, project_id: str, suite_id: str, archived: bool) -> None:
+        self.find_by_id(project_id, suite_id)
+        if not self.db:
+            suite = self.find_by_id(project_id, suite_id)
+            self._replace(project_id, suite_id, suite.model_copy(update={"archived": archived}))
+            return
+        try:
+            self.db.from_("test_suites").update({"archived": archived}).eq("project_id", project_id).eq(
+                "id", suite_id
+            ).execute()
+        except Exception as exc:
+            if "archived" in str(exc).lower():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Apply supabase/migrations/20261013_archive.sql in the Supabase SQL editor, then try again.",
+                ) from exc
+            raise
+
+    def set_project_archived(self, project_id: str, archived: bool) -> None:
+        if not self.db:
+            suites = self.demo_suites.get(project_id, [])
+            self.demo_suites[project_id] = [suite.model_copy(update={"archived": archived}) for suite in suites]
+            return
+        try:
+            self.db.from_("test_suites").update({"archived": archived}).eq("project_id", project_id).execute()
+        except Exception as exc:
+            if "archived" in str(exc).lower():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Apply supabase/migrations/20261013_archive.sql in the Supabase SQL editor, then try again.",
+                ) from exc
+            raise
+
+    def primary_suite_id(self, project_id: str, case_id: str) -> str | None:
+        if not self.db:
+            for key, members in self.demo_suite_cases.items():
+                if not key.startswith(f"{project_id}:") or case_id not in members:
+                    continue
+                return key.split(":", 1)[-1]
+            return None
+        try:
+            rows = self.db.from_("test_cases").select("suite_id").eq("id", case_id).limit(1).execute().data or []
+        except Exception:
+            return None
+        suite_id = str(rows[0].get("suite_id") or "") if rows else ""
+        return suite_id or None
+
+    def other_suite_ids(self, case_id: str, exclude_suite_id: str) -> Set[str]:
+        """Suites besides exclude_suite_id that also contain this case."""
+        found: Set[str] = set()
+        if not self.db:
+            for key, members in self.demo_suite_cases.items():
+                if case_id not in members:
+                    continue
+                suite_id = key.split(":", 1)[-1]
+                if suite_id != exclude_suite_id:
+                    found.add(suite_id)
+            return found
+        try:
+            rows = (
+                self.db.from_("test_suite_cases")
+                .select("test_suite_id")
+                .eq("test_case_id", case_id)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            rows = []
+        for row in rows:
+            suite_id = str(row.get("test_suite_id") or "")
+            if suite_id and suite_id != exclude_suite_id:
+                found.add(suite_id)
+        try:
+            case_rows = self.db.from_("test_cases").select("suite_id").eq("id", case_id).limit(1).execute().data or []
+        except Exception:
+            case_rows = []
+        if case_rows:
+            suite_id = str(case_rows[0].get("suite_id") or "")
+            if suite_id and suite_id != exclude_suite_id:
+                found.add(suite_id)
+        return found
 
     def list_case_ids(self, project_id: str, suite_id: str) -> List[str]:
         if not self.db:

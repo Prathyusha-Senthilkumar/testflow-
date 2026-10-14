@@ -1009,6 +1009,21 @@ export function TestCaseDetailPage() {
         }
         actions={
           <>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (!projectId || !testCaseId) return;
+                void api
+                  .archiveTestCase(projectId, testCaseId, !testCase.archived)
+                  .then((next) => {
+                    setTestCase(next);
+                    toast.success(next.archived ? "Test case archived" : "Test case restored");
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not update the test case"));
+              }}
+            >
+              {testCase.archived ? "Unarchive" : "Archive"}
+            </Button>
             {!editing ? (
               <Button variant="outline" onClick={startEditing}>
                 <Pencil />

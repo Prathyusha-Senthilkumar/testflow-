@@ -15,6 +15,7 @@ class SuiteSummary(BaseModel):
     passRate: float = Field(0, alias="passRate")
     lastRun: Optional[str] = Field(None, alias="lastRun")
     lastRunBy: Optional[str] = Field(None, alias="lastRunBy")
+    archived: bool = False
 
 
 class ProjectSummary(BaseModel):
@@ -31,6 +32,7 @@ class ProjectSummary(BaseModel):
     passRate: float = Field(0, alias="passRate")
     lastRun: Optional[str] = Field(None, alias="lastRun")
     lastRunBy: Optional[str] = Field(None, alias="lastRunBy")
+    archived: bool = False
 
 
 class ProjectDetail(ProjectSummary):

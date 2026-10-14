@@ -16,6 +16,7 @@ create table if not exists public.projects (
   base_url text not null,
   description text,
   created_by uuid references public.profiles(id),
+  archived boolean not null default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -29,6 +30,7 @@ create table if not exists public.test_suites (
   categories text[] not null default '{regression}'
     check (categories <@ array['smoke', 'sanity', 'regression', 'full_regression']::text[]),
   source text not null default 'Manual' check (source in ('Manual','Suggested')),
+  archived boolean not null default false,
   created_at timestamptz default now()
 );
 
@@ -45,6 +47,7 @@ create table if not exists public.test_cases (
   categories text[] not null default '{}'
     check (categories <@ array['smoke', 'sanity', 'regression', 'full_regression']::text[]),
   environment_ids uuid[] not null default '{}',
+  archived boolean not null default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
