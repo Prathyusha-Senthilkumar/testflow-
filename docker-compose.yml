@@ -36,6 +36,10 @@ services:
       STUCK_RUN_AFTER_MINUTES: ${STUCK_RUN_AFTER_MINUTES:-60}
       # Must match the worker's heartbeat period; used to flag stale workers on the Workers page.
       WORKER_STATUS_INTERVAL_MS: ${WORKER_STATUS_INTERVAL_MS:-5000}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash}
+      OPENROUTER_FALLBACK_MODEL: ${OPENROUTER_FALLBACK_MODEL:-z-ai/glm-5.3-flash}
+      AGENT_MAX_COST_USD: ${AGENT_MAX_COST_USD:-0.50}
       # Headed Playwright codegen runs on the Windows host (host_recorder_main.py).
       RECORDING_DELEGATE_URL: ${RECORDING_DELEGATE_URL:-http://host.docker.internal:8765}
     extra_hosts:

@@ -64,6 +64,7 @@ function toJavaScriptCall(line: string): string {
     .replace(/\.get_by_label\(/g, ".getByLabel(")
     .replace(/\.get_by_placeholder\(/g, ".getByPlaceholder(")
     .replace(/\.to_have_title\(/g, ".toHaveTitle(")
+    .replace(/\.to_be_visible\(/g, ".toBeVisible(")
     .replace(/\bTrue\b/g, "true")
     .replace(/\bFalse\b/g, "false")
     .replace(/\bNone\b/g, "null");

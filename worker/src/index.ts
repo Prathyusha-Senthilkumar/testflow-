@@ -21,6 +21,7 @@ import {
 } from "./jobStore.js";
 import { markCancelled, markFinished, markRequeued, markRunning } from "./runs.js";
 import { runRecordedTest, type RunOutcome } from "./runTest.js";
+import { consumeAgentQueue } from "./agentRecord.js";
 import {
   SlotTracker,
   buildHeartbeat,
@@ -302,6 +303,7 @@ async function main(): Promise<void> {
     every(1000, async () => void (await promoteScheduled(redis))),
     every(REAPER_INTERVAL_MS, reap),
     ...Array.from({ length: WORKER_CONCURRENCY }, (_, index) => consume(index)),
+    consumeAgentQueue(redis, () => pool.getBrowser(), () => stopping, REPO_ROOT),
   ]);
 }
 

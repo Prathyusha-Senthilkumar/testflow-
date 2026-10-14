@@ -50,6 +50,9 @@ export function crumbsForPath(pathname: string, search?: URLSearchParams | null)
   switch (section) {
     case undefined:
       break;
+    case "agent":
+      crumbs.push({ label: "Agent" });
+      break;
     case "test-cases":
       crumbs.push({ label: "Test cases", to: `${base}/test-cases` });
       if (child === "new") crumbs.push({ label: "New test case" });

@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     GITHUB_API_URL: str = "https://api.github.com"
     GITHUB_ISSUE_POLL_SECONDS: int = 30
 
+    # In-app test agent. Chinese models only; DeepSeek V4.1 Flash is the default.
+    OPENROUTER_API_KEY: Optional[str] = None
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_MODEL: str = "deepseek/deepseek-v4.1-flash"
+    OPENROUTER_FALLBACK_MODEL: str = "z-ai/glm-5.3-flash"
+    AGENT_MAX_COST_USD: float = 0.50
+    AGENT_INPUT_USD_PER_MILLION: float = 0.044
+    AGENT_OUTPUT_USD_PER_MILLION: float = 0.60
+
     # Runs left in Queued/Running longer than this are marked Failed by the sweep.
     STUCK_RUN_AFTER_MINUTES: int = 60
     STUCK_RUN_SWEEP_SECONDS: int = 300

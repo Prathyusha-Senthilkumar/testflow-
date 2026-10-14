@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Browser, BrowserContext, BrowserContextOptions, Page } from "playwright";
+import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "playwright";
 import {
   AuthProfileError,
   type StorageState,
@@ -11,6 +11,7 @@ import {
   stateChanged,
 } from "./authProfiles.js";
 import { applyEnvironment, retargetUrl, scriptBody } from "./playback.js";
+import { revealLocator } from "./reveal.js";
 
 async function accessibilityAudit(repoRoot: string): Promise<string> {
   const source = await readFile(path.join(repoRoot, "automation", "framework", "accessibility.py"), "utf8");
@@ -191,7 +192,7 @@ export async function runRecordedTest(repoRoot: string, configPath: string, opti
       shot: (step: number, label: string) => Promise<void>,
       fail: (step: number, message: string) => Promise<void>
     ) => Promise<void>;
-    await run(page, expectTitle, shots.capture, shots.fail);
+    await run(page, expectAssertion, shots.capture, shots.fail);
     const expected = String(meta.expectedResult || "").trim();
     if (expected) {
       const text = await page.locator("body").innerText({ timeout: 10000 });
@@ -296,12 +297,19 @@ export async function captureFinalScreenshot(page: Page, repoRoot: string, runId
   return relative;
 }
 
-function expectTitle(target: Page) {
+function expectAssertion(target: Page | Locator) {
   return {
     async toHaveTitle(expected: string | RegExp) {
-      const title = await target.title();
+      const title = await (target as Page).title();
       const matches = expected instanceof RegExp ? expected.test(title) : title === expected;
       if (!matches) throw new Error(`Expected title ${String(expected)} but received ${title}`);
+    },
+    async toBeVisible() {
+      const locator = (target as Locator).first();
+      const visible = await revealLocator(locator.page(), locator);
+      if (!visible) {
+        throw new Error("The text was not visible after scrolling the page.");
+      }
     },
   };
 }

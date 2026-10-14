@@ -292,6 +292,9 @@ export function TestCasesPage() {
         description="Manage, organize into suites, and execute all automated test cases across suites."
         actions={
           <>
+            <Button variant="outline" onClick={() => navigate(`/projects/${projectId}/agent`)}>
+              <Sparkles /> Generate with agent
+            </Button>
             <Button onClick={() => void createDraft.create(projectId)} loading={createDraft.creating}>
               {!createDraft.creating ? <Plus /> : null} Create test case
             </Button>

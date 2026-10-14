@@ -289,6 +289,14 @@ export type ReportRun = {
   errorMessage?: string | null;
   runBy?: string | null;
   screenshotPath?: string | null;
+  createdBy?: string | null;
+  createdAt?: string | null;
+  lastModifiedBy?: string | null;
+  lastModifiedAt?: string | null;
+  firstRunBy?: string | null;
+  firstRunAt?: string | null;
+  lastRunBy?: string | null;
+  lastRunAt?: string | null;
 };
 
 export type RunScreenshot = {
@@ -416,6 +424,7 @@ export type GroupedRun = {
   title: string;
   code?: string | null;
   suiteCategory?: string | null;
+  categories?: string[] | null;
   environmentName?: string | null;
   status: string;
   startedAt?: string | null;
@@ -701,6 +710,20 @@ export const api = {
     request<TestCaseSummary[]>(`/projects/${projectId}/test-cases`),
   testCase: (projectId: string, testCaseId: string) =>
     request<TestCaseSummary>(`/projects/${projectId}/test-cases/${testCaseId}`),
+  createAgentJob: (projectId: string, input: AgentJobInput) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  agentJob: (projectId: string, jobId: string) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}`, {}, { live: true }),
+  approveAgentJob: (projectId: string, jobId: string, accepted: boolean) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/approval`, {
+      method: "POST",
+      body: JSON.stringify({ accepted }),
+    }),
+  saveAgentDraft: (projectId: string, jobId: string) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/save`, { method: "POST" }),
   createTestCase: (projectId: string, input: TestCaseInput) =>
     request<TestCaseSummary>(`/projects/${projectId}/test-cases`, {
       method: "POST",
@@ -875,6 +898,30 @@ export type AssertionConfig = {
   id: string;
   type: AssertionType;
   value: string;
+};
+
+export type AgentStep = { action: string; target: string; value: string };
+
+export type AgentJobInput = {
+  prompt: string;
+  startPath: string;
+  startUrl: string;
+  environmentId?: string;
+  authProfileId?: string;
+};
+
+export type AgentJob = {
+  id: string;
+  projectId: string;
+  phase: string;
+  prompt: string;
+  steps: AgentStep[];
+  expected: string;
+  diary: { action: string; role: string; name: string; value: string; url: string }[];
+  script: string;
+  testCaseId?: string | null;
+  costUsd: number;
+  error?: string | null;
 };
 
 export type EnvironmentInput = {

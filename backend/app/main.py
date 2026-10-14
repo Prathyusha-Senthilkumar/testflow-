@@ -9,7 +9,10 @@ from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 
 from app.config import settings
+from app.logging_format import concise_error, configure_logging
 from app.middleware.request_id import REQUEST_ID_HEADER, RequestIdMiddleware, request_id_of
+
+configure_logging()
 from app.routers.dashboard import router as dashboard_router
 from app.routers.projects import router as projects_router
 from app.routers.crawler import router as crawler_router
@@ -27,6 +30,7 @@ from app.routers.search import router as search_router
 from app.routers.notifications import router as notifications_router
 from app.routers.workers import router as workers_router
 from app.routers.github import router as github_router
+from app.routers.agents import router as agents_router
 from app.dependencies.auth import auth_bypass_enabled, require_user
 
 logger = logging.getLogger("testflow.api")
@@ -98,9 +102,12 @@ app.add_middleware(
 # Exception handlers for frontend compatibility ({ "message": "..." })
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    detail = exc.detail if isinstance(exc.detail, str) else "Request failed"
+    request.state.error_message = detail
     return JSONResponse(
         status_code=exc.status_code,
-        content={"message": exc.detail},
+        content={"message": detail},
+        headers={REQUEST_ID_HEADER: request_id_of(request)},
     )
 
 @app.exception_handler(RequestValidationError)
@@ -113,21 +120,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         messages.append(f"{field_name}: {msg}")
     
     message_str = ", ".join(messages) if messages else "Invalid input"
+    request.state.error_message = message_str
     return JSONResponse(
         status_code=400,
         content={"message": message_str},
+        headers={REQUEST_ID_HEADER: request_id_of(request)},
     )
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     # Details stay in server logs; clients only get a generic message and the request id.
     request_id = request_id_of(request)
-    logger.exception(
-        "event=unhandled_error request_id=%s method=%s path=%s",
-        request_id,
-        request.method,
-        request.url.path,
-    )
+    request.state.error_message = concise_error(exc)
     return JSONResponse(
         status_code=500,
         content={"message": f"Internal server error (request id {request_id})."},
@@ -157,6 +161,7 @@ api_router.include_router(search_router)
 api_router.include_router(notifications_router)
 api_router.include_router(workers_router)
 api_router.include_router(github_router)
+api_router.include_router(agents_router)
 
 app.include_router(public_api_router)
 app.include_router(api_router)
