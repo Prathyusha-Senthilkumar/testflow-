@@ -329,8 +329,6 @@ export function TestSuiteDetailPage() {
 
       <ScheduledBatchList items={scheduled.items} onCancel={(item) => void scheduled.cancel(item)} />
 
-      <ScopedRunHistory projectId={projectId} suiteId={suiteId} />
-
       <section className="flex flex-col gap-3">
         <SectionHeader
           title="Test cases"
@@ -388,6 +386,7 @@ export function TestSuiteDetailPage() {
         />
       </section>
 
+      <ScopedRunHistory projectId={projectId} suiteId={suiteId} />
 
       <AddTestCasesModal
         open={addOpen}
