@@ -29,6 +29,41 @@ _MAX_SESSION_AGE = timedelta(days=7)
 logger = logging.getLogger("testflow.auth_profiles")
 
 
+def retarget_storage_state(state: dict, target_url: str, source_url: str | None) -> dict:
+    """Move the app's own cookies and localStorage onto the recording host.
+
+    Auth Profile sessions are captured on the login host (often dev). Record Test
+    opens the selected environment, which can be a different host. Host-only
+    cookies are not sent there, so codegen shows the login page. Third-party
+    cookies are left alone.
+    """
+    from urllib.parse import urlparse
+
+    target = urlparse(target_url if "://" in (target_url or "") else f"https://{target_url}")
+    target_host = (target.hostname or "").lower()
+    source_host = (urlparse(source_url or "").hostname or "").lower()
+    if not target_host or not source_host or target_host == source_host:
+        return state
+    scheme = target.scheme or "https"
+    target_origin = f"{scheme}://{target_host}"
+    if target.port:
+        target_origin = f"{target_origin}:{target.port}"
+    cloned = json.loads(json.dumps(state))
+    for cookie in cloned.get("cookies") or []:
+        if not isinstance(cookie, dict):
+            continue
+        domain = str(cookie.get("domain") or "").lstrip(".").lower()
+        if domain == source_host:
+            cookie["domain"] = target_host
+    for origin in cloned.get("origins") or []:
+        if not isinstance(origin, dict):
+            continue
+        host = (urlparse(str(origin.get("origin") or "")).hostname or "").lower()
+        if host == source_host:
+            origin["origin"] = target_origin
+    return cloned
+
+
 def _decrypt_for_use(token: str) -> Optional[dict]:
     """Strict decrypt for runs and recording: a bad key is an explicit error, never 'no session'."""
     from app.services.secret_store import SecretDecryptError, SecretUnavailableError, decrypt_mapping
@@ -419,7 +454,15 @@ class AuthProfileRepository:
 
     @contextmanager
     def session_file(
-        self, project_id: str, profile_id: str, *, load: bool = True, save: bool = False
+        self,
+        project_id: str,
+        profile_id: str,
+        *,
+        load: bool = True,
+        save: bool = False,
+        target_url: str | None = None,
+        source_url: str | None = None,
+        state_override: dict | None = None,
     ) -> Iterator[Path]:
         """A storageState file for tools that only accept a path (Playwright codegen).
 
@@ -438,7 +481,12 @@ class AuthProfileRepository:
         profile_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         path = profile_dir / f"storage_state.{uuid.uuid4().hex}.tmp.json"
         original = ""
-        state = self.read_storage_state(project_id, profile_id) if load else None
+        if state_override is not None:
+            state = state_override
+        else:
+            state = self.read_storage_state(project_id, profile_id) if load else None
+            if state is not None and target_url:
+                state = retarget_storage_state(state, target_url, source_url)
         if state is not None:
             original = json.dumps(state)
         # Always pre-create it private, so a tool writing into it keeps 0600.

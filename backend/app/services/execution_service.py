@@ -6,9 +6,10 @@ from typing import Any, Optional
 
 from fastapi import HTTPException
 
+from app.logging_format import log_failure
 from app.execution.config_path import resolve_runner_config_path
 from app.execution.runner_sidecar import ensure_runner_config_for_script
-from app.queue.connection import get_redis_connection
+from app.queue.connection import get_redis_connection, get_status_redis_connection
 
 _logger = logging.getLogger("testflow.execution")
 
@@ -133,6 +134,7 @@ class ExecutionService:
             run_by_id = None
             if run_by:
                 test_run_repository.ensure_profile(run_by[0], run_by[1])
+                _remember_runner(run_by[0], run_by[1])
                 run_by_id = run_by[0]
             try:
                 test_run_id = test_run_repository.create_queued(
@@ -142,9 +144,7 @@ class ExecutionService:
                     run_by=run_by_id,
                 )
             except Exception as exc:
-                _logger.error(
-                    "event=run_row_create_failed job_id=%s error=%s", job_id, exc.__class__.__name__
-                )
+                log_failure(_logger, f"run.record job_id={job_id}", exc)
                 raise HTTPException(
                     status_code=503, detail="Could not record the test run. Try again."
                 ) from exc
@@ -162,14 +162,14 @@ class ExecutionService:
                 environment_base_url=environment_base_url,
             )
         except Exception as exc:
-            _logger.error("event=enqueue_failed job_id=%s error=%s", job_id, exc.__class__.__name__)
+            log_failure(_logger, f"run.enqueue job_id={job_id}", exc)
             if test_run_id:
                 try:
                     test_run_repository.mark_result(
                         job_id, "Failed", None, "Test not started: the run could not be queued."
                     )
-                except Exception:
-                    _logger.error("event=run_row_close_failed job_id=%s", job_id)
+                except Exception as close_exc:
+                    log_failure(_logger, f"run.close job_id={job_id}", close_exc)
             raise HTTPException(status_code=503, detail="Could not queue the test run. Try again.") from exc
 
         if run_at is not None:
@@ -449,20 +449,17 @@ class ExecutionService:
             try:
                 batch = self._fire_schedule(record)
             except HTTPException as exc:
-                _logger.error(
-                    "event=scheduled_batch_failed schedule_id=%s batch_type=%s project_id=%s reason=%s",
-                    schedule_id,
-                    record.get("batchType"),
-                    record.get("projectId"),
-                    _public_reason(exc.detail),
+                log_failure(
+                    _logger,
+                    f"schedule.fire schedule_id={schedule_id} batch_type={record.get('batchType')} project_id={record.get('projectId')}",
+                    exc,
                 )
                 continue
-            except Exception:
-                _logger.exception(
-                    "event=scheduled_batch_failed schedule_id=%s batch_type=%s project_id=%s",
-                    schedule_id,
-                    record.get("batchType"),
-                    record.get("projectId"),
+            except Exception as exc:
+                log_failure(
+                    _logger,
+                    f"schedule.fire schedule_id={schedule_id} batch_type={record.get('batchType')} project_id={record.get('projectId')}",
+                    exc,
                 )
                 continue
             _logger.info(
@@ -534,12 +531,7 @@ class ExecutionService:
         try:
             scheduled_batch_repository.save(record, scheduled)
         except Exception as exc:
-            _logger.error(
-                "event=scheduled_batch_save_failed batch_type=%s project_id=%s error=%s",
-                batch_type,
-                project_id,
-                exc.__class__.__name__,
-            )
+            log_failure(_logger, f"schedule.save batch_type={batch_type} project_id={project_id}", exc)
             raise HTTPException(status_code=503, detail="Could not save the schedule. Try again.") from exc
         _logger.info(
             "event=scheduled_batch_created schedule_id=%s batch_type=%s project_id=%s",
@@ -548,6 +540,97 @@ class ExecutionService:
             project_id,
         )
         return _scheduled_batch(record)
+
+    def live_activity(self, project_id: str):
+        """Queued and running cases, suites, and project batches other sessions can see."""
+        from app.schemas.test_run import LiveCaseRun, LiveProjectRun, LiveSuiteRun, ProjectLiveActivity
+
+        cases: dict[str, dict] = {}
+        for row in test_run_repository.list_active_for_project(project_id):
+            case_id = str(row.get("testCaseId") or "")
+            if case_id:
+                cases[case_id] = row
+
+        project_batches = _load_project_batches(project_id)
+        job_ids = [
+            str(entry.get("jobId"))
+            for payload in project_batches
+            for entry in payload.get("cases") or []
+            if entry.get("jobId")
+        ]
+        persisted: dict[str, dict] = {}
+        for start in range(0, len(job_ids), 80):
+            persisted.update(test_run_repository.map_by_job_ids(job_ids[start : start + 80]))
+
+        suites: dict[str, dict] = {}
+        project_run: Optional[dict] = None
+        open_batches = [payload for payload in project_batches if _batch_has_open_work(payload, persisted)]
+        open_batches.sort(key=lambda payload: str(payload.get("createdAt") or ""))
+        for payload in open_batches:
+            batch_id = str(payload.get("id") or "")
+            run_by = payload.get("runBy") or None
+            batch_running = _batch_case_running(payload, persisted)
+            status = "Running" if batch_running else "Queued"
+            if payload.get("batchType") == "project" and batch_id:
+                project_run = {"batchId": batch_id, "status": status, "runBy": run_by}
+            suite_id = str(payload.get("suiteId") or "")
+            if payload.get("batchType") == "suite" and suite_id:
+                suites[suite_id] = {"suiteId": suite_id, "batchId": batch_id, "status": status, "runBy": run_by}
+            for entry in payload.get("cases") or []:
+                if not _entry_still_open(entry, persisted):
+                    continue
+                case_id = str(entry.get("testCaseId") or "")
+                entry_suite = str(entry.get("suiteId") or suite_id or "")
+                if entry_suite and entry_suite not in suites:
+                    suites[entry_suite] = {
+                        "suiteId": entry_suite,
+                        "batchId": batch_id,
+                        "status": status,
+                        "runBy": run_by,
+                    }
+                elif entry_suite and status == "Running":
+                    suites[entry_suite]["status"] = "Running"
+                if not case_id:
+                    continue
+                job_id = str(entry.get("jobId") or "")
+                saved = persisted.get(job_id) or {}
+                case_status = "Running" if str(saved.get("status") or "") == "Running" else "Queued"
+                current = cases.get(case_id)
+                if current and current.get("status") == "Running":
+                    current.setdefault("batchId", batch_id)
+                    if run_by and not current.get("runBy"):
+                        current["runBy"] = run_by
+                    continue
+                cases[case_id] = {
+                    "testCaseId": case_id,
+                    "suiteId": entry_suite or (current or {}).get("suiteId"),
+                    "status": case_status,
+                    "runId": saved.get("id") or (current or {}).get("runId"),
+                    "batchId": batch_id,
+                    "runBy": run_by or (current or {}).get("runBy"),
+                    "startedAt": (current or {}).get("startedAt"),
+                }
+
+        pending_ids = [
+            str(row.get("runById") or "")
+            for row in cases.values()
+            if row.get("runById") and not row.get("runBy")
+        ]
+        names = _runner_names(pending_ids)
+        for row in cases.values():
+            user_id = str(row.pop("runById", "") or "")
+            if not row.get("runBy") and user_id:
+                row["runBy"] = names.get(user_id)
+            if row.get("runBy") is not None:
+                row["runBy"] = str(row["runBy"])
+            if row.get("startedAt") is not None:
+                row["startedAt"] = str(row["startedAt"])
+
+        return ProjectLiveActivity(
+            cases=[LiveCaseRun(**row) for row in cases.values()],
+            suites=[LiveSuiteRun(**row) for row in suites.values()],
+            project=LiveProjectRun(**project_run) if project_run else None,
+        )
 
     def list_grouped_runs(self) -> list[GroupedRun]:
         """Suite and project batches from Redis, plus individual runs not in those batches."""
@@ -559,10 +642,26 @@ class ExecutionService:
                 if job_id:
                     child_job_ids.add(str(job_id))
         persisted = test_run_repository.map_by_job_ids(list(child_job_ids))
+        case_ids: list[str] = []
+        suite_ids: list[str] = []
+        for payload in payloads:
+            if payload.get("suiteId"):
+                suite_ids.append(str(payload["suiteId"]))
+            for entry in payload.get("cases") or []:
+                if entry.get("testCaseId"):
+                    case_ids.append(str(entry["testCaseId"]))
+                if entry.get("suiteId"):
+                    suite_ids.append(str(entry["suiteId"]))
+        case_categories, suite_categories = test_run_repository.category_maps(case_ids, suite_ids)
         items: list[GroupedRun] = []
         for payload in payloads:
             status = self._status_from_payload(payload, persisted)
-            items.append(_grouped_from_batch(status))
+            items.append(
+                _grouped_from_batch(
+                    status,
+                    _categories_for_batch(payload, case_categories, suite_categories),
+                )
+            )
         for run in test_run_repository.list_recent_for_activity(200):
             job_id = str(run.get("jobId") or "")
             if job_id and job_id in child_job_ids:
@@ -587,6 +686,7 @@ class ExecutionService:
                     started_at=str(started) if started else None,
                     duration_ms=int(duration) if duration is not None else None,
                     project_id=run.get("projectId"),
+                    categories=list(run.get("categories") or []),
                     error_message=None if status == "Cancelled" else error_message,
                 )
             )
@@ -714,6 +814,7 @@ class ExecutionService:
                 if case is None:
                     case = cases_service.get(project_id, case_id)
             except HTTPException as exc:
+                log_failure(_logger, f"run.case_load test_case_id={case_id}", exc, level=logging.WARNING)
                 stored_cases.append({
                     "testCaseId": case_id, "testCaseCode": "", "name": "Test case",
                     "jobId": None, "skippedReason": None,
@@ -722,6 +823,7 @@ class ExecutionService:
                 })
                 continue
             except Exception as exc:
+                log_failure(_logger, f"run.case_load test_case_id={case_id}", exc)
                 stored_cases.append({
                     "testCaseId": case_id, "testCaseCode": "", "name": "Test case",
                     "jobId": None, "skippedReason": None,
@@ -810,6 +912,7 @@ class ExecutionService:
                 )
                 entry["jobId"] = started.job_id
             except Exception as exc:
+                log_failure(_logger, f"run.dispatch batch_id={batch_id} test_case_id={entry.get('testCaseId')}", exc)
                 detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
                 entry["enqueueError"] = _public_reason(detail) or "Could not start this test"
             finally:
@@ -961,7 +1064,29 @@ def _is_cancelled_case(entry: dict, stored: dict) -> bool:
     return bool(entry.get("cancelRequested")) and str(stored.get("status") or "") not in ("Passed", "Failed", "Running")
 
 
-def _grouped_from_batch(status: BatchExecutionStatus) -> GroupedRun:
+def _categories_for_batch(
+    payload: dict,
+    case_categories: dict[str, list[str]],
+    suite_categories: dict[str, list[str]],
+) -> list[str]:
+    """Tags a suite or project run can be filtered by."""
+    explicit = str(payload.get("suiteCategory") or "").strip()
+    if explicit:
+        return [explicit]
+    if payload.get("batchType") == "suite":
+        return list(suite_categories.get(str(payload.get("suiteId") or ""), []))
+    found: list[str] = []
+    for entry in payload.get("cases") or []:
+        tags = case_categories.get(str(entry.get("testCaseId") or ""))
+        if not tags:
+            tags = suite_categories.get(str(entry.get("suiteId") or ""), [])
+        for tag in tags:
+            if tag not in found:
+                found.append(tag)
+    return found
+
+
+def _grouped_from_batch(status: BatchExecutionStatus, categories: Optional[list[str]] = None) -> GroupedRun:
     if not status.finished:
         label = "Queued" if status.passed == 0 and status.failed == 0 and status.running == 0 and status.cancelled == 0 else "Running"
     elif status.cancel_requested:
@@ -982,6 +1107,7 @@ def _grouped_from_batch(status: BatchExecutionStatus) -> GroupedRun:
         title=title,
         code=None,
         suite_category=status.suite_category if status.batch_type == "project" else None,
+        categories=list(categories or []),
         environment_name=status.environment_name,
         status=label,
         started_at=status.created_at.isoformat() if status.created_at else None,
@@ -1024,7 +1150,8 @@ def _case_suites(case_ids: list[str]) -> dict[str, tuple[str, str]]:
         from app.database import get_supabase_client
 
         db = get_supabase_client()
-    except Exception:
+    except Exception as exc:
+        log_failure(_logger, "run.case_suites", exc, level=logging.WARNING, dedupe_seconds=60)
         return {}
     if not db:
         return {}
@@ -1090,7 +1217,8 @@ def _batch_names(project_id: str, suite_id: Optional[str]) -> tuple[Optional[str
                 )
                 if suite_rows:
                     suite_name = suite_rows[0].get("name")
-    except Exception:
+    except Exception as exc:
+        log_failure(_logger, "run.batch_names", exc, level=logging.WARNING, dedupe_seconds=60)
         project_name = None
         suite_name = None
     found = (project_name, suite_name)
@@ -1150,6 +1278,77 @@ def _public_reason(detail: Any) -> str:
     text = detail if isinstance(detail, str) else str(detail or "")
     text = " ".join(text.split())
     return text[:180]
+
+
+_RUNNER_KEY_PREFIX = "testflow:runner:"
+
+
+def _remember_runner(user_id: str, name: str) -> None:
+    """Keep the display name for a runner so other sessions can show who started a live run."""
+    cleaned = (name or "").strip()
+    if not user_id or not cleaned:
+        return
+    try:
+        get_redis_connection().set(f"{_RUNNER_KEY_PREFIX}{user_id}", cleaned, ex=_BATCH_TTL_SECONDS)
+    except Exception as exc:
+        log_failure(_logger, "runner.remember", exc, level=logging.WARNING, dedupe_seconds=60)
+
+
+def _runner_names(user_ids: list[str]) -> dict[str, str]:
+    ids = list(dict.fromkeys(user_id for user_id in user_ids if user_id))
+    if not ids:
+        return {}
+    try:
+        values = get_status_redis_connection().mget([f"{_RUNNER_KEY_PREFIX}{user_id}" for user_id in ids])
+    except Exception as exc:
+        log_failure(_logger, "runner.names", exc, level=logging.WARNING, dedupe_seconds=60)
+        return {}
+    names: dict[str, str] = {}
+    for user_id, value in zip(ids, values):
+        if not value:
+            continue
+        text = value.decode("utf-8") if isinstance(value, bytes) else str(value)
+        text = text.strip()
+        if text:
+            names[user_id] = text
+    return names
+
+
+def _load_project_batches(project_id: str) -> list[dict]:
+    redis = get_status_redis_connection()
+    try:
+        keys = list(redis.scan_iter(match=f"{_BATCH_KEY_PREFIX}*", count=100))
+        raw_values = redis.mget(keys) if keys else []
+    except Exception as exc:
+        log_failure(_logger, "run.live_batches", exc, level=logging.WARNING, dedupe_seconds=60)
+        return []
+    payloads: list[dict] = []
+    for raw in raw_values:
+        payload = _decode_batch(raw)
+        if payload is not None and str(payload.get("projectId") or "") == project_id:
+            payloads.append(payload)
+    return payloads
+
+
+def _entry_still_open(entry: dict, persisted: dict[str, dict]) -> bool:
+    if entry.get("skippedReason") or entry.get("enqueueError"):
+        return False
+    if entry.get("dispatchPending") or not entry.get("jobId"):
+        return True
+    status = str((persisted.get(str(entry.get("jobId"))) or {}).get("status") or "")
+    return status in ("", "Queued", "Running")
+
+
+def _batch_has_open_work(payload: dict, persisted: dict[str, dict]) -> bool:
+    return any(_entry_still_open(entry, persisted) for entry in payload.get("cases") or [])
+
+
+def _batch_case_running(payload: dict, persisted: dict[str, dict]) -> bool:
+    for entry in payload.get("cases") or []:
+        status = str((persisted.get(str(entry.get("jobId") or "")) or {}).get("status") or "")
+        if status == "Running":
+            return True
+    return False
 
 
 def _batch_key(batch_id: str) -> str:

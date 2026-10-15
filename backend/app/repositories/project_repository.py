@@ -1,9 +1,13 @@
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from fastapi import HTTPException
 from app.database import get_supabase_client
+from app.logging_format import log_failure
+
+logger = logging.getLogger("testflow.projects")
 from app.schemas.test_suite import parse_suite_categories
 from app.schemas.project import (
     ProjectSummary,
@@ -79,7 +83,8 @@ class ProjectRepository:
                 rows = self.db.from_("project_overview").select("*").execute().data or []
                 self._resolve_overview_names(rows)
                 return [self._project_summary_from_overview(row) for row in rows]
-            except Exception:
+            except Exception as exc:
+                log_failure(logger, "project.overview", exc, level=logging.WARNING, dedupe_seconds=300)
                 ProjectRepository._overview_ok = False
         return self._find_all_from_base_tables()
 
@@ -167,7 +172,8 @@ class ProjectRepository:
                 return self._find_by_id_from_overviews(id)
             except HTTPException:
                 raise
-            except Exception:
+            except Exception as exc:
+                log_failure(logger, "project.detail", exc, level=logging.WARNING, dedupe_seconds=300)
                 ProjectRepository._overview_ok = False
                 ProjectRepository._suite_overview_ok = False
         return self._find_by_id_from_base_tables(id)

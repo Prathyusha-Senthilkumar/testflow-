@@ -1,10 +1,14 @@
 import json
+import logging
 import re
 import time
 import uuid
 from typing import Dict, List
 from fastapi import HTTPException
 from app.database import get_supabase_client
+from app.logging_format import log_failure
+
+logger = logging.getLogger("testflow.test_cases")
 from app.schemas.test_suite import MIGRATION_HINT, missing_multi_column
 from app.schemas.test_case import (
     CreateTestCaseDto,
@@ -236,6 +240,42 @@ class TestCaseRepository:
         ).execute()
         return self.find_by_id(project_id, test_case_id)
 
+    def record_audit(self, test_case_id: str, user_id: str | None, *, creating: bool = False) -> None:
+        """Stamp updated_at and, when the columns exist, who created or last changed the case."""
+        if not self.db or not test_case_id:
+            return
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        # Live table uses last_modified_*; schema.sql uses updated_*.
+        candidates = [
+            {"last_modified_at": now, "last_modified_by": user_id, "created_by": user_id if creating else None},
+            {"last_modified_at": now, "last_modified_by": user_id},
+            {"updated_at": now, "updated_by": user_id, "created_by": user_id if creating else None},
+            {"updated_at": now, "updated_by": user_id},
+            {"last_modified_at": now},
+            {"updated_at": now},
+        ]
+        last_error: Exception | None = None
+        for raw in candidates:
+            payload = {key: value for key, value in raw.items() if value}
+            if not payload:
+                continue
+            try:
+                self.db.from_("test_cases").update(payload).eq("id", test_case_id).execute()
+                return
+            except Exception as exc:
+                last_error = exc
+                continue
+        if last_error is not None:
+            log_failure(
+                logger,
+                f"test_case.audit test_case_id={test_case_id}",
+                last_error,
+                level=logging.WARNING,
+                dedupe_seconds=300,
+            )
+
     def update(self, project_id: str, test_case_id: str, input_dto: UpdateTestCaseDto) -> TestCaseSummary:
         if not self.db:
             cases = self.demo_cases.get(project_id, [])
@@ -392,7 +432,9 @@ class TestCaseRepository:
         self._delete_rows("test_runs", "test_case_id", test_case_id)
         self._delete_rows("test_case_versions", "test_case_id", test_case_id)
         self._delete_rows("test_suite_cases", "test_case_id", test_case_id)
-        self.db.from_("test_cases").delete().eq("project_id", project_id).eq("id", test_case_id).execute()
+        # Ownership is already checked in find_by_id via suite_id. Live
+        # test_cases rows have no project_id column.
+        self.db.from_("test_cases").delete().eq("id", test_case_id).execute()
 
     def _delete_rows(self, table: str, column: str, value: str) -> None:
         try:
@@ -401,6 +443,7 @@ class TestCaseRepository:
             message = str(exc)
             if "PGRST205" in message or "does not exist" in message or "42P01" in message:
                 return
+            log_failure(logger, f"test_case.delete_rows table={table}", exc)
             raise
 
     def _next_code(self, project_id: str) -> str:

@@ -1,12 +1,15 @@
+import logging
 import uuid
 from typing import Dict
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from app.logging_format import log_failure
 from app.schemas.crawler import CrawlRequest, CrawlJobStatus
 from app.services.crawler_service import crawler_service
 from app.services.test_generator_service import test_generator_service
 from app.repositories.project_repository import project_repository as project_repo
 
 router = APIRouter(prefix="/crawler", tags=["Crawler & Test Generator"])
+logger = logging.getLogger("testflow.crawler")
 
 # In-memory tracking for background crawl jobs
 active_jobs: Dict[str, CrawlJobStatus] = {}
@@ -61,7 +64,7 @@ async def execute_crawl_and_generation(job_id: str, request: CrawlRequest):
         job.message = f"Successfully generated {len(generated_suites)} suites ({total_cases} test cases) across {len(discovered_pages)} pages."
 
     except Exception as e:
-        print(f"[CrawlerJobError] Job {job_id} failed: {e}")
+        log_failure(logger, f"crawler.job job_id={job_id}", e)
         job.status = "failed"
         job.progress = 100
         job.error = str(e)

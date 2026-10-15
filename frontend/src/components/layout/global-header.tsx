@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { CircleHelp, Menu, PanelLeft, Search } from "lucide-react";
+import { CircleHelp, Menu, Search } from "lucide-react";
 import { Link } from "@/lib/navigation";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -59,13 +59,11 @@ function HelpMenu() {
 }
 
 type GlobalHeaderProps = {
-  onToggleSidebar: () => void;
   onOpenMobileNav: () => void;
-  sidebarCollapsed: boolean;
 };
 
 /** Top bar: breadcrumbs, ⌘K search, theme toggle, help. */
-export function GlobalHeader({ onToggleSidebar, onOpenMobileNav, sidebarCollapsed }: GlobalHeaderProps) {
+export function GlobalHeader({ onOpenMobileNav }: GlobalHeaderProps) {
   const [searchOpen, setSearchOpen] = useState(false);
 
   return (
@@ -78,23 +76,7 @@ export function GlobalHeader({ onToggleSidebar, onOpenMobileNav, sidebarCollapse
         <Link to="/dashboard" aria-label="Attest home" className="shrink-0 md:hidden">
           <AttestMark variant="tile" className="size-7" />
         </Link>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="hidden md:inline-flex"
-              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-pressed={!sidebarCollapsed}
-              onClick={onToggleSidebar}
-            >
-              <PanelLeft />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}</TooltipContent>
-        </Tooltip>
-        <div className="hidden h-4 w-px shrink-0 bg-border md:block" aria-hidden />
-        <div className="min-w-0 flex-1 md:pl-1">
+        <div className="min-w-0 flex-1">
           <Suspense fallback={null}>
             <BreadcrumbTrail />
           </Suspense>

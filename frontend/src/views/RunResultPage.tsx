@@ -372,6 +372,25 @@ export function RunResultPage() {
           <RunsTab projectId={projectId || run.projectId || ""} runs={history} loading={historyLoading} />
         </section>
       ) : null}
+      {!active && run.testCaseId ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>System</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid gap-x-8 gap-y-2.5 text-[13px] sm:grid-cols-2">
+              <Row label="Created by" value={run.createdBy || "—"} />
+              <Row label="Created date" value={formatExecutedAt(run.createdAt) || "—"} />
+              <Row label="Last modified by" value={run.lastModifiedBy || "—"} />
+              <Row label="Last modified date" value={formatExecutedAt(run.lastModifiedAt) || "—"} />
+              <Row label="First run by" value={run.firstRunBy || "—"} />
+              <Row label="First run date" value={formatExecutedAt(run.firstRunAt) || "—"} />
+              <Row label="Last run by" value={run.lastRunBy || "—"} />
+              <Row label="Last run date" value={formatExecutedAt(run.lastRunAt) || "—"} />
+            </dl>
+          </CardContent>
+        </Card>
+      ) : null}
     </PageContainer>
   );
 }

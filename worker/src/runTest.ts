@@ -10,8 +10,8 @@ import {
   saveStorageState,
   stateChanged,
 } from "./authProfiles.js";
-import { applyEnvironment, retargetUrl, scriptBody } from "./playback.js";
-import { revealLocator } from "./reveal.js";
+import { applyEnvironment, retargetUrl, scriptBody, textIsListed } from "./playback.js";
+import { anyVisible, revealLocator } from "./reveal.js";
 
 async function accessibilityAudit(repoRoot: string): Promise<string> {
   const source = await readFile(path.join(repoRoot, "automation", "framework", "accessibility.py"), "utf8");

@@ -1,9 +1,11 @@
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
 # Sentinel: keep the Auth Profile already stored on the case or in its meta file.
 _KEEP_AUTH_PROFILE = object()
+logger = logging.getLogger("testflow.test_cases")
 
 from fastapi import HTTPException
 
@@ -77,18 +79,30 @@ class TestCasesService:
         test_case = self._attach_resolved_url(project_id, test_case)
         return self._with_meta_config(project_id, test_case_id, test_case)
 
-    def create(self, project_id: str, input_dto: CreateTestCaseDto) -> TestCaseSummary:
+    def create(
+        self,
+        project_id: str,
+        input_dto: CreateTestCaseDto,
+        actor: Optional[tuple[str, str]] = None,
+    ) -> TestCaseSummary:
         self._ensure_project_exists(project_id)
         normalized = self._validate_and_normalize(input_dto)
         self._validate_environment_ids(project_id, normalized.environmentIds)
         created = self.test_cases.create(project_id, normalized)
+        self._audit(project_id, created.id, actor, creating=True)
         return self._attach_resolved_url(project_id, created)
 
     def delete(self, project_id: str, test_case_id: str) -> None:
         self._ensure_project_exists(project_id)
         self.test_cases.delete(project_id, test_case_id)
 
-    def update(self, project_id: str, test_case_id: str, input_dto: UpdateTestCaseDto) -> TestCaseSummary:
+    def update(
+        self,
+        project_id: str,
+        test_case_id: str,
+        input_dto: UpdateTestCaseDto,
+        actor: Optional[tuple[str, str]] = None,
+    ) -> TestCaseSummary:
         self._ensure_project_exists(project_id)
         existing = self.test_cases.find_by_id(project_id, test_case_id)
         if input_dto.startPath is not None:
@@ -103,6 +117,7 @@ class TestCasesService:
                 self.auth_profiles.get(project_id, profile_id)
             input_dto = input_dto.model_copy(update={"authProfileId": profile_id})
         updated = self.test_cases.update(project_id, test_case_id, input_dto)
+        self._audit(project_id, test_case_id, actor)
         if existing.publishedVersion > 0:
             updated = self.test_cases.mark_draft(project_id, test_case_id)
         updated = self._attach_resolved_url(project_id, updated)
@@ -141,7 +156,13 @@ class TestCasesService:
         content = read_test_script(script_path)
         return TestScriptResponse(content=content, testFile=script_path)
 
-    def save_script(self, project_id: str, test_case_id: str, input_dto: TestScriptDto) -> TestCaseSummary:
+    def save_script(
+        self,
+        project_id: str,
+        test_case_id: str,
+        input_dto: TestScriptDto,
+        actor: Optional[tuple[str, str]] = None,
+    ) -> TestCaseSummary:
         self._ensure_project_exists(project_id)
         test_case = self.test_cases.find_by_id(project_id, test_case_id)
         test_case = self._ensure_recorded_script_linked(project_id, test_case_id, test_case)
@@ -157,9 +178,15 @@ class TestCasesService:
         updated = self._attach_resolved_url(project_id, updated)
         updated = self._with_meta_config(project_id, test_case_id, updated)
         self._sync_testflow_meta(project_id, test_case_id, updated)
+        self._audit(project_id, test_case_id, actor)
         return updated
 
-    def publish(self, project_id: str, test_case_id: str) -> TestCaseSummary:
+    def publish(
+        self,
+        project_id: str,
+        test_case_id: str,
+        actor: Optional[tuple[str, str]] = None,
+    ) -> TestCaseSummary:
         test_case = self.get(project_id, test_case_id)
         version_number = test_case.publishedVersion + 1
         relative = test_case.testFile or relative_script_path(project_id, test_case_id)
@@ -182,6 +209,7 @@ class TestCasesService:
         self.versions.publish(project_id, test_case_id, snapshot)
         updated = self.test_cases.apply_publish_state(project_id, test_case_id, version_number)
         updated = self._attach_resolved_url(project_id, updated)
+        self._audit(project_id, test_case_id, actor)
         return updated
 
     def list_versions(self, project_id: str, test_case_id: str) -> List[TestCaseVersionSummary]:
@@ -194,7 +222,12 @@ class TestCasesService:
         self.test_cases.find_by_id(project_id, test_case_id)
         return self.versions.get_version(project_id, test_case_id, version_number)
 
-    def record(self, project_id: str, test_case_id: str) -> TestCaseSummary:
+    def record(
+        self,
+        project_id: str,
+        test_case_id: str,
+        actor: Optional[tuple[str, str]] = None,
+    ) -> TestCaseSummary:
         self._ensure_project_exists(project_id)
         test_case = self.test_cases.find_by_id(project_id, test_case_id)
         test_case = self._attach_resolved_url(project_id, test_case)
@@ -203,7 +236,9 @@ class TestCasesService:
         if not resolved:
             raise HTTPException(status_code=400, detail="A valid environment base URL is required for recording")
 
-        with self.auth_profiles.recording_session(project_id, test_case.authProfileId) as load_storage:
+        with self.auth_profiles.recording_session(
+            project_id, test_case.authProfileId, target_url=resolved
+        ) as load_storage:
             relative_script = record_test_case(
                 title=test_case.name,
                 start_url=resolved,
@@ -222,7 +257,61 @@ class TestCasesService:
         updated = self._attach_resolved_url(project_id, updated)
         updated = self._with_meta_config(project_id, test_case_id, updated)
         self._sync_testflow_meta(project_id, test_case_id, updated)
+        self._audit(project_id, test_case_id, actor)
         return updated
+
+    def _audit(
+        self,
+        project_id: str,
+        test_case_id: str,
+        actor: Optional[tuple[str, str]],
+        *,
+        creating: bool = False,
+    ) -> None:
+        if actor:
+            from app.repositories.test_run_repository import test_run_repository
+
+            test_run_repository.ensure_profile(actor[0], actor[1])
+        self.test_cases.record_audit(test_case_id, actor[0] if actor else None, creating=creating)
+        self._write_case_audit(project_id, test_case_id, actor, creating=creating)
+
+    def _write_case_audit(
+        self,
+        project_id: str,
+        test_case_id: str,
+        actor: Optional[tuple[str, str]],
+        *,
+        creating: bool,
+    ) -> None:
+        """Remember who created the case. The live table has last_modified_by but no created_by."""
+        if not actor:
+            return
+        import json
+
+        user_id, name = actor
+        folder = _REPO_ROOT / "automation" / "generated" / project_id / test_case_id
+        path = folder / "audit.json"
+        stored: dict = {}
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    stored = loaded
+            except (OSError, ValueError):
+                stored = {}
+        if creating or not stored.get("createdBy"):
+            stored["createdById"] = user_id
+            stored["createdBy"] = name
+        stored["lastModifiedById"] = user_id
+        stored["lastModifiedBy"] = name
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(stored, indent=2), encoding="utf-8")
+        except OSError as exc:
+            from app.logging_format import log_failure
+
+            log_failure(logger, f"test_case.audit_file test_case_id={test_case_id}", exc, level=logging.WARNING)
+            return
 
     def _ensure_recorded_script_linked(
         self, project_id: str, test_case_id: str, test_case: TestCaseSummary

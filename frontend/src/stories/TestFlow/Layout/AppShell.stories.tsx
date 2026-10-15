@@ -21,8 +21,8 @@ function Shell({ collapsed: initialCollapsed = false, project = true, loading = 
         sidebarWidth={collapsed ? 56 : width}
         resizing={resizing}
         brand={<SidebarBrand collapsed={collapsed} />}
-        header={<GlobalHeader sidebarCollapsed={collapsed} onToggleSidebar={() => setCollapsed((value) => !value)} onOpenMobileNav={() => {}} />}
-        sidebar={<Sidebar collapsed={collapsed} />}
+        header={<GlobalHeader onOpenMobileNav={() => {}} />}
+        sidebar={<Sidebar collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} />}
         resizer={collapsed ? null : <Sash value={width} min={SIDEBAR_MIN} max={SIDEBAR_MAX} defaultValue={SIDEBAR_DEFAULT} onChange={setWidth} onDraggingChange={setResizing} />}
       >
         {loading ? (

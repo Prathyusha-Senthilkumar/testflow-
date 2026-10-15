@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.config import settings
+from app.logging_format import bind_background, log_failure
 from app.repositories.test_run_repository import TestRunRepository, test_run_repository
 
 logger = logging.getLogger("testflow.run_sweep")
@@ -86,8 +87,9 @@ def sweep_forever(stop: Optional[threading.Event] = None) -> None:
     stop = stop or threading.Event()
     interval = max(30, int(settings.STUCK_RUN_SWEEP_SECONDS))
     while not stop.is_set():
+        bind_background("run-sweep")
         try:
             run_sweep_service.sweep()
         except Exception as exc:  # keep the loop alive; Redis/Supabase may be briefly unavailable
-            logger.warning("event=stuck_run_sweep_failed error=%s", exc.__class__.__name__)
+            log_failure(logger, "run.sweep", exc, level=logging.WARNING)
         stop.wait(interval)

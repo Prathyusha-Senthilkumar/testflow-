@@ -1,7 +1,7 @@
 {
   "startPath": "/admin/curricula",
-  "environmentId": "env-default",
-  "authProfileId": "auth-1790159757408",
+  "environmentId": "6e315a16-9a75-4ba8-a988-141b79d4c52c",
+  "authProfileId": "auth-1791470933283",
   "resolvedStartUrl": "https://evolv-dev.revature.io/admin/curricula",
   "assertions": [
     {

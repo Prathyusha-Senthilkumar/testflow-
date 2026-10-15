@@ -52,7 +52,7 @@ function translateJavaScript(source: string): string {
   const body = start >= 0 && end > start ? source.slice(start + 1, end) : source;
   return body
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => exactText(line.trim()))
     .filter((line) => line && !line.startsWith("import ") && !line.startsWith("//"))
     .join("\n");
 }

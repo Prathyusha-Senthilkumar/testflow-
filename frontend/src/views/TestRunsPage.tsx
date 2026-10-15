@@ -76,6 +76,17 @@ function matchesDate(value: string | null | undefined, preset: DatePreset): bool
   return time >= start.getTime();
 }
 
+function matchesCategory(run: GroupedRun, category: string): boolean {
+  if (category === "all") return true;
+  if (run.suiteCategory === category) return true;
+  return (run.categories ?? []).includes(category);
+}
+
+function matchesRunType(run: GroupedRun, runType: string): boolean {
+  if (runType === "all") return true;
+  return (run.runType || "").toLowerCase() === runType;
+}
+
 function isLive(run: GroupedRun): boolean {
   return run.status === "Queued" || run.status === "Running";
 }
@@ -630,9 +641,9 @@ export function TestRunsPage() {
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return runs.filter((run) => {
-      if (typeFilter !== "all" && run.runType !== typeFilter) return false;
+      if (!matchesRunType(run, typeFilter)) return false;
       if (statusFilter !== "all" && run.status !== statusFilter) return false;
-      if (categoryFilter !== "all" && run.suiteCategory !== categoryFilter) return false;
+      if (!matchesCategory(run, categoryFilter)) return false;
       if (!matchesDate(run.startedAt, dateFilter)) return false;
       if (!needle) return true;
       return [TYPE_LABELS[run.runType], run.projectName, run.title, run.code, run.status, summary(run)]

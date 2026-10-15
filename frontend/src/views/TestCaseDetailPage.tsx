@@ -25,6 +25,7 @@ import {
   type TestSuiteSummary,
   type UpdateTestCaseInput,
 } from "@/lib/api";
+import { runningTitle, useLiveActivity } from "@/hooks/useLiveActivity";
 import { DRAFT_TEST_NAME } from "@/lib/createDraftTestCase";
 import { browserTimeZone, supportedTimeZones, zonedWallTimeToUtc } from "@/lib/scheduleTime";
 import type { SuiteCategory } from "@/lib/suiteCategory";
@@ -117,6 +118,8 @@ function DetailSkeleton() {
 
 export function TestCaseDetailPage() {
   const { id: projectId = "", caseId: testCaseId = "" } = useParams();
+  const activity = useLiveActivity(projectId);
+  const remoteRunningRef = useRef(false);
   const navigate = useNavigate();
   const confirm = useConfirm();
   const { pathname } = useLocation();
@@ -287,17 +290,16 @@ export function TestCaseDetailPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [editing]);
 
-  // Run history + upcoming schedules. Polls only while a run is queued or
-  // running, stops at terminal states, and pauses while the tab is hidden.
+  // Run history + upcoming schedules. Keeps polling while the tab is visible so a
+  // run started in another session shows up here. Pauses while the tab is hidden.
   useEffect(() => {
     if (!testCaseId) return;
     let cancelled = false;
-    let live = true;
     let timer: number | undefined;
 
     const scheduleNext = () => {
       window.clearTimeout(timer);
-      if (cancelled || !live || document.hidden) return;
+      if (cancelled || document.hidden) return;
       timer = window.setTimeout(load, HISTORY_POLL_MS);
     };
 
@@ -307,7 +309,6 @@ export function TestCaseDetailPage() {
           if (cancelled) return;
           setScheduled(upcoming);
           setCaseRuns(runs);
-          live = runs.some((item) => isLive(item.status));
         })
         .catch(() => {
           if (!cancelled) setScheduled([]);
@@ -319,7 +320,7 @@ export function TestCaseDetailPage() {
     }
 
     const onVisibilityChange = () => {
-      if (document.hidden || !live || cancelled) return;
+      if (document.hidden || cancelled) return;
       window.clearTimeout(timer);
       load();
     };
@@ -672,7 +673,7 @@ export function TestCaseDetailPage() {
 
   /** Starts a run in place: the live row shows in the Runs tab and the user stays on the page. */
   async function handleRun(environmentOverride?: string) {
-    if (!projectId || !testCaseId || !hasScript) return;
+    if (!projectId || !testCaseId || !hasScript || remoteRunningRef.current) return;
     setRunning(true);
     setError("");
     setLastResult(null);
@@ -923,9 +924,12 @@ export function TestCaseDetailPage() {
 
   const busy = saving || recording || running;
   const projectDefaultEnvironment = defaultEnvironment(environments);
-  const hasLiveRun = caseRuns.some((run) => isLive(run.status));
+  const remoteCase = activity?.cases.find((item) => item.testCaseId === testCaseId) ?? null;
+  const historyLive = caseRuns.some((run) => isLive(run.status));
+  const hasLiveRun = historyLive || Boolean(remoteCase);
+  remoteRunningRef.current = hasLiveRun;
   const runRows: RunRow[] =
-    running && !hasLiveRun
+    running && !historyLive
       ? [
           {
             id: "live",
@@ -936,7 +940,18 @@ export function TestCaseDetailPage() {
           },
           ...caseRuns,
         ]
-      : caseRuns;
+      : remoteCase && !historyLive
+        ? [
+            {
+              id: remoteCase.runId || "remote",
+              live: true,
+              status: remoteCase.status,
+              phase: remoteCase.runBy ? `Started by ${remoteCase.runBy}` : "Running",
+              startedAt: remoteCase.startedAt || new Date().toISOString(),
+            },
+            ...caseRuns,
+          ]
+        : caseRuns;
   const placeholderName = isNew && testCase.name === DRAFT_TEST_NAME;
 
   const storageEditor = (
@@ -1042,9 +1057,10 @@ export function TestCaseDetailPage() {
               defaultEnvironmentId={projectDefaultEnvironment?.id}
               onRunOn={(envId) => void handleRun(envId)}
               onSchedule={openSchedule}
-              running={running}
-              disabled={!hasScript || recording || running}
-              title={environmentName ? `Run on ${environmentName}` : "Run test"}
+              running={running || hasLiveRun}
+              runningLabel={hasLiveRun && !running ? "Running" : "Running…"}
+              disabled={!hasScript || recording || running || hasLiveRun}
+              title={runningTitle(hasLiveRun, remoteCase?.runBy, environmentName ? `Run on ${environmentName}` : "Run test")}
             />
           </>
         }
@@ -1104,7 +1120,7 @@ export function TestCaseDetailPage() {
                 runs={runRows}
                 loading={!historyLoaded}
                 onRun={() => void handleRun()}
-                canRun={hasScript && !recording && !running}
+                canRun={hasScript && !recording && !running && !hasLiveRun}
                 header={
                   <ResultPanel
                     running={running}

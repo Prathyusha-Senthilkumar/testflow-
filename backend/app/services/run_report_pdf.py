@@ -4,12 +4,17 @@ Same content as the browser's HTML report (frontend/src/lib/runReport.ts): run d
 each step with its screenshot and failure reason, and a summary.
 """
 
+import logging
 import re
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
 from fpdf import FPDF
+
+from app.logging_format import log_failure
+
+logger = logging.getLogger("testflow.report")
 
 _TEXT = (15, 23, 42)
 _MUTED = (100, 116, 139)
@@ -150,7 +155,8 @@ def build_run_pdf(
             try:
                 pdf.ln(1)
                 pdf.image(str(path), w=width)
-            except Exception:  # a corrupt image must not lose the whole report
+            except Exception as exc:  # a corrupt image must not lose the whole report
+                log_failure(logger, "report.screenshot", exc, level=logging.WARNING)
                 text("Screenshot unavailable.", 9, color=_MUTED)
         else:
             text("Screenshot unavailable.", 9, color=_MUTED)

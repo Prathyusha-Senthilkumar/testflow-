@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useLocation } from "@/lib/navigation";
 import { useAuthGate } from "@/hooks/useAuthGate";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -55,6 +55,8 @@ type ShellFrameProps = {
   sidebar: ReactNode;
   /** Resize handle rendered on the sidebar's right edge (full height). */
   resizer?: ReactNode;
+  onSidebarEnter?: () => void;
+  onSidebarLeave?: (event: ReactMouseEvent<HTMLElement>) => void;
   children: ReactNode;
 };
 
@@ -64,7 +66,17 @@ type ShellFrameProps = {
  * runs from the top of the window to the bottom, with a resize sash on it.
  * Right: the top bar (bottom border) over the scrolling content.
  */
-export function ShellFrame({ sidebarWidth, resizing = false, header, brand, sidebar, resizer, children }: ShellFrameProps) {
+export function ShellFrame({
+  sidebarWidth,
+  resizing = false,
+  header,
+  brand,
+  sidebar,
+  resizer,
+  onSidebarEnter,
+  onSidebarLeave,
+  children,
+}: ShellFrameProps) {
   return (
     <div
       style={{ "--sidebar-w": `${sidebarWidth}px` } as CSSProperties}
@@ -73,7 +85,13 @@ export function ShellFrame({ sidebarWidth, resizing = false, header, brand, side
         !resizing && "transition-[grid-template-columns] duration-200 ease-out"
       )}
     >
-      <aside aria-label="Sidebar" className="relative hidden min-h-0 flex-col border-r border-border bg-sidebar md:flex">
+      <aside
+        aria-label="Sidebar"
+        data-sidebar-root=""
+        onMouseEnter={onSidebarEnter}
+        onMouseLeave={onSidebarLeave}
+        className="relative hidden min-h-0 flex-col border-r border-border bg-sidebar md:flex"
+      >
         <div className="h-14 shrink-0">{brand}</div>
         <div className="min-h-0 flex-1">{sidebar}</div>
         {resizer}
@@ -108,9 +126,12 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const { ready } = useAuthGate();
   const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const [peek, setPeek] = useState(false);
   const [width, setWidth] = useState(SIDEBAR_DEFAULT);
   const [resizing, setResizing] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const peekTimer = useRef<number | null>(null);
+  const suppressPeek = useRef(false);
 
   useEffect(() => {
     // localStorage is only readable after mount (keeps SSR and hydration identical).
@@ -128,12 +149,50 @@ export function AppShell({ children }: { children?: ReactNode }) {
     setMobileOpen(false);
   }, [pathname]);
 
-  const toggleCollapsed = useCallback(() => {
-    setCollapsed((current) => {
-      writeStorage(COLLAPSE_KEY, !current ? "1" : "0");
-      return !current;
-    });
+  const clearPeekTimer = useCallback(() => {
+    if (peekTimer.current !== null) window.clearTimeout(peekTimer.current);
+    peekTimer.current = null;
   }, []);
+
+  useEffect(() => clearPeekTimer, [clearPeekTimer]);
+
+  const visualCollapsed = collapsed && !peek;
+
+  const showPeek = useCallback(() => {
+    clearPeekTimer();
+    if (!collapsed || suppressPeek.current) return;
+    peekTimer.current = window.setTimeout(() => setPeek(true), 100);
+  }, [clearPeekTimer, collapsed]);
+
+  const hidePeek = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      const next = event.relatedTarget;
+      if (next instanceof Element && next.closest("[data-radix-popper-content-wrapper]")) {
+        const popper = next.closest("[data-radix-popper-content-wrapper]");
+        const close = () => {
+          popper?.removeEventListener("mouseleave", close);
+          setPeek(false);
+        };
+        popper?.addEventListener("mouseleave", close);
+        return;
+      }
+      clearPeekTimer();
+      suppressPeek.current = false;
+      peekTimer.current = window.setTimeout(() => setPeek(false), 160);
+    },
+    [clearPeekTimer]
+  );
+
+  const toggleCollapsed = useCallback(() => {
+    setPeek(false);
+    clearPeekTimer();
+    setCollapsed((current) => {
+      const open = !current || peek;
+      suppressPeek.current = open;
+      writeStorage(COLLAPSE_KEY, open ? "1" : "0");
+      return open;
+    });
+  }, [clearPeekTimer, peek]);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -143,17 +202,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
         <>
           <RunnersSheet />
           <ShellFrame
-            sidebarWidth={collapsed ? SIDEBAR_COLLAPSED : width}
+            sidebarWidth={visualCollapsed ? SIDEBAR_COLLAPSED : width}
             resizing={resizing}
-            brand={<SidebarBrand collapsed={collapsed} />}
-            header={
-              <GlobalHeader
-                sidebarCollapsed={collapsed}
-                onToggleSidebar={toggleCollapsed}
-                onOpenMobileNav={() => setMobileOpen(true)}
-              />
-            }
-            sidebar={<Sidebar collapsed={collapsed} />}
+            onSidebarEnter={showPeek}
+            onSidebarLeave={hidePeek}
+            brand={<SidebarBrand collapsed={visualCollapsed} />}
+            header={<GlobalHeader onOpenMobileNav={() => setMobileOpen(true)} />}
+            sidebar={<Sidebar collapsed={visualCollapsed} onToggle={toggleCollapsed} />}
             resizer={
               collapsed ? null : (
                 <Sash

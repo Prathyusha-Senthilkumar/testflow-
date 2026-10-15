@@ -1,13 +1,48 @@
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Optional
 
 from app.database import get_supabase_client
+from app.logging_format import log_failure
+
+logger = logging.getLogger("testflow.test_runs")
 
 _SCHEDULE_TTL_SECONDS = 60 * 60 * 24 * 30
 # Non-terminal statuses. Terminal: Passed, Failed, Not Run (cancel = Not Run + "Cancelled").
 ACTIVE_STATUSES = ("Queued", "Running")
+
+
+def _read_case_audit(project_id: str, case_id: str) -> dict:
+    """Names saved when a case is created or edited. created_by is not a table column."""
+    if not project_id or not case_id:
+        return {}
+    path = Path(__file__).resolve().parents[3] / "automation" / "generated" / project_id / case_id / "audit.json"
+    if not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def execution_categories(case: dict, suite: dict | None) -> list[str]:
+    """Suite tags on the test case. When the case has none, use its suite's tags."""
+    from app.schemas.test_case import normalize_execution_categories
+    from app.schemas.test_suite import parse_suite_categories
+
+    direct = normalize_execution_categories(case.get("categories") or [])
+    if direct or not suite:
+        return direct
+    return parse_suite_categories(suite)
+
+
+def _is_missing_column(exc: Exception) -> bool:
+    message = str(exc)
+    code = str(getattr(exc, "code", "") or "")
+    return code in ("PGRST204", "42703") or "PGRST204" in message or "42703" in message
 
 
 class TestRunRepository:
@@ -27,7 +62,8 @@ class TestRunRepository:
                 on_conflict="id",
             ).execute()
             return True
-        except Exception:
+        except Exception as exc:
+            log_failure(logger, "profiles.ensure", exc, level=logging.WARNING, dedupe_seconds=300)
             return False
 
     def profile_names(self, user_ids: list[str]) -> dict[str, str]:
@@ -45,7 +81,8 @@ class TestRunRepository:
                 or []
             )
             names = {str(row["id"]): str(row.get("name") or "") for row in rows if row.get("id") and row.get("name")}
-        except Exception:
+        except Exception as exc:
+            log_failure(logger, "profiles.names", exc, level=logging.WARNING, dedupe_seconds=300)
             names = {}
         missing = [user_id for user_id in ids if not names.get(user_id)]
         if missing:
@@ -211,6 +248,65 @@ class TestRunRepository:
             )
         return items
 
+    def list_active_for_project(self, project_id: str) -> list[dict]:
+        """Queued and Running rows for cases in one project. One row per case."""
+        if not self.db:
+            return []
+        suites = (
+            self.db.from_("test_suites")
+            .select("id")
+            .eq("project_id", project_id)
+            .execute()
+            .data
+            or []
+        )
+        suite_ids = [str(row["id"]) for row in suites if row.get("id")]
+        if not suite_ids:
+            return []
+        cases = (
+            self.db.from_("test_cases")
+            .select("id,suite_id")
+            .in_("suite_id", suite_ids)
+            .execute()
+            .data
+            or []
+        )
+        case_suite = {str(row["id"]): str(row.get("suite_id") or "") for row in cases if row.get("id")}
+        if not case_suite:
+            return []
+        case_ids = list(case_suite)
+        runs: list[dict] = []
+        for start in range(0, len(case_ids), 80):
+            chunk = case_ids[start : start + 80]
+            runs.extend(
+                self.db.from_("test_runs")
+                .select("id,test_case_id,status,started_at,run_by")
+                .in_("test_case_id", chunk)
+                .in_("status", list(ACTIVE_STATUSES))
+                .execute()
+                .data
+                or []
+            )
+        newest: dict[str, dict] = {}
+        for run in runs:
+            case_id = str(run.get("test_case_id") or "")
+            if not case_id:
+                continue
+            current = newest.get(case_id)
+            if current is None or str(run.get("started_at") or "") >= str(current.get("started_at") or ""):
+                newest[case_id] = run
+        return [
+            {
+                "testCaseId": case_id,
+                "suiteId": case_suite.get(case_id) or None,
+                "status": str(run.get("status") or "Queued"),
+                "runId": str(run.get("id") or "") or None,
+                "startedAt": run.get("started_at"),
+                "runById": str(run.get("run_by") or "") or None,
+            }
+            for case_id, run in newest.items()
+        ]
+
     def list_latest_for_project(self, project_id: str) -> list[dict]:
         """One latest run per test case in a project. Skips report name lookups."""
         if not self.db:
@@ -300,7 +396,132 @@ class TestRunRepository:
         if not rows:
             return None
         names = self.profile_names([str(rows[0].get("run_by") or "")])
-        return self._report_row(rows[0], *self._report_lookups(rows), names)
+        row = self._report_row(rows[0], *self._report_lookups(rows), names)
+        case_id = str(rows[0].get("test_case_id") or "")
+        row.update(self._case_system_fields(case_id))
+        saved = _read_case_audit(str(row.get("projectId") or ""), case_id)
+        if saved.get("createdBy") and not row.get("createdBy"):
+            row["createdBy"] = saved.get("createdBy")
+        if saved.get("lastModifiedBy") and not row.get("lastModifiedBy"):
+            row["lastModifiedBy"] = saved.get("lastModifiedBy")
+        return row
+
+    def _case_system_fields(self, case_id: str) -> dict:
+        """Created/modified record plus the earliest and latest run of this test case."""
+        blank = {
+            "createdBy": None,
+            "createdAt": None,
+            "lastModifiedBy": None,
+            "lastModifiedAt": None,
+            "firstRunBy": None,
+            "firstRunAt": None,
+            "lastRunBy": None,
+            "lastRunAt": None,
+        }
+        if not self.db or not case_id:
+            return blank
+        case = self._case_audit_row(case_id)
+        first = self._edge_run(case_id, newest=False)
+        last = self._edge_run(case_id, newest=True)
+        author_ids = [
+            str(case.get("created_by") or ""),
+            str(case.get("last_modified_by") or case.get("updated_by") or ""),
+            str((first or {}).get("run_by") or ""),
+            str((last or {}).get("run_by") or ""),
+        ]
+        names = self.profile_names(author_ids)
+        modified_by = case.get("last_modified_by") or case.get("updated_by")
+        return {
+            "createdBy": names.get(str(case.get("created_by") or "")) or None,
+            "createdAt": case.get("created_at"),
+            "lastModifiedBy": names.get(str(modified_by or "")) or None,
+            "lastModifiedAt": case.get("last_modified_at") or case.get("updated_at"),
+            "firstRunBy": names.get(str((first or {}).get("run_by") or "")) or None,
+            "firstRunAt": (first or {}).get("started_at") or (first or {}).get("completed_at"),
+            "lastRunBy": names.get(str((last or {}).get("run_by") or "")) or None,
+            "lastRunAt": (last or {}).get("completed_at") or (last or {}).get("started_at"),
+        }
+
+    def _case_audit_row(self, case_id: str) -> dict:
+        selects = (
+            "id,created_at,last_modified_at,last_modified_by,created_by",
+            "id,created_at,last_modified_at,last_modified_by",
+            "id,created_at,updated_at,created_by,updated_by",
+            "id,created_at,updated_at",
+            "id,created_at",
+        )
+        for columns in selects:
+            try:
+                rows = (
+                    self.db.from_("test_cases")
+                    .select(columns)
+                    .eq("id", case_id)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                return rows[0] if rows else {}
+            except Exception as exc:
+                if not _is_missing_column(exc):
+                    return {}
+        return {}
+
+    def _edge_run(self, case_id: str, *, newest: bool) -> Optional[dict]:
+        try:
+            rows = (
+                self.db.from_("test_runs")
+                .select("run_by,started_at,completed_at")
+                .eq("test_case_id", case_id)
+                .order("started_at", desc=newest)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            return None
+        return rows[0] if rows else None
+
+    def _select_in(self, table: str, columns: str, fallback: str, column: str, values: list[str]) -> list[dict]:
+        try:
+            return (
+                self.db.from_(table).select(columns).in_(column, values).execute().data
+                or []
+            )
+        except Exception as exc:
+            if "categories" not in str(exc):
+                raise
+            return (
+                self.db.from_(table).select(fallback).in_(column, values).execute().data
+                or []
+            )
+
+    def category_maps(self, case_ids: list[str], suite_ids: list[str]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+        """Execution categories keyed by test case id and by suite id."""
+        from app.schemas.test_suite import parse_suite_categories
+
+        if not self.db:
+            return {}, {}
+        cases, suites, _projects = self._report_lookups(
+            [{"test_case_id": case_id} for case_id in dict.fromkeys(case_ids)]
+        )
+        missing = [suite_id for suite_id in dict.fromkeys(suite_ids) if suite_id not in suites]
+        if missing:
+            for row in self._select_in(
+                "test_suites",
+                "id,name,project_id,category,categories",
+                "id,name,project_id,category",
+                "id",
+                missing,
+            ):
+                suites[str(row["id"])] = row
+        case_categories = {
+            case_id: execution_categories(case, suites.get(str(case.get("suite_id") or "")))
+            for case_id, case in cases.items()
+        }
+        suite_categories = {suite_id: parse_suite_categories(suite) for suite_id, suite in suites.items()}
+        return case_categories, suite_categories
 
     def list_failed_since(self, completed_after: str, limit: int = 100) -> list[dict]:
         """Failed runs completed after `completed_after` (ISO time), oldest first, as report rows."""
@@ -330,13 +551,12 @@ class TestRunRepository:
         if case_ids:
             cases = {
                 str(row["id"]): row
-                for row in (
-                    self.db.from_("test_cases")
-                    .select("id,name,test_case_code,suite_id,category")
-                    .in_("id", case_ids)
-                    .execute()
-                    .data
-                    or []
+                for row in self._select_in(
+                    "test_cases",
+                    "id,name,test_case_code,suite_id,category,categories",
+                    "id,name,test_case_code,suite_id,category",
+                    "id",
+                    case_ids,
                 )
             }
         suite_ids = list({str(case["suite_id"]) for case in cases.values() if case.get("suite_id")})
@@ -344,13 +564,12 @@ class TestRunRepository:
         if suite_ids:
             suites = {
                 str(row["id"]): row
-                for row in (
-                    self.db.from_("test_suites")
-                    .select("id,name,project_id")
-                    .in_("id", suite_ids)
-                    .execute()
-                    .data
-                    or []
+                for row in self._select_in(
+                    "test_suites",
+                    "id,name,project_id,category,categories",
+                    "id,name,project_id,category",
+                    "id",
+                    suite_ids,
                 )
             }
         project_ids = list(
@@ -392,6 +611,7 @@ class TestRunRepository:
             "testCaseCode": case.get("test_case_code"),
             "testName": case.get("name"),
             "category": case.get("category") or "Functional",
+            "categories": execution_categories(case, suite),
             "status": str(run.get("status") or "Not Run"),
             "startedAt": run.get("started_at"),
             "completedAt": run.get("completed_at"),

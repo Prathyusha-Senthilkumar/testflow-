@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.database import get_supabase_client
+from app.logging_format import bind_background, log_failure
 from app.queue.connection import get_redis_connection
 
 logger = logging.getLogger("testflow.batch_queue")
@@ -86,8 +87,8 @@ def drain_legacy_redis_batches() -> None:
         batch_id = str(raw)
         try:
             service.dispatch_batch(batch_id)
-        except Exception:
-            logger.exception("Could not dispatch leftover batch %s", batch_id)
+        except Exception as exc:
+            log_failure(logger, f"batch.dispatch_leftover batch_id={batch_id}", exc)
 
 
 def dispatch_once(service, batch_id: str) -> bool:
@@ -96,9 +97,9 @@ def dispatch_once(service, batch_id: str) -> bool:
             return False
         _inflight_batches.add(batch_id)
     try:
-        print(f"Dispatching batch {batch_id}", flush=True)
+        logger.info("batch.dispatch started batch_id=%s", batch_id)
         service.dispatch_batch(batch_id)
-        print(f"Batch {batch_id} dispatched", flush=True)
+        logger.info("batch.dispatch completed batch_id=%s", batch_id)
         return True
     finally:
         with _inflight_guard:
@@ -156,11 +157,12 @@ def consume_forever() -> None:
     service = get_execution_service()
     try:
         drain_legacy_redis_batches()
-    except Exception:
-        logger.exception("Could not drain leftover Redis batches")
+    except Exception as exc:
+        log_failure(logger, "batch.drain_leftover", exc)
 
     queue_missing = False
     while True:
+        bind_background("batch-queue")
         try:
             item = read_batch()
             queue_missing = False
@@ -174,15 +176,17 @@ def consume_forever() -> None:
             text = str(exc)
             if "PGRST202" in text or "PGRST205" in text:
                 if not queue_missing:
-                    print(
-                        "Batch queue is not installed. Apply supabase/migrations/20261007_batch_queue.sql",
-                        flush=True,
+                    log_failure(
+                        logger,
+                        "batch.queue",
+                        exc,
+                        level=logging.WARNING,
+                        dedupe_seconds=300,
                     )
                     queue_missing = True
                 time.sleep(30)
                 continue
-            print(f"Batch queue error: {exc}", flush=True)
-            logger.exception("Batch queue consumer error")
+            log_failure(logger, "batch.queue", exc)
             time.sleep(1)
 
 
@@ -195,8 +199,9 @@ def promote_scheduled_forever(stop: threading.Event) -> None:
 
     service = get_execution_service()
     while not stop.is_set():
+        bind_background("scheduled-batches")
         try:
             service.promote_due_batches()
-        except Exception:
-            logger.exception("event=scheduled_batch_promote_error")
+        except Exception as exc:
+            log_failure(logger, "schedule.promote", exc)
         stop.wait(SCHEDULE_POLL_SECONDS)

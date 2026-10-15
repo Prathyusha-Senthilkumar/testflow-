@@ -302,10 +302,14 @@ class GitHubService:
         except GitHubError as exc:
             message = explain(exc, owner, name)
             self.repository.update_issue(run_id, {"state": "error", "last_error": message})
-            logger.warning("event=github_issue_failed run_id=%s status=%s", run_id, exc.status)
-        except Exception:
+            from app.logging_format import log_failure
+
+            log_failure(logger, f"github.issue run_id={run_id}", exc, level=logging.WARNING)
+        except Exception as exc:
             self.repository.update_issue(run_id, {"state": "error", "last_error": "Attest hit an unexpected error filing this issue."})
-            logger.exception("event=github_issue_error run_id=%s", run_id)
+            from app.logging_format import log_failure
+
+            log_failure(logger, f"github.issue run_id={run_id}", exc)
 
     def _upload_artifacts(self, client: GitHubClient, report: dict, connection: dict) -> tuple[list[dict], Optional[str], Optional[str]]:
         """Commit screenshots and the PDF. A refusal here still files the issue, with a note."""
@@ -331,7 +335,9 @@ class GitHubService:
             if exc.status in (401, 0) or "rate limit" in (exc.message or "").lower():
                 raise
             note = explain(exc, client.owner, client.repo, action="contents")
-            logger.warning("event=github_upload_skipped run_id=%s status=%s", run_id, exc.status)
+            from app.logging_format import log_failure
+
+            log_failure(logger, f"github.upload run_id={run_id}", exc, level=logging.WARNING)
             return [{**step, "index": i, "url": None} for i, step in enumerate(steps[:_MAX_STEP_IMAGES])], None, note
 
     def pdf(self, run_id: str) -> tuple[bytes, str]:
@@ -493,8 +499,11 @@ github_service = GitHubService()
 
 
 def poll_issues_forever(stop: threading.Event) -> None:
+    from app.logging_format import bind_background, log_failure
+
     while not stop.wait(max(5, settings.GITHUB_ISSUE_POLL_SECONDS)):
+        bind_background("github-poll")
         try:
             github_service.poll_once()
-        except Exception:
-            logger.exception("event=github_issue_poll_failed")
+        except Exception as exc:
+            log_failure(logger, "github.poll", exc)

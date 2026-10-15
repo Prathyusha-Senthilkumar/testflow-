@@ -13,6 +13,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { runningTitle, useLiveActivity } from "@/hooks/useLiveActivity";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { CardArrow } from "@/components/ui/card";
@@ -72,6 +73,8 @@ export function ProjectOverviewPage() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const projectId = id ?? "";
+  const activity = useLiveActivity(projectId);
+  const remoteProject = activity?.project ?? null;
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -113,7 +116,7 @@ export function ProjectOverviewPage() {
 
   /** Main click runs all categories on the default; "Run on" items run once on that environment. */
   async function runProject(category: SuiteCategory | undefined, targetEnvironmentId: string | undefined) {
-    if (!projectId || startingProject) return;
+    if (!projectId || startingProject || remoteProject) return;
     if (!targetEnvironmentId) {
       if (projectDialogOpen) return;
       warnNoEnvironment();
@@ -134,7 +137,7 @@ export function ProjectOverviewPage() {
   }
 
   async function runSuite(suiteId: string, targetEnvironmentId: string | undefined) {
-    if (!projectId || startingSuiteId) return;
+    if (!projectId || startingSuiteId || activity?.suites.some((item) => item.suiteId === suiteId)) return;
     if (!targetEnvironmentId) {
       warnNoEnvironment();
       return;
@@ -262,16 +265,20 @@ export function ProjectOverviewPage() {
             size="sm"
             variant="outline"
             label="Run suite"
-            runningLabel="Starting…"
+            runningLabel={activity?.suites.some((item) => item.suiteId === row.original.id) ? "Running" : "Starting…"}
             onRun={() => void runSuite(row.original.id, defaultEnvironment?.id)}
             environments={environments}
             selectedEnvironmentId={defaultEnvironment?.id}
             defaultEnvironmentId={defaultEnvironment?.id}
             onRunOn={(envId) => void runSuite(row.original.id, envId)}
-            title={defaultEnvironment ? `Run on ${defaultEnvironment.name}` : undefined}
+            title={runningTitle(
+              Boolean(activity?.suites.some((item) => item.suiteId === row.original.id)),
+              activity?.suites.find((item) => item.suiteId === row.original.id)?.runBy,
+              defaultEnvironment ? `Run on ${defaultEnvironment.name}` : "Run suite"
+            )}
             onSchedule={() => setScheduleTarget({ kind: "suite", id: row.original.id, name: row.original.name })}
-            running={startingSuiteId === row.original.id}
-            disabled={startingSuiteId === row.original.id}
+            running={startingSuiteId === row.original.id || Boolean(activity?.suites.some((item) => item.suiteId === row.original.id))}
+            disabled={startingSuiteId === row.original.id || Boolean(activity?.suites.some((item) => item.suiteId === row.original.id))}
             scheduleDisabled={environments.length === 0}
           />
         ),
@@ -279,7 +286,7 @@ export function ProjectOverviewPage() {
       }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run handlers are recreated each render but only read the state listed here
-    [startingSuiteId, environments, defaultEnvironment]
+    [startingSuiteId, environments, defaultEnvironment, activity]
   );
 
   if (loading) return <OverviewSkeleton />;
@@ -325,7 +332,7 @@ export function ProjectOverviewPage() {
             </Button>
             <RunMenuButton
               label="Run project"
-              runningLabel="Starting project…"
+              runningLabel={remoteProject ? "Running" : "Starting project…"}
               onRun={() => void runProject(undefined, defaultEnvironment?.id)}
               environments={environments}
               selectedEnvironmentId={defaultEnvironment?.id}
@@ -333,9 +340,13 @@ export function ProjectOverviewPage() {
               onRunOn={(envId) => void runProject(undefined, envId)}
               onRunWithOptions={environments.length > 0 ? openProjectRunOptions : undefined}
               onSchedule={() => setScheduleTarget({ kind: "project" })}
-              title={defaultEnvironment ? `Run on ${defaultEnvironment.name}` : "Add an environment to run this project"}
-              running={startingProject && !projectDialogOpen}
-              disabled={startingProject || project.cases === 0}
+              title={runningTitle(
+                Boolean(remoteProject),
+                remoteProject?.runBy,
+                defaultEnvironment ? `Run on ${defaultEnvironment.name}` : "Add an environment to run this project"
+              )}
+              running={Boolean(remoteProject) || (startingProject && !projectDialogOpen)}
+              disabled={Boolean(remoteProject) || startingProject || project.cases === 0}
               scheduleDisabled={project.cases === 0 || environments.length === 0}
             />
           </>

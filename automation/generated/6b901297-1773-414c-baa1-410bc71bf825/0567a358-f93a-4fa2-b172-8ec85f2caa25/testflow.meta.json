@@ -1,0 +1,20 @@
+{
+  "startPath": "/admin/projects",
+  "environmentId": "6e315a16-9a75-4ba8-a988-141b79d4c52c",
+  "authProfileId": "auth-1791470933283",
+  "resolvedStartUrl": "https://evolv-dev.revature.io/admin/projects",
+  "assertions": [
+    {
+      "id": "expected-result",
+      "type": "text_visible",
+      "value": "aaaaaaaaaaaaaa"
+    }
+  ],
+  "storageSeeds": [],
+  "storageAssertions": [],
+  "accessibilityEnabled": false,
+  "networkCheckEnabled": false,
+  "expectedResult": "aaaaaaaaaaaaaa",
+  "recordedModule": "test_recorded.ts",
+  "recordedTestName": "test_example"
+}

@@ -7,7 +7,7 @@ from app.dependencies.auth import current_actor
 
 from app.repositories.test_run_repository import test_run_repository
 from app.schemas.execution import ExecutionStatusResponse
-from app.schemas.test_run import GroupedRun, LatestCaseRun, ReportRun, RunScreenshot, TestRunHistoryItem
+from app.schemas.test_run import GroupedRun, LatestCaseRun, ProjectLiveActivity, ReportRun, RunScreenshot, TestRunHistoryItem
 from app.services import signed_urls
 from app.services.execution_service import get_execution_service
 
@@ -67,6 +67,12 @@ def list_test_runs(
 def list_grouped_runs():
     """Individual runs plus suite and project batches still stored for this execution history."""
     return get_execution_service().list_grouped_runs()
+
+
+@router.get("/live", response_model=ProjectLiveActivity)
+def list_live_activity(projectId: str = Query(..., min_length=1)):
+    """Queued and running work in one project, so every open session can see it."""
+    return get_execution_service().live_activity(projectId)
 
 
 @router.get("/latest", response_model=List[LatestCaseRun])
