@@ -400,7 +400,10 @@ export function ProjectOverviewPage() {
         <DataTable
           columns={columns}
           data={topSuites}
-          getRowId={(suite) => suite.id}
+          getRowId={(suite) => {
+            const live = activity?.suites.find((item) => item.suiteId === suite.id);
+            return `${suite.id}:${live?.status ?? "idle"}`;
+          }}
           onRowClick={(suite) => navigate(`/projects/${project.id}/suites/${suite.id}`)}
           rowLabel={(suite) => `Open suite ${suite.name}`}
           minWidth={820}

@@ -17,6 +17,7 @@ _BATCH_KEY_PREFIX = "testflow:batch:"
 _BATCH_TTL_SECONDS = 60 * 60 * 48
 _NO_SCRIPT_REASON = "No automation script"
 from app.queue.job_store import fetch_job, request_cancel
+from app.queue.redis_oom import REDIS_FULL_MESSAGE, is_redis_oom
 from app.schemas.execution import (
     BatchCaseResult,
     BatchExecutionStatus,
@@ -163,14 +164,21 @@ class ExecutionService:
             )
         except Exception as exc:
             log_failure(_logger, f"run.enqueue job_id={job_id}", exc)
+            oom = is_redis_oom(exc)
             if test_run_id:
                 try:
                     test_run_repository.mark_result(
-                        job_id, "Failed", None, "Test not started: the run could not be queued."
+                        job_id,
+                        "Failed",
+                        None,
+                        REDIS_FULL_MESSAGE if oom else "Test not started: the run could not be queued.",
                     )
                 except Exception as close_exc:
                     log_failure(_logger, f"run.close job_id={job_id}", close_exc)
-            raise HTTPException(status_code=503, detail="Could not queue the test run. Try again.") from exc
+            raise HTTPException(
+                status_code=503,
+                detail=REDIS_FULL_MESSAGE if oom else "Could not queue the test run. Try again.",
+            ) from exc
 
         if run_at is not None:
             remember_schedule(

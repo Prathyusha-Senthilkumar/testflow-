@@ -5,14 +5,18 @@ import { Sparkles } from "lucide-react";
 import { useNavigate, useParams } from "@/lib/navigation";
 import { api, type AgentCase, type AgentJob, type AuthProfileSummary, type EnvironmentSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FieldLabel } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Alert } from "@/components/ui/alert";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageContainer, PageHeader } from "@/components/layout/page-header";
 import { usePublishEntityName } from "@/components/layout/shell-context";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import { CategoryMultiSelect } from "@/components/suites/CategoryMultiSelect";
+import { type SuiteCategory } from "@/lib/suiteCategory";
 
 const WAITING = new Set(["discovering", "planning", "recording"]);
 
@@ -29,6 +33,10 @@ export function AgentPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [suiteCategories, setSuiteCategories] = useState<SuiteCategory[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [runNotice, setRunNotice] = useState("");
+  const confirm = useConfirm();
 
   usePublishEntityName("project", projectId, projectName);
 
@@ -62,6 +70,16 @@ export function AgentPage() {
     return () => window.clearInterval(timer);
   }, [projectId, job]);
 
+  useEffect(() => {
+    if (!job) return;
+    if (job.phase === "review") {
+      setSelected((job.cases || []).map((item) => item.id));
+      return;
+    }
+    if (job.phase !== "draft" && job.phase !== "saved") return;
+    setSelected((job.cases || []).filter(canSave).map((item) => item.id));
+  }, [job?.id, job?.phase]);
+
   const environment = environments.find((item) => item.id === environmentId);
   const finding = job?.phase === "discovering" || job?.phase === "planning";
   const showRecording = Boolean(
@@ -86,6 +104,8 @@ export function AgentPage() {
         authProfileId: authProfileId || undefined,
       });
       setJob(created);
+      setSelected([]);
+      setRunNotice("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "The planner did not start.");
     } finally {
@@ -106,12 +126,33 @@ export function AgentPage() {
     }
   }
 
+  const recommended = (job?.cases || []).filter((item) => job?.phase === "review" && selected.includes(item.id));
+
   async function decide(accepted: boolean) {
     if (!job) return;
+    const ids = (job.cases || []).length > 0 ? recommended.map((item) => item.id) : [];
+    if ((job.cases || []).length > 0 && ids.length === 0) {
+      setError("Choose a recommended test case.");
+      return;
+    }
+    if (!accepted) {
+      await confirm({
+        title: ids.length > 1 ? `Reject ${ids.length} test cases?` : "Reject this test case?",
+        description: "Rejected recommendations are removed. Nothing is recorded.",
+        confirmLabel: "Reject",
+        tone: "danger",
+        onConfirm: async () => {
+          const next = await api.approveAgentJob(projectId, job.id, false, ids);
+          setJob(next);
+          setSelected((next.cases || []).map((item) => item.id));
+        },
+      });
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      setJob(await api.approveAgentJob(projectId, job.id, accepted));
+      setJob(await api.approveAgentJob(projectId, job.id, true, ids));
     } catch (err) {
       setError(err instanceof Error ? err.message : "The plan could not be updated.");
     } finally {
@@ -119,20 +160,106 @@ export function AgentPage() {
     }
   }
 
-  async function saveDraft() {
+  const chosen = (job?.cases || []).filter((item) => selected.includes(item.id));
+  const runnable = chosen.filter(canSave);
+  const needsCategory = runnable.length > 1 && !job?.suiteId;
+
+  async function saveSelected(andRun: boolean) {
     if (!job) return;
+    if (runnable.length === 0) {
+      setError("Choose a recorded test case.");
+      return;
+    }
+    if (needsCategory && suiteCategories.length === 0) {
+      setError("Choose at least one category.");
+      return;
+    }
     setBusy(true);
     setError("");
+    setRunNotice("");
     try {
-      const saved = await api.saveAgentDraft(projectId, job.id);
+      const previousSuite = job.suiteId;
+      const saved = await api.saveAgentDraft(
+        projectId,
+        job.id,
+        needsCategory ? suiteCategories : undefined,
+        runnable.map((item) => item.id)
+      );
       setJob(saved);
-      if (saved.suiteId) navigate(`/projects/${projectId}/suites/${saved.suiteId}`);
-      else if (saved.testCaseId) navigate(`/projects/${projectId}/test-cases/${saved.testCaseId}`);
+      const savedCases = (saved.cases || []).filter((item) => runnable.some((chosenItem) => chosenItem.id === item.id) && item.testCaseId);
+      const leftovers = (saved.cases || []).filter((item) => item.phase === "draft" || item.phase === "recorded" || item.phase === "failed");
+      setSelected(leftovers.filter(canChoose).map((item) => item.id));
+      if (!andRun) {
+        if (!leftovers.length) {
+          if (saved.suiteId) navigate(`/projects/${projectId}/suites/${saved.suiteId}`);
+          else if (saved.testCaseId) navigate(`/projects/${projectId}/test-cases/${saved.testCaseId}`);
+        }
+        return;
+      }
+      const href = await startSavedRun(saved, savedCases, previousSuite);
+      if (leftovers.length) setRunNotice(href || "started");
+      else if (href) navigate(href);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The draft could not be saved.");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function startSavedRun(saved: AgentJob, savedCases: AgentCase[], previousSuite?: string | null) {
+    if (savedCases.length > 1 && saved.suiteId && saved.suiteId !== previousSuite) {
+      const started = await api.startSuiteRun(projectId, saved.suiteId, environmentId);
+      return `/runs/batches/${started.batchId}`;
+    }
+    if (savedCases.length > 1 && saved.suiteId && (saved.cases || []).filter((item) => item.testCaseId).length === savedCases.length) {
+      const started = await api.startSuiteRun(projectId, saved.suiteId, environmentId);
+      return `/runs/batches/${started.batchId}`;
+    }
+    for (const item of savedCases) {
+      if (!item.testCaseId) continue;
+      const testCase = await api.testCase(projectId, item.testCaseId);
+      if (!testCase.testFile) throw new Error("This test case has no recorded steps yet.");
+      await api.startExecution({
+        projectId,
+        testCaseId: testCase.id,
+        testCaseCode: testCase.code,
+        scriptPath: testCase.testFile,
+        environmentId: environmentId || undefined,
+      });
+    }
+    if (savedCases.length === 1 && savedCases[0].testCaseId) {
+      return `/projects/${projectId}/test-cases/${savedCases[0].testCaseId}`;
+    }
+    return "";
+  }
+
+  function toggleSelected(id: string) {
+    setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  }
+
+  function toggleAll() {
+    const ids =
+      job?.phase === "review"
+        ? (job.cases || []).map((item) => item.id)
+        : (job?.cases || []).filter(canChoose).map((item) => item.id);
+    const all = ids.length > 0 && ids.every((id) => selected.includes(id));
+    setSelected(all ? [] : ids);
+  }
+
+  async function deleteSelected() {
+    if (!job || chosen.length === 0) return;
+    await confirm({
+      title: chosen.length === 1 ? "Delete this test case?" : `Delete ${chosen.length} test cases?`,
+      description: "Selected cases are removed from this recording. Cases that were already saved are deleted.",
+      confirmLabel: "Delete",
+      tone: "danger",
+      onConfirm: async () => {
+        const next = await api.removeAgentCases(projectId, job.id, chosen.map((item) => item.id));
+        setJob(next);
+        setSelected((next.cases || []).filter(canChoose).map((item) => item.id));
+        setRunNotice("");
+      },
+    });
   }
 
   return (
@@ -204,10 +331,19 @@ export function AgentPage() {
             ) : null}
             {job && !finding && job.phase !== "rejected" && (job.cases || []).length > 1 ? (
               <p className="text-[13px] text-muted-foreground">
-                {job.cases?.length} test cases. Saved cases are grouped into one suite.
+                {job.phase === "review"
+                  ? `${job.cases?.length} test cases. Choose which ones to record.`
+                  : `${job.cases?.length} test cases. Saved cases are grouped into one suite.`}
               </p>
             ) : null}
-            {job && !finding && job.phase !== "rejected" && (job.cases || []).length > 0 ? <CaseList cases={job.cases || []} /> : null}
+            {job && !finding && job.phase !== "rejected" && (job.cases || []).length > 0 ? (
+              <CaseList
+                cases={job.cases || []}
+                selected={job.phase === "review" ? selected : undefined}
+                onToggle={job.phase === "review" ? toggleSelected : undefined}
+                onToggleAll={job.phase === "review" ? toggleAll : undefined}
+              />
+            ) : null}
             {job && !finding && job.phase !== "rejected" && !(job.cases || []).length && job.steps.length > 0 ? (
               <StepList steps={job.steps} expected={job.expected} path={job.startPath} />
             ) : null}
@@ -230,11 +366,19 @@ export function AgentPage() {
             ) : null}
           </CardContent>
           {job?.phase === "review" ? (
-            <CardFooter>
-              <Button variant="outline" onClick={() => void decide(false)} disabled={busy}>
+            <CardFooter className="flex-wrap">
+              <Button
+                variant="destructive"
+                onClick={() => void decide(false)}
+                disabled={busy || ((job.cases || []).length > 0 && recommended.length === 0)}
+              >
                 Reject
               </Button>
-              <Button onClick={() => void decide(true)} loading={busy}>
+              <Button
+                onClick={() => void decide(true)}
+                loading={busy}
+                disabled={(job.cases || []).length > 0 && recommended.length === 0}
+              >
                 Accept and record
               </Button>
             </CardFooter>
@@ -252,15 +396,62 @@ export function AgentPage() {
           {job?.phase === "recording" ? (
             <LoadingSpinner compact label="Recording the accepted cases, up to 3 at a time." />
           ) : null}
-          {showRecording && job ? <RecordingList cases={job.cases || []} running={job.phase === "recording"} /> : null}
+          {showRecording && job ? (
+            <RecordingList
+              cases={job.cases || []}
+              running={job.phase === "recording"}
+              selected={selected}
+              onToggle={toggleSelected}
+              onToggleAll={toggleAll}
+            />
+          ) : null}
           {job?.phase === "failed" && showRecording ? <Alert variant="error">{job.error || "Recording stopped."}</Alert> : null}
+          {runNotice ? (
+            <Alert
+              variant="success"
+              action={
+                runNotice.startsWith("/") ? (
+                  <Button variant="outline" onClick={() => navigate(runNotice)}>
+                    View run
+                  </Button>
+                ) : undefined
+              }
+            >
+              Saved the selected cases and started the run. The others are still here.
+            </Alert>
+          ) : null}
+          {needsCategory && (job?.phase === "draft" || job?.phase === "saved") ? (
+            <CategoryMultiSelect required value={suiteCategories} onChange={setSuiteCategories} />
+          ) : null}
         </CardContent>
           {job && (job.phase === "draft" || job.phase === "saved" || (job.phase === "failed" && showRecording)) ? (
-            <CardFooter>
+            <CardFooter className="flex-wrap">
               {job.phase === "draft" || job.phase === "saved" ? (
-                <Button onClick={() => void saveDraft()} loading={busy}>
-                  {(job.cases?.length || 0) > 1 ? "Save test cases" : "Save as test case"}
-                </Button>
+                (job.cases || []).length > 0 ? (
+                  <>
+                    <Button variant="destructive" onClick={() => void deleteSelected()} disabled={busy || chosen.length === 0}>
+                      Delete
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => void saveSelected(false)}
+                      disabled={busy || runnable.length === 0 || (needsCategory && suiteCategories.length === 0)}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      onClick={() => void saveSelected(true)}
+                      loading={busy}
+                      disabled={runnable.length === 0 || (needsCategory && suiteCategories.length === 0)}
+                    >
+                      Save and run
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="outline" onClick={() => setJob(null)}>
+                    Start over
+                  </Button>
+                )
               ) : (
                 <Button variant="outline" onClick={() => setJob(null)}>
                   Start over
@@ -275,11 +466,42 @@ export function AgentPage() {
   );
 }
 
-function CaseList({ cases }: { cases: AgentCase[] }) {
+function CaseList({
+  cases,
+  selected,
+  onToggle,
+  onToggleAll,
+}: {
+  cases: AgentCase[];
+  selected?: string[];
+  onToggle?: (id: string) => void;
+  onToggleAll?: () => void;
+}) {
+  const choosing = Boolean(onToggle && selected);
+  const all = choosing && cases.length > 0 && cases.every((item) => selected?.includes(item.id));
   return (
     <div className="flex flex-col divide-y divide-border">
+      {choosing && cases.length > 1 ? (
+        <label className="flex items-center gap-2 pb-3 text-[13px] text-muted-foreground">
+          <Checkbox
+            aria-label="Select all recommended test cases"
+            checked={all ? true : selected?.some((id) => cases.some((item) => item.id === id)) ? "indeterminate" : false}
+            onCheckedChange={onToggleAll}
+          />
+          Select all
+        </label>
+      ) : null}
       {cases.map((item, index) => (
-        <div key={item.id || `${item.path}-${index}`} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
+        <div key={item.id || `${item.path}-${index}`} className="flex items-start gap-2 py-3 first:pt-0 last:pb-0">
+          {choosing ? (
+            <Checkbox
+              className="mt-0.5"
+              aria-label={`Select ${item.name}`}
+              checked={selected?.includes(item.id)}
+              onCheckedChange={() => onToggle?.(item.id)}
+            />
+          ) : null}
+          <div className="flex min-w-0 flex-col gap-1">
           <p className="text-sm font-medium">
             {index + 1}. {item.name}
           </p>
@@ -295,6 +517,7 @@ function CaseList({ cases }: { cases: AgentCase[] }) {
             </ol>
           ) : null}
           {item.expected ? <p className="text-[13px] text-muted-foreground">Expected: {item.expected}</p> : null}
+          </div>
         </div>
       ))}
     </div>
@@ -326,23 +549,66 @@ function StepList({
   );
 }
 
-function RecordingList({ cases, running }: { cases: AgentCase[]; running: boolean }) {
+function canChoose(item: AgentCase) {
+  return item.phase === "draft" || item.phase === "saved" || item.phase === "failed" || item.phase === "recorded";
+}
+
+function canSave(item: AgentCase) {
+  return item.phase === "draft" || item.phase === "saved";
+}
+
+function RecordingList({
+  cases,
+  running,
+  selected,
+  onToggle,
+  onToggleAll,
+}: {
+  cases: AgentCase[];
+  running: boolean;
+  selected: string[];
+  onToggle: (id: string) => void;
+  onToggleAll: () => void;
+}) {
   if (cases.length === 0) {
     return running ? null : <p className="text-[13px] text-muted-foreground">No cases were recorded.</p>;
   }
+  const choosable = cases.filter(canChoose);
+  const all = choosable.length > 0 && choosable.every((item) => selected.includes(item.id));
   return (
     <div className="flex flex-col divide-y divide-border">
+      {!running && choosable.length > 1 ? (
+        <label className="flex items-center gap-2 pb-3 text-[13px] text-muted-foreground">
+          <Checkbox
+            aria-label="Select all test cases"
+            checked={all ? true : selected.some((id) => choosable.some((item) => item.id === id)) ? "indeterminate" : false}
+            onCheckedChange={onToggleAll}
+          />
+          Select all
+        </label>
+      ) : null}
       {cases.map((item, index) => {
         const pending = running && item.phase !== "failed" && item.phase !== "recorded" && item.phase !== "draft" && item.phase !== "saved";
         const done = item.phase === "recorded" || item.phase === "draft" || item.phase === "saved";
+        const choice = !running && canChoose(item);
         return (
           <div key={item.id || `${item.path}-${index}`} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-            <div className="min-w-0">
-              <p className="text-sm font-medium">
-                {index + 1}. {item.name}
-              </p>
-              <p className="truncate text-[13px] text-muted-foreground">{item.path}</p>
-              {item.error ? <p className="text-[13px] text-muted-foreground">{item.error}</p> : null}
+            <div className="flex min-w-0 items-start gap-2">
+              {choice ? (
+                <Checkbox
+                  className="mt-0.5"
+                  aria-label={`Select ${item.name}`}
+                  checked={selected.includes(item.id)}
+                  onCheckedChange={() => onToggle(item.id)}
+                />
+              ) : null}
+              <div className="min-w-0">
+                <p className="text-sm font-medium">
+                  {index + 1}. {item.name}
+                </p>
+                <p className="truncate text-[13px] text-muted-foreground">{item.path}</p>
+                {item.error ? <p className="text-[13px] text-muted-foreground">{item.error}</p> : null}
+              </div>
             </div>
             {pending ? <LoadingSpinner compact label="Recording…" /> : null}
             {done ? <p className="shrink-0 text-[13px] text-muted-foreground">Recorded</p> : null}

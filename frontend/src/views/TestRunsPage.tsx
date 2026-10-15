@@ -559,14 +559,15 @@ export function TestRunsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    // Poll only while some run is queued/running; pauses while the tab is hidden.
+    // Keep polling while this tab is open so a run started elsewhere appears without a refresh.
     const stop = pollWhileVisible(async () => {
       try {
         const [items, reports] = await Promise.all([api.groupedRuns(), api.reportRuns().catch(() => [] as ReportRun[])]);
         if (cancelled) return false;
         setRuns(mergeHistory(items, reports));
         setError("");
-        return items.some(isLive);
+        // Keep watching after the list is idle, so a run started in another tab shows up here.
+        return true;
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not load test runs");
         return true;

@@ -290,7 +290,7 @@ export function TestCasesPage() {
       caseColumns.accessor((t) => caseStatus(latestRunByCase.get(t.id)), {
         id: "status",
         header: "Status",
-        cell: ({ getValue }) => <RunStatusBadge status={getValue<string>()} />,
+        cell: ({ row }) => <RunStatusBadge status={caseStatus(latestRunByCase.get(row.original.id))} />,
       }),
       caseColumns.accessor((t) => runTime(latestRunByCase.get(t.id) ?? { status: "" }), {
         id: "lastRun",
@@ -307,7 +307,7 @@ export function TestCasesPage() {
       caseColumns.accessor((t) => latestRunByCase.get(t.id)?.runBy ?? "", {
         id: "runBy",
         header: "Run by",
-        cell: ({ getValue }) => <span className="text-[13px] text-muted-foreground">{getValue<string>() || "—"}</span>,
+        cell: ({ row }) => <span className="text-[13px] text-muted-foreground">{latestRunByCase.get(row.original.id)?.runBy || "—"}</span>,
       }),
       caseColumns.display({
         id: "delete",
@@ -442,7 +442,7 @@ export function TestCasesPage() {
         <DataTable
           columns={columns}
           data={rows}
-          getRowId={(t) => t.id}
+          getRowId={(t) => `${t.id}:${caseStatus(latestRunByCase.get(t.id))}:${latestRunByCase.get(t.id)?.startedAt ?? ""}`}
           loading={loading}
           loadingLabel="Loading test cases…"
           minWidth={1050}
@@ -507,7 +507,7 @@ export function TestCasesPage() {
             <DataTable
               columns={columns}
               data={archivedRows}
-              getRowId={(testCase) => testCase.id}
+              getRowId={(testCase) => `${testCase.id}:${caseStatus(latestRunByCase.get(testCase.id))}:${latestRunByCase.get(testCase.id)?.startedAt ?? ""}`}
               minWidth={1050}
               onRowClick={(testCase) => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
               rowLabel={(testCase) => `Open ${testCase.code} ${testCase.name}`}

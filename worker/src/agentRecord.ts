@@ -2,6 +2,7 @@ import type { Browser, BrowserContext, Page } from "playwright";
 import type { Redis } from "ioredis";
 import { AuthProfileError, ensureAuthenticatedSession, loadAuthProfile } from "./authProfiles.js";
 import { revealLocator } from "./reveal.js";
+import { REDIS_FULL_MESSAGE, isRedisOom, noteRedisOom, redisWriteDelayMs } from "./redisOom.js";
 
 const JOB_PREFIX = "testflow:agent:job:";
 export const AGENT_QUEUE = "testflow:agent:queue";
@@ -50,14 +51,39 @@ export async function consumeAgentQueue(
   const blocking = redis.duplicate();
   try {
     while (!stopping()) {
-      const item = await blocking.brpop(AGENT_QUEUE, 5);
+      const paused = redisWriteDelayMs();
+      if (paused > 0) {
+        await sleep(Math.min(paused, 5_000));
+        continue;
+      }
+      let item: [string, string] | null;
+      try {
+        item = await blocking.brpop(AGENT_QUEUE, 5);
+      } catch (error) {
+        if (stopping()) break;
+        if (isRedisOom(error)) {
+          const waitMs = noteRedisOom();
+          console.error(`event=redis_full action=agent_claim wait_ms=${waitMs}`);
+          continue;
+        }
+        console.error("event=agent_claim_failed");
+        await sleep(1000);
+        continue;
+      }
       if (!item) continue;
       const jobId = item[1];
-      const job = await readJob(redis, jobId);
+      let job: AgentJob | null = null;
       try {
+        job = await readJob(redis, jobId);
         if (job?.phase === "discovering") await discoverJob(redis, jobId, await openBrowser(), repoRoot);
         else await recordJob(redis, jobId, await openBrowser(), repoRoot);
       } catch (error) {
+        if (isRedisOom(error)) {
+          const waitMs = noteRedisOom();
+          console.error(`event=redis_full action=agent_job job=${jobId} wait_ms=${waitMs}`);
+          await rememberAgentFailure(redis, jobId, stopping);
+          continue;
+        }
         const detail = error instanceof Error ? error.message.split("\n")[0].slice(0, 180) : "Recording failed.";
         console.error(`event=agent_job_failed job=${jobId} phase=${job?.phase || ""} error=${detail}`);
         const message = error instanceof AuthProfileError
@@ -65,7 +91,14 @@ export async function consumeAgentQueue(
           : job?.phase === "discovering"
             ? `Could not open the app to find a page. ${detail}`
             : detail;
-        await writePhase(redis, jobId, "failed", message);
+        try {
+          await writePhase(redis, jobId, "failed", message);
+        } catch (writeError) {
+          if (!isRedisOom(writeError)) throw writeError;
+          const waitMs = noteRedisOom();
+          console.error(`event=redis_full action=agent_job job=${jobId} wait_ms=${waitMs}`);
+          await rememberAgentFailure(redis, jobId, stopping);
+        }
       }
     }
   } finally {
@@ -245,6 +278,7 @@ async function recordCase(
       diary: outcome.diary,
     });
   } catch (error) {
+    if (isRedisOom(error)) throw error;
     const message = error instanceof AuthProfileError
       ? error.message
       : "This test case could not be recorded.";
@@ -357,6 +391,31 @@ export function pick(step: Step, controls: Control[]): Control | null {
   if (exact.length === 1) return exact[0];
   const partial = controls.filter((item) => item.name.toLowerCase().includes(wanted));
   return partial.length === 1 ? partial[0] : null;
+}
+
+async function rememberAgentFailure(redis: Redis, jobId: string, stopping: () => boolean): Promise<void> {
+  while (!stopping()) {
+    const paused = redisWriteDelayMs();
+    if (paused > 0) {
+      await sleep(Math.min(paused, 5_000));
+      continue;
+    }
+    try {
+      await writePhase(redis, jobId, "failed", REDIS_FULL_MESSAGE);
+      return;
+    } catch (error) {
+      if (!isRedisOom(error)) {
+        console.error(`event=agent_job_failed job=${jobId}`);
+        return;
+      }
+      const waitMs = noteRedisOom();
+      console.error(`event=redis_full action=agent_job job=${jobId} wait_ms=${waitMs}`);
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function readJob(redis: Redis, jobId: string): Promise<AgentJob | null> {

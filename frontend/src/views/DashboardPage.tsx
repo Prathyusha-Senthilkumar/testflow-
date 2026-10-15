@@ -130,26 +130,27 @@ function DashboardContent() {
     return () => stops.forEach((stop) => stop());
   }, [refresh]);
 
-  // Poll recent runs while anything is queued/running; refresh history once they settle.
+  // Keep polling while the dashboard is open so a run started elsewhere shows up without a refresh.
   const hasLive = Boolean(data?.groupedRuns.some((run) => isActiveStatus(run.status)));
+  const hadLive = useRef(false);
   useEffect(() => {
-    if (!hasLive) return;
+    hadLive.current = hasLive;
+  }, [hasLive]);
+  useEffect(() => {
     return pollWhileVisible(async () => {
       try {
         const grouped = await api.groupedRuns();
         const stillLive = grouped.some((run) => isActiveStatus(run.status));
-        if (stillLive) {
-          setData((current) => (current ? { ...current, groupedRuns: grouped } : current));
-          setNow(Date.now());
-          return true;
-        }
-        await refresh();
-        return false;
+        setData((current) => (current ? { ...current, groupedRuns: grouped } : current));
+        setNow(Date.now());
+        if (hadLive.current && !stillLive) await refresh();
+        hadLive.current = stillLive;
+        return true;
       } catch {
         return true;
       }
     }, 4000);
-  }, [hasLive, refresh]);
+  }, [refresh]);
 
   function setParam(key: "range" | "project", value: string) {
     const next = new URLSearchParams(params?.toString() ?? "");

@@ -14,6 +14,7 @@ from typing import Any
 from app.database import get_supabase_client
 from app.logging_format import bind_background, log_failure
 from app.queue.connection import get_redis_connection
+from app.queue.redis_oom import is_redis_oom, oom_backoff_seconds
 
 logger = logging.getLogger("testflow.batch_queue")
 
@@ -89,6 +90,11 @@ def drain_legacy_redis_batches() -> None:
             service.dispatch_batch(batch_id)
         except Exception as exc:
             log_failure(logger, f"batch.dispatch_leftover batch_id={batch_id}", exc)
+            if is_redis_oom(exc):
+                delay = oom_backoff_seconds()
+                logger.warning("event=redis_full action=batch_drain wait_s=%.0f", delay)
+                time.sleep(delay)
+                return
 
 
 def dispatch_once(service, batch_id: str) -> bool:
@@ -173,6 +179,11 @@ def consume_forever() -> None:
             if dispatch_once(service, item["batch_id"]):
                 archive_batch(item.get("msg_id"))
         except Exception as exc:
+            if is_redis_oom(exc):
+                delay = oom_backoff_seconds()
+                logger.warning("event=redis_full action=batch_queue wait_s=%.0f", delay)
+                time.sleep(delay)
+                continue
             text = str(exc)
             if "PGRST202" in text or "PGRST205" in text:
                 if not queue_missing:
@@ -203,5 +214,10 @@ def promote_scheduled_forever(stop: threading.Event) -> None:
         try:
             service.promote_due_batches()
         except Exception as exc:
+            if is_redis_oom(exc):
+                delay = oom_backoff_seconds()
+                logger.warning("event=redis_full action=schedule_promote wait_s=%.0f", delay)
+                stop.wait(delay)
+                continue
             log_failure(logger, "schedule.promote", exc)
         stop.wait(SCHEDULE_POLL_SECONDS)

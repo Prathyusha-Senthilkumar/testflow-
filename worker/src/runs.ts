@@ -34,6 +34,11 @@ async function update(
   return Array.isArray(data) && data.length > 0;
 }
 
+/** Attach a message while the run is still Queued or Running. A later finish replaces it. */
+export function noteRedisFull(jobId: string, message: string, db?: SupabaseClient | null): Promise<boolean> {
+  return update(jobId, { error_message: message }, ACTIVE, db);
+}
+
 export function markRunning(jobId: string, db?: SupabaseClient | null): Promise<boolean> {
   return update(jobId, { status: "Running", started_at: new Date().toISOString() }, ["Queued"], db);
 }

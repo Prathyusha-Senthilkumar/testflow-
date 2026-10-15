@@ -746,13 +746,21 @@ export const api = {
     }),
   agentJob: (projectId: string, jobId: string) =>
     request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}`, {}, { live: true }),
-  approveAgentJob: (projectId: string, jobId: string, accepted: boolean) =>
+  approveAgentJob: (projectId: string, jobId: string, accepted: boolean, caseIds?: string[]) =>
     request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/approval`, {
       method: "POST",
-      body: JSON.stringify({ accepted }),
+      body: JSON.stringify({ accepted, caseIds: caseIds ?? [] }),
     }),
-  saveAgentDraft: (projectId: string, jobId: string) =>
-    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/save`, { method: "POST" }),
+  saveAgentDraft: (projectId: string, jobId: string, categories?: string[], caseIds?: string[]) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/save`, {
+      method: "POST",
+      body: JSON.stringify({ categories: categories ?? [], caseIds: caseIds ?? [] }),
+    }),
+  removeAgentCases: (projectId: string, jobId: string, caseIds: string[]) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/cases/remove`, {
+      method: "POST",
+      body: JSON.stringify({ caseIds }),
+    }),
   chooseAgentPage: (projectId: string, jobId: string, path: string) =>
     request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/page`, {
       method: "POST",
