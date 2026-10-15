@@ -18,7 +18,6 @@ import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { CardArrow } from "@/components/ui/card";
 import { api, type EnvironmentSummary, type ProjectDetail, type ProjectInput, type SuiteSummary } from "@/lib/api";
 import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS, type SuiteCategory } from "@/lib/suiteCategory";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Modal } from "@/components/ui/modal";
@@ -96,17 +95,6 @@ export function ProjectOverviewPage() {
     api.project(projectId).then(setProject).catch((err: Error) => setError(err.message)).finally(() => setLoading(false));
     api.environments(projectId).then(setEnvironments).catch(() => setEnvironments([]));
   }, [projectId]);
-
-  async function toggleArchive() {
-    if (!project) return;
-    try {
-      const next = await api.archiveProject(project.id, !project.archived);
-      setProject(next);
-      toast.success(next.archived ? "Project archived" : "Project restored");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update the project");
-    }
-  }
 
   function warnNoEnvironment() {
     toast.error("No environments configured", {
@@ -323,14 +311,10 @@ export function ProjectOverviewPage() {
           >
             {project.baseUrl}
             <ExternalLink className="size-3" aria-hidden />
-            {project.archived ? <Badge variant="outline">Archived</Badge> : null}
           </a>
         }
         actions={
           <>
-            <Button variant="outline" onClick={() => void toggleArchive()}>
-              {project.archived ? "Unarchive" : "Archive"}
-            </Button>
             <Button variant="outline" onClick={() => setEditOpen(true)}>
               <Pencil />
               Edit
@@ -387,8 +371,6 @@ export function ProjectOverviewPage() {
         onCancel={(item) => void scheduled.cancel(item)}
       />
 
-      <ScopedRunHistory projectId={project.id} />
-
       <section className="space-y-3">
         {/* Overview shows the top suites only; the full list lives on the Suites page (count is on the tile above). */}
         <SectionHeader
@@ -427,6 +409,8 @@ export function ProjectOverviewPage() {
           }
         />
       </section>
+
+      <ScopedRunHistory projectId={project.id} />
 
       <Modal
         open={projectDialogOpen}

@@ -570,6 +570,7 @@ export function TestRunsPage() {
   }, []);
 
   const openedProjectId = searchParams.get("project");
+  const openedSuiteId = searchParams.get("suite");
   const [projectSuites, setProjectSuites] = useState<TestSuiteSummary[]>([]);
   const [suitesLoading, setSuitesLoading] = useState(false);
 
@@ -596,10 +597,18 @@ export function TestRunsPage() {
     };
   }, [openedProjectId]);
   const openedProjectName = runs.find((run) => run.projectId === openedProjectId)?.projectName || "Project";
+  const openedSuite = projectSuites.find((suite) => suite.id === openedSuiteId);
   const openedRuns = useMemo(
     () => (openedProjectId ? runs.filter((run) => run.projectId === openedProjectId) : []),
     [runs, openedProjectId]
   );
+  const projectHistoryRuns = useMemo(() => openedRuns.filter((run) => run.runType === "project"), [openedRuns]);
+  const suiteHistoryRuns = useMemo(() => {
+    if (!openedSuiteId) return [];
+    return openedRuns.filter(
+      (run) => run.runType === "suite" && (run.suiteId === openedSuiteId || (openedSuite ? run.title === openedSuite.name : false))
+    );
+  }, [openedRuns, openedSuiteId, openedSuite]);
   const openedSuites = useMemo(() => {
     const suiteRuns = openedRuns.filter((run) => run.runType === "suite");
     return projectSuites.map((suite) => {
@@ -639,7 +648,7 @@ export function TestRunsPage() {
     }
     if (run.historyOnly) {
       if (run.runType === "suite" && run.projectId && run.suiteId) {
-        navigate(`/projects/${run.projectId}/suites/${run.suiteId}`);
+        navigate(`/runs?project=${run.projectId}&suite=${run.suiteId}`);
         return;
       }
       if (run.projectId) navigate(`/runs?project=${run.projectId}`);
@@ -687,7 +696,33 @@ export function TestRunsPage() {
         </TabsContent>
 
         <TabsContent value="history">
-      {openedProjectId ? (
+      {openedSuiteId && openedProjectId ? (
+        <div className="flex flex-col gap-8">
+          <SectionHeader
+            title={openedSuite?.name || "Suite"}
+            actions={
+              <Button variant="outline" size="sm" onClick={() => navigate(`/runs?project=${openedProjectId}`)}>
+                <ArrowLeft />
+                Back to project
+              </Button>
+            }
+          />
+          <section className="flex flex-col gap-3">
+            <SectionHeader title="Run history" count={loading ? undefined : suiteHistoryRuns.length} />
+            <DataTable
+              columns={columns}
+              data={suiteHistoryRuns}
+              getRowId={(run) => `${run.runType}-${run.id}`}
+              loading={loading}
+              loadingLabel="Loading suite run history…"
+              minWidth={960}
+              onRowClick={openRun}
+              rowLabel={(run) => `Open suite run ${run.title}`}
+              empty={<EmptyState size="sm" icon={Layers} title="No suite runs yet" />}
+            />
+          </section>
+        </div>
+      ) : openedProjectId ? (
         <div className="flex flex-col gap-8">
           <SectionHeader
             title={openedProjectName}
@@ -706,23 +741,23 @@ export function TestRunsPage() {
               getRowId={(suite) => suite.id}
               loading={suitesLoading}
               loadingLabel="Loading test suites…"
-              onRowClick={(suite) => navigate(`/projects/${openedProjectId}/suites/${suite.id}`)}
+              onRowClick={(suite) => navigate(`/runs?project=${openedProjectId}&suite=${suite.id}`)}
               rowLabel={(suite) => `Open suite ${suite.name}`}
               empty={<EmptyState size="sm" icon={Layers} title="No test suites in this project" />}
             />
           </section>
           <section className="flex flex-col gap-3">
-            <SectionHeader title="Run history" count={loading ? undefined : openedRuns.length} />
+            <SectionHeader title="Run history" count={loading ? undefined : projectHistoryRuns.length} />
             <DataTable
               columns={columns}
-              data={openedRuns}
+              data={projectHistoryRuns}
               getRowId={(run) => `${run.runType}-${run.id}`}
               loading={loading}
               loadingLabel="Loading project run history…"
               minWidth={960}
               onRowClick={openRun}
-              rowLabel={(run) => `Open ${TYPE_LABELS[run.runType]} run ${run.title}`}
-              empty={<EmptyState size="sm" icon={History} title="No runs for this project yet" />}
+              rowLabel={(run) => `Open project run ${run.title}`}
+              empty={<EmptyState size="sm" icon={History} title="No project runs yet" />}
             />
           </section>
         </div>

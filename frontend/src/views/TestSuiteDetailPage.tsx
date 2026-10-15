@@ -50,6 +50,7 @@ export function TestSuiteDetailPage() {
     () => new Set((suite?.testCases ?? []).map((testCase) => testCase.id)),
     [suite]
   );
+  const activeCases = useMemo(() => (suite?.testCases ?? []).filter((testCase) => !testCase.archived), [suite]);
 
   useEffect(() => {
     if (!projectId || !suiteId) return;
@@ -333,7 +334,7 @@ export function TestSuiteDetailPage() {
       <section className="flex flex-col gap-3">
         <SectionHeader
           title="Test cases"
-          count={suite.testCases.length}
+          count={activeCases.length}
           actions={
             <>
               <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
@@ -353,15 +354,15 @@ export function TestSuiteDetailPage() {
         />
         <DataTable
           columns={columns}
-          data={suite.testCases}
+          data={activeCases}
           getRowId={(testCase) => testCase.id}
-          searchable={suite.testCases.length > 0}
+          searchable={activeCases.length > 0}
           searchPlaceholder="Search test cases…"
           onRowClick={(testCase) => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
           rowLabel={(testCase) => `Open ${testCase.code} ${testCase.name}`}
           minWidth={760}
           empty={
-            suite.testCases.length > 0 ? undefined : (
+            activeCases.length > 0 ? undefined : (
               <EmptyState
                 icon={FileCheck2}
                 title="No test cases in this suite"
@@ -391,7 +392,7 @@ export function TestSuiteDetailPage() {
       <AddTestCasesModal
         open={addOpen}
         loading={busy}
-        testCases={projectCases}
+        testCases={projectCases.filter((testCase) => !testCase.archived)}
         alreadyInSuite={inSuite}
         onClose={() => setAddOpen(false)}
         onSubmit={handleAdd}

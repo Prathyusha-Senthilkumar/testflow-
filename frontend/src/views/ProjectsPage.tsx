@@ -62,10 +62,7 @@ function ProjectTile({ project }: { project: ProjectSummary }) {
         <span className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-elevated text-muted-foreground group-hover:text-brand-accent">
           <FolderKanban className="size-4" aria-hidden />
         </span>
-        <span className="flex items-center gap-2">
-          {project.archived ? <Badge variant="outline">Archived</Badge> : null}
-          <Badge variant={passRateVariant(project)}>{project.passRate}% passed</Badge>
-        </span>
+        <Badge variant={passRateVariant(project)}>{project.passRate}% passed</Badge>
       </div>
       <h2 className="mt-3 truncate text-sm font-semibold text-foreground" data-card-title>
         <Link

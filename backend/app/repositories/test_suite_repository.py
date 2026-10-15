@@ -37,12 +37,13 @@ class TestSuiteRepository:
 
     # ---- Supabase helpers -------------------------------------------------
     def _count_cases(self, suite_id: str) -> int:
-        res = (
-            self.db.from_("test_cases")
-            .select("id", count="exact")
-            .eq("suite_id", suite_id)
-            .execute()
-        )
+        query = self.db.from_("test_cases").select("id", count="exact").eq("suite_id", suite_id)
+        try:
+            res = query.eq("archived", False).execute()
+        except Exception as exc:
+            if "archived" not in str(exc).lower():
+                raise
+            res = self.db.from_("test_cases").select("id", count="exact").eq("suite_id", suite_id).execute()
         if getattr(res, "count", None) is not None:
             return int(res.count)
         return len(res.data or [])
@@ -70,16 +71,30 @@ class TestSuiteRepository:
     def _case_counts(self, suite_ids: List[str]) -> Dict[str, int]:
         if not suite_ids:
             return {}
-        rows = (
-            self.db.from_("test_cases")
-            .select("suite_id")
-            .in_("suite_id", suite_ids)
-            .execute()
-            .data
-            or []
-        )
+        try:
+            rows = (
+                self.db.from_("test_cases")
+                .select("suite_id,archived")
+                .in_("suite_id", suite_ids)
+                .execute()
+                .data
+                or []
+            )
+        except Exception as exc:
+            if "archived" not in str(exc).lower():
+                raise
+            rows = (
+                self.db.from_("test_cases")
+                .select("suite_id")
+                .in_("suite_id", suite_ids)
+                .execute()
+                .data
+                or []
+            )
         counts: Dict[str, int] = {}
         for row in rows:
+            if row.get("archived"):
+                continue
             suite_id = str(row.get("suite_id") or "")
             if suite_id:
                 counts[suite_id] = counts.get(suite_id, 0) + 1

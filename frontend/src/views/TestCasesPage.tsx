@@ -17,7 +17,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import { Toolbar } from "@/components/ui/toolbar";
 import { DataTable, createDataTableColumns } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/common/EmptyState";
-import { PageContainer, PageHeader } from "@/components/layout/page-header";
+import { PageContainer, PageHeader, SectionHeader } from "@/components/layout/page-header";
 import { usePublishEntityName } from "@/components/layout/shell-context";
 import { cn } from "@/lib/utils";
 import { api, type TestCaseSummary, type TestSuiteSummary } from "@/lib/api";
@@ -90,7 +90,7 @@ export function TestCasesPage() {
     return map;
   }, [projectId, runs]);
 
-  const rows = useMemo(() => {
+  const filteredCases = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return cases.filter((testCase) => {
       if (needle && !`${testCase.code} ${testCase.name}`.toLowerCase().includes(needle)) return false;
@@ -104,6 +104,8 @@ export function TestCasesPage() {
       return true;
     });
   }, [cases, dateFilter, latestRunByCase, q, statusFilter, suiteByCase, suiteFilter, typeFilter]);
+  const rows = useMemo(() => filteredCases.filter((testCase) => !testCase.archived), [filteredCases]);
+  const archivedRows = useMemo(() => filteredCases.filter((testCase) => testCase.archived), [filteredCases]);
   const all = rows.length > 0 && selected.length === rows.length;
   const filtersActive = q.trim() !== "" || statusFilter !== "all" || suiteFilter !== "all" || typeFilter !== "all" || dateFilter !== "all";
 
@@ -404,6 +406,13 @@ export function TestCasesPage() {
                   </>
                 }
               />
+            ) : !filtersActive ? (
+              <EmptyState
+                size="sm"
+                icon={FileCheck2}
+                title="No active test cases"
+                description="Archived test cases are listed below."
+              />
             ) : (
               <EmptyState
                 size="sm"
@@ -432,8 +441,21 @@ export function TestCasesPage() {
         />
         {!loading && rows.length > 0 ? (
           <p className="text-xs text-muted-foreground tabular-nums">
-            Showing {rows.length} of {cases.length} test case{cases.length === 1 ? "" : "s"}
+            Showing {rows.length} of {cases.filter((testCase) => !testCase.archived).length} test case{cases.filter((testCase) => !testCase.archived).length === 1 ? "" : "s"}
           </p>
+        ) : null}
+        {!loading && archivedRows.length > 0 ? (
+          <section className="mt-8 flex flex-col gap-3">
+            <SectionHeader title="Archived" count={archivedRows.length} />
+            <DataTable
+              columns={columns}
+              data={archivedRows}
+              getRowId={(testCase) => testCase.id}
+              minWidth={1050}
+              onRowClick={(testCase) => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
+              rowLabel={(testCase) => `Open ${testCase.code} ${testCase.name}`}
+            />
+          </section>
         ) : null}
       </div>
     </PageContainer>
