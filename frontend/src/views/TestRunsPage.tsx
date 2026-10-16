@@ -3,16 +3,18 @@
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { WaitingHint } from "@/components/runs/WaitingHint";
 import { friendlyRunError } from "@/lib/friendlyRunError";
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { ArrowLeft, FileText, FolderKanban, History, Layers, RotateCcw, Search, Square } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { ArrowLeft, CheckCircle2, FileCheck2, FileText, FolderKanban, History, Layers, RotateCcw, Search, Square, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useNavigate, useSearchParams } from "@/lib/navigation";
-import { api, type GroupedRun, type ReportRun, type ScheduledExecution, type TestSuiteSummary } from "@/lib/api";
+import { api, type GroupedRun, type ProjectDetail, type ReportRun, type ScheduledExecution, type SuiteSummary, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScheduledRuns, type ScheduledRunRow } from "@/components/runs/ScheduledRuns";
 import { useScheduledBatches } from "@/hooks/useScheduledBatches";
 import { formatInTimeZone } from "@/lib/scheduleTime";
 import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS, suiteCategoryLabel } from "@/lib/suiteCategory";
+import { SuiteCategoryBadges } from "@/components/suites/SuiteCategoryBadge";
+import { Stat, StatGroup } from "@/components/common/Stat";
 import { pollWhileVisible } from "@/hooks/useExecutionPolling";
 import { PageContainer, PageHeader, SectionHeader } from "@/components/layout/page-header";
 import { DataTable, createDataTableColumns, type DataTableColumn } from "@/components/ui/data-table";
@@ -333,45 +335,99 @@ function RunActions({ run }: { run: HistoryRun }) {
   );
 }
 
-type SuiteHistoryRow = {
-  id: string;
-  name: string;
-  category: string;
-  caseCount: number;
-  startedAt: string | null;
-  times: number;
-  status: string;
-};
+function PassRateBar({ value }: { value: number }) {
+  const width = Math.max(0, Math.min(100, value));
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-elevated" aria-hidden>
+        <div className="h-full rounded-full bg-pass" style={{ width: `${width}%` }} />
+      </div>
+      <span className="w-9 text-right text-[13px] font-medium tabular-nums">{value}%</span>
+    </div>
+  );
+}
 
-const suiteCol = createDataTableColumns<SuiteHistoryRow>();
+const caseCol = createDataTableColumns<TestCaseSummary>();
 
-const suiteColumns: DataTableColumn<SuiteHistoryRow>[] = [
-  suiteCol.accessor("name", {
-    header: "Suite",
-    cell: ({ getValue }) => <span className="font-medium text-foreground">{getValue<string>()}</span>,
+const caseColumns: DataTableColumn<TestCaseSummary>[] = [
+  caseCol.accessor("code", {
+    header: "Code",
+    meta: { className: "w-24" },
+    cell: ({ getValue }) => <span className="font-mono text-xs text-muted-foreground">{getValue<string>()}</span>,
   }),
-  suiteCol.accessor("category", {
+  caseCol.accessor("name", {
+    header: "Name",
+    cell: ({ row }) => (
+      <div className="min-w-0">
+        <div className="font-medium text-foreground">{row.original.name}</div>
+        {row.original.categories?.length ? (
+          <div className="mt-1">
+            <SuiteCategoryBadges categories={row.original.categories} />
+          </div>
+        ) : null}
+      </div>
+    ),
+  }),
+  caseCol.accessor((testCase) => testCase.category ?? "Functional", {
+    id: "category",
     header: "Category",
-    cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>() || "—"}</span>,
+    cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span>,
   }),
-  suiteCol.accessor("caseCount", {
-    header: "Test cases",
+  caseCol.accessor((testCase) => testCase.scenario ?? "Happy Path", {
+    id: "scenario",
+    header: "Scenario",
+    cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span>,
+  }),
+  caseCol.accessor("automationStatus", {
+    header: "Automation",
+    cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span>,
+  }),
+];
+
+const overviewCol = createDataTableColumns<SuiteSummary>();
+
+const overviewColumns: DataTableColumn<SuiteSummary>[] = [
+  overviewCol.accessor("name", {
+    header: "Suite",
+    cell: ({ row }) => (
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="truncate font-medium text-foreground">{row.original.name}</span>
+        <SuiteCategoryBadges categories={row.original.categories} category={row.original.category} />
+      </div>
+    ),
+    meta: { className: "max-w-[28rem]" },
+  }),
+  overviewCol.accessor("cases", {
+    header: "Cases",
     meta: { align: "right" },
     cell: ({ getValue }) => <span className="tabular-nums text-muted-foreground">{getValue<number>()}</span>,
   }),
-  suiteCol.accessor((row) => row.startedAt ?? "", {
-    id: "startedAt",
+  overviewCol.accessor("passRate", {
+    header: "Pass rate",
+    cell: ({ getValue }) => <PassRateBar value={getValue<number>()} />,
+  }),
+  overviewCol.display({
+    id: "outcomes",
+    header: "Passed / Failed / Not run",
+    cell: ({ row }) => (
+      <span className="text-[13px] tabular-nums">
+        <span className="text-pass">{row.original.passed}</span>
+        <span className="text-faint"> / </span>
+        <span className={row.original.failed > 0 ? "font-medium text-destructive" : "text-muted-foreground"}>{row.original.failed}</span>
+        <span className="text-faint"> / </span>
+        <span className="text-muted-foreground">{row.original.notRun}</span>
+      </span>
+    ),
+  }),
+  overviewCol.accessor("lastRun", {
     header: "Last run",
-    cell: ({ row }) => <span className="tabular-nums text-muted-foreground">{formatWhen(row.original.startedAt)}</span>,
-  }),
-  suiteCol.accessor("times", {
-    header: "Times run",
-    meta: { align: "right" },
-    cell: ({ getValue }) => <span className="tabular-nums text-foreground">{getValue<number>()}</span>,
-  }),
-  suiteCol.accessor("status", {
-    header: "Status",
-    cell: ({ getValue }) => <RunStatusBadge status={getValue()} />,
+    sortFn: "datetime",
+    cell: ({ row }) => (
+      <div className="text-[13px] text-muted-foreground">
+        <div className="tabular-nums">{row.original.lastRun ? new Date(row.original.lastRun).toLocaleString() : "Not run"}</div>
+        {row.original.lastRunBy ? <div className="text-xs text-faint">by {row.original.lastRunBy}</div> : null}
+      </div>
+    ),
   }),
 ];
 
@@ -508,7 +564,15 @@ export function TestRunsPage() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState(searchParams.get("tab") === "scheduled" ? "scheduled" : "history");
+  const openedProjectId = searchParams.get("project");
+  const openedSuiteId = searchParams.get("suite");
+  const [tab, setTab] = useState(() => {
+    if (searchParams.get("tab") === "scheduled") return "scheduled";
+    if (searchParams.get("project")) return "overview";
+    return "history";
+  });
+  const scopeKey = openedSuiteId ? `suite:${openedSuiteId}` : openedProjectId ? `project:${openedProjectId}` : "all";
+  const previousScope = useRef(scopeKey);
   const batches = useScheduledBatches({});
   const [scheduledCases, setScheduledCases] = useState<ScheduledExecution[]>([]);
   const scheduledCount = scheduledCases.length + batches.items.length;
@@ -569,35 +633,73 @@ export function TestRunsPage() {
     };
   }, []);
 
-  const openedProjectId = searchParams.get("project");
-  const openedSuiteId = searchParams.get("suite");
-  const [projectSuites, setProjectSuites] = useState<TestSuiteSummary[]>([]);
-  const [suitesLoading, setSuitesLoading] = useState(false);
+  const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
+
+  useEffect(() => {
+    if (previousScope.current === scopeKey) return;
+    previousScope.current = scopeKey;
+    if (!openedProjectId) {
+      setTab((current) => (current === "overview" ? "history" : current));
+      return;
+    }
+    setTab((current) => (current === "scheduled" ? current : "overview"));
+  }, [openedProjectId, openedSuiteId, scopeKey]);
 
   useEffect(() => {
     if (!openedProjectId) {
-      setProjectSuites([]);
+      setProjectDetail(null);
       return;
     }
     let cancelled = false;
-    setSuitesLoading(true);
+    setProjectLoading(true);
     api
-      .testSuites(openedProjectId)
-      .then((suites) => {
-        if (!cancelled) setProjectSuites(suites);
+      .project(openedProjectId)
+      .then((project) => {
+        if (!cancelled) setProjectDetail(project);
       })
       .catch(() => {
-        if (!cancelled) setProjectSuites([]);
+        if (!cancelled) setProjectDetail(null);
       })
       .finally(() => {
-        if (!cancelled) setSuitesLoading(false);
+        if (!cancelled) setProjectLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [openedProjectId]);
-  const openedProjectName = runs.find((run) => run.projectId === openedProjectId)?.projectName || "Project";
-  const openedSuite = projectSuites.find((suite) => suite.id === openedSuiteId);
+
+  const [suiteDetail, setSuiteDetail] = useState<TestSuiteDetail | null>(null);
+  const [suiteLoading, setSuiteLoading] = useState(false);
+
+  useEffect(() => {
+    if (!openedProjectId || !openedSuiteId) {
+      setSuiteDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setSuiteLoading(true);
+    api
+      .testSuite(openedProjectId, openedSuiteId)
+      .then((suite) => {
+        if (!cancelled) setSuiteDetail(suite);
+      })
+      .catch(() => {
+        if (!cancelled) setSuiteDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setSuiteLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openedProjectId, openedSuiteId]);
+
+  const openedProjectName = projectDetail?.name || runs.find((run) => run.projectId === openedProjectId)?.projectName || "Project";
+  const openedSuite = projectDetail?.suitesList.find((suite) => suite.id === openedSuiteId);
+  const openedSuiteName = suiteDetail?.name || openedSuite?.name || "Suite";
+  const overviewSuites = projectDetail?.suitesList ?? [];
+  const overviewCases = (suiteDetail?.testCases ?? []).filter((testCase) => !testCase.archived);
   const openedRuns = useMemo(
     () => (openedProjectId ? runs.filter((run) => run.projectId === openedProjectId) : []),
     [runs, openedProjectId]
@@ -609,23 +711,6 @@ export function TestRunsPage() {
       (run) => run.runType === "suite" && (run.suiteId === openedSuiteId || (openedSuite ? run.title === openedSuite.name : false))
     );
   }, [openedRuns, openedSuiteId, openedSuite]);
-  const openedSuites = useMemo(() => {
-    const suiteRuns = openedRuns.filter((run) => run.runType === "suite");
-    return projectSuites.map((suite) => {
-      const related = suiteRuns.filter((run) => run.suiteId === suite.id || run.title === suite.name);
-      const latest = [...related].sort((a, b) => startedMs(b.startedAt) - startedMs(a.startedAt))[0];
-      const categories = suite.categories?.length ? suite.categories : suite.category ? [suite.category] : [];
-      return {
-        id: suite.id,
-        name: suite.name,
-        category: categories.join(", "),
-        caseCount: suite.caseCount,
-        startedAt: latest?.startedAt ?? null,
-        times: latest?.times ?? related.length,
-        status: latest?.status ?? "Not run",
-      };
-    });
-  }, [projectSuites, openedRuns]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -678,8 +763,17 @@ export function TestRunsPage() {
 
       {error ? <Alert variant="error" title="Could not refresh test runs">{error}</Alert> : null}
 
-      <Tabs value={tab} onValueChange={setTab} className="gap-4">
+      <Tabs
+        value={openedProjectId ? tab : tab === "overview" ? "history" : tab}
+        onValueChange={setTab}
+        className="gap-4"
+      >
         <TabsList variant="line" className="h-auto w-full justify-start gap-1 rounded-none border-b border-border p-0">
+          {openedProjectId ? (
+            <TabsTrigger value="overview" className="h-9 flex-none rounded-none px-3 text-[13px] after:bottom-[-1px]">
+              Overview
+            </TabsTrigger>
+          ) : null}
           <TabsTrigger value="history" className="h-9 flex-none rounded-none px-3 text-[13px] after:bottom-[-1px]">
             History
           </TabsTrigger>
@@ -691,6 +785,70 @@ export function TestRunsPage() {
           </TabsTrigger>
         </TabsList>
 
+        {openedProjectId ? (
+          <TabsContent value="overview">
+            {openedSuiteId ? (
+              <div className="flex flex-col gap-8">
+                <SectionHeader
+                  title={openedSuiteName}
+                  actions={
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/runs?project=${openedProjectId}`)}>
+                      <ArrowLeft />
+                      Back to project
+                    </Button>
+                  }
+                />
+                <section className="flex flex-col gap-3">
+                  <SectionHeader title="Test cases" count={suiteLoading ? undefined : overviewCases.length} />
+                  <DataTable
+                    columns={caseColumns}
+                    data={overviewCases}
+                    getRowId={(testCase) => testCase.id}
+                    loading={suiteLoading}
+                    loadingLabel="Loading test cases…"
+                    minWidth={760}
+                    empty={<EmptyState size="sm" icon={FileCheck2} title="No test cases in this suite" />}
+                  />
+                </section>
+              </div>
+            ) : (
+            <div className="flex flex-col gap-8">
+              <SectionHeader
+                title={openedProjectName}
+                actions={
+                  <Button variant="outline" size="sm" onClick={() => navigate("/runs")}>
+                    <ArrowLeft />
+                    Back to test runs
+                  </Button>
+                }
+              />
+              {projectDetail ? (
+                <StatGroup columns={4}>
+                  <Stat label="Suites" icon={Layers} value={projectDetail.suites} />
+                  <Stat label="Test cases" icon={FileCheck2} value={projectDetail.cases} />
+                  <Stat label="Passed" icon={CheckCircle2} value={projectDetail.passed} hint={`${projectDetail.passRate}% pass rate`} />
+                  <Stat label="Failed" icon={XCircle} value={projectDetail.failed} tone={projectDetail.failed > 0 ? "destructive" : "default"} />
+                </StatGroup>
+              ) : null}
+              <section className="flex flex-col gap-3">
+                <SectionHeader title="Test suites" count={projectLoading ? undefined : overviewSuites.length} />
+                <DataTable
+                  columns={overviewColumns}
+                  data={overviewSuites}
+                  getRowId={(suite) => suite.id}
+                  loading={projectLoading}
+                  loadingLabel="Loading test suites…"
+                  minWidth={820}
+                  onRowClick={(suite) => navigate(`/runs?project=${openedProjectId}&suite=${suite.id}`)}
+                  rowLabel={(suite) => `Open suite ${suite.name}`}
+                  empty={<EmptyState size="sm" icon={Layers} title="No test suites in this project" />}
+                />
+              </section>
+            </div>
+            )}
+          </TabsContent>
+        ) : null}
+
         <TabsContent value="scheduled">
           <ScheduledRuns cases={scheduledCases} batches={batches.items} onCancel={(row) => void cancelScheduled(row)} />
         </TabsContent>
@@ -699,7 +857,7 @@ export function TestRunsPage() {
       {openedSuiteId && openedProjectId ? (
         <div className="flex flex-col gap-8">
           <SectionHeader
-            title={openedSuite?.name || "Suite"}
+            title={openedSuiteName}
             actions={
               <Button variant="outline" size="sm" onClick={() => navigate(`/runs?project=${openedProjectId}`)}>
                 <ArrowLeft />
@@ -733,19 +891,6 @@ export function TestRunsPage() {
               </Button>
             }
           />
-          <section className="flex flex-col gap-3">
-            <SectionHeader title="Test suites" count={suitesLoading ? undefined : openedSuites.length} />
-            <DataTable
-              columns={suiteColumns}
-              data={openedSuites}
-              getRowId={(suite) => suite.id}
-              loading={suitesLoading}
-              loadingLabel="Loading test suites…"
-              onRowClick={(suite) => navigate(`/runs?project=${openedProjectId}&suite=${suite.id}`)}
-              rowLabel={(suite) => `Open suite ${suite.name}`}
-              empty={<EmptyState size="sm" icon={Layers} title="No test suites in this project" />}
-            />
-          </section>
           <section className="flex flex-col gap-3">
             <SectionHeader title="Run history" count={loading ? undefined : projectHistoryRuns.length} />
             <DataTable
