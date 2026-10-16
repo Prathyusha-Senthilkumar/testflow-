@@ -1,6 +1,8 @@
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Response
+
+from app.dependencies.auth import current_actor
 
 from app.repositories.project_repository import project_repository
 from app.repositories.test_case_repository import test_case_repository
@@ -45,8 +47,9 @@ def create_test_case(
     project_id: str,
     input_dto: CreateTestCaseDto,
     service: TestCasesService = Depends(get_test_cases_service),
+    actor: Optional[tuple[str, str]] = Depends(current_actor),
 ):
-    return service.create(project_id, input_dto)
+    return service.create(project_id, input_dto, actor=actor)
 
 
 @router.post("/{test_case_id}/archive", response_model=TestCaseSummary)
@@ -70,8 +73,9 @@ def update_test_case(
     test_case_id: str,
     input_dto: UpdateTestCaseDto,
     service: TestCasesService = Depends(get_test_cases_service),
+    actor: Optional[tuple[str, str]] = Depends(current_actor),
 ):
-    return service.update(project_id, test_case_id, input_dto)
+    return service.update(project_id, test_case_id, input_dto, actor=actor)
 
 
 @router.get("/{test_case_id}/script", response_model=TestScriptResponse)

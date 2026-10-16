@@ -1,5 +1,6 @@
 "use client";
 
+import { PanelLeft } from "lucide-react";
 import { Link, useLocation } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { AttestLogo, AttestMark } from "@/components/brand/attest-logo";
@@ -51,6 +52,26 @@ function SectionLabel({ children, collapsed }: { children: React.ReactNode; coll
   return <div className="truncate px-2.5 pt-4 pb-1 text-[11px] font-medium tracking-[0.08em] text-faint uppercase">{children}</div>;
 }
 
+function SidebarCollapseButton({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          aria-pressed={!collapsed}
+          onClick={onToggle}
+          className="flex size-7 items-center justify-center rounded-md text-faint outline-none transition-colors hover:bg-state-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <PanelLeft className="size-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side={collapsed ? "right" : "top"}>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Brand lockup cell of the shell grid (top-left), aligned to the sidebar width. */
 export function SidebarBrand({ collapsed }: { collapsed: boolean }) {
   return (
@@ -63,7 +84,15 @@ export function SidebarBrand({ collapsed }: { collapsed: boolean }) {
 }
 
 /** Navigation content, shared by the desktop sidebar and the mobile sheet. */
-export function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+export function SidebarNav({
+  collapsed = false,
+  onNavigate,
+  onToggle,
+}: {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+  onToggle?: () => void;
+}) {
   const { pathname } = useLocation();
 
   return (
@@ -79,6 +108,11 @@ export function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: bool
         </ul>
       </nav>
       <div className={cn("space-y-1 border-t border-border py-2", collapsed ? "flex flex-col items-center px-2.5" : "px-3")}>
+        {onToggle ? (
+          <div className={cn("flex", collapsed ? "justify-center" : "justify-end pr-0.5")}>
+            <SidebarCollapseButton collapsed={collapsed} onToggle={onToggle} />
+          </div>
+        ) : null}
         <SidebarLink item={SETTINGS_NAV} active={isNavActive(SETTINGS_NAV, pathname)} collapsed={collapsed} onNavigate={onNavigate} />
         <AccountMenu collapsed={collapsed} />
       </div>
@@ -87,6 +121,6 @@ export function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: bool
 }
 
 /** Desktop sidebar navigation (the shell provides the column, border and sash). */
-export function Sidebar({ collapsed }: { collapsed: boolean }) {
-  return <SidebarNav collapsed={collapsed} />;
+export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () => void }) {
+  return <SidebarNav collapsed={collapsed} onToggle={onToggle} />;
 }

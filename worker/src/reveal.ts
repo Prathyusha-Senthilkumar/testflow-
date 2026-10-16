@@ -42,11 +42,27 @@ export async function revealLocator(page: Page, locator: Locator): Promise<boole
 }
 
 async function shown(locator: Locator): Promise<boolean> {
-  if ((await locator.count()) === 0) return false;
-  try {
-    await locator.first().scrollIntoViewIfNeeded({ timeout: 400 });
-  } catch {
-    return false;
+  const count = Math.min(await locator.count().catch(() => 0), 40);
+  if (count === 0) return false;
+  for (let index = 0; index < count; index += 1) {
+    if (await locator.nth(index).isVisible().catch(() => false)) return true;
   }
-  return locator.first().isVisible();
+  for (let index = 0; index < count; index += 1) {
+    const item = locator.nth(index);
+    try {
+      await item.scrollIntoViewIfNeeded({ timeout: 800 });
+    } catch {
+      continue;
+    }
+    if (await item.isVisible().catch(() => false)) return true;
+  }
+  return false;
+}
+
+export async function anyVisible(locator: Locator): Promise<boolean> {
+  const count = Math.min(await locator.count().catch(() => 0), 40);
+  for (let index = 0; index < count; index += 1) {
+    if (await locator.nth(index).isVisible().catch(() => false)) return true;
+  }
+  return false;
 }

@@ -48,6 +48,8 @@ create table if not exists public.test_cases (
     check (categories <@ array['smoke', 'sanity', 'regression', 'full_regression']::text[]),
   environment_ids uuid[] not null default '{}',
   archived boolean not null default false,
+  created_by uuid references public.profiles(id),
+  updated_by uuid references public.profiles(id),
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

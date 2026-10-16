@@ -1,0 +1,14 @@
+{
+  "startPath": "/",
+  "environmentId": "env-default",
+  "authProfileId": null,
+  "resolvedStartUrl": "https://evolv-dev.revature.io/",
+  "assertions": [],
+  "storageSeeds": [],
+  "storageAssertions": [],
+  "accessibilityEnabled": false,
+  "networkCheckEnabled": false,
+  "expectedResult": null,
+  "recordedModule": "test_recorded.ts",
+  "recordedTestName": "test_example"
+}

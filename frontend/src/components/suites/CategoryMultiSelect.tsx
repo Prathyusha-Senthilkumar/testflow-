@@ -7,15 +7,17 @@ type Props = {
   value: SuiteCategory[];
   onChange: (value: SuiteCategory[]) => void;
   legend?: string;
+  required?: boolean;
 };
 
 const CATEGORY_OPTIONS = SUITE_CATEGORIES.map((item) => ({ value: item, label: SUITE_CATEGORY_LABELS[item] }));
 
 /** Suite category picker (Popover + checklist with chips). */
-export function CategoryMultiSelect({ value, onChange, legend = "Categories" }: Props) {
+export function CategoryMultiSelect({ value, onChange, legend = "Categories", required = false }: Props) {
   return (
     <MultiSelect
       label={legend}
+      required={required}
       options={CATEGORY_OPTIONS}
       value={value}
       onChange={(next) => onChange(next as SuiteCategory[])}

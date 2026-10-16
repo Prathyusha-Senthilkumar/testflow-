@@ -3,6 +3,14 @@ services:
     image: redis:7-alpine
     # Host 6380 avoids conflict with an existing local Redis on 6379 (e.g. testflow-redis).
     # Backend/worker still use redis://redis:6379/0 inside the Compose network.
+    # 256m container cap, Redis maxmemory 200mb, noeviction: refuse writes before the OOM killer instead of deleting in-flight jobs.
+    command: ["redis-server", "--maxmemory", "200mb", "--maxmemory-policy", "noeviction"]
+    mem_limit: 256m
+    memswap_limit: 256m
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     ports:
       - "${REDIS_HOST_PORT:-6380}:6379"
     healthcheck:

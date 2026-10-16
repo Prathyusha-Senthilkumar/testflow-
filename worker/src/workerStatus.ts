@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import type { Redis } from "ioredis";
+import { throwIfRedisOom } from "./redisOom.js";
 import type { BrowserStatus, WarmStatus } from "./browserPool.js";
 
 // Worker registry read by backend/app/repositories/worker_status_repository.py (GET /api/workers).
@@ -162,12 +163,13 @@ export function heartbeatTtlSeconds(intervalMs: number): number {
 
 /** One MULTI round trip on the shared (non-blocking) connection. */
 export async function publishHeartbeat(redis: Redis, heartbeat: WorkerHeartbeat, intervalMs: number): Promise<void> {
-  await redis
+  const results = await redis
     .multi()
     .set(WORKER_KEY_PREFIX + heartbeat.id, JSON.stringify(heartbeat), "EX", heartbeatTtlSeconds(intervalMs))
     .sadd(WORKERS_SET_KEY, heartbeat.id)
     .hset(WORKERS_SEEN_KEY, heartbeat.id, String(Date.parse(heartbeat.lastHeartbeatAt)))
     .exec();
+  throwIfRedisOom(results);
 }
 
 export async function removeHeartbeat(redis: Redis, workerId: string): Promise<void> {

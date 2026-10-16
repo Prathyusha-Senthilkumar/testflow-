@@ -11,6 +11,47 @@ class RunScreenshot(BaseModel):
     url: Optional[str] = None
 
 
+class LiveCaseRun(BaseModel):
+    """A test case that is queued or running, including one started from another tab or device."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    testCaseId: str = Field(alias="testCaseId")
+    suiteId: Optional[str] = Field(None, alias="suiteId")
+    status: str
+    runId: Optional[str] = Field(None, alias="runId")
+    batchId: Optional[str] = Field(None, alias="batchId")
+    runBy: Optional[str] = Field(None, alias="runBy")
+    startedAt: Optional[str] = Field(None, alias="startedAt")
+
+
+class LiveSuiteRun(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    suiteId: str = Field(alias="suiteId")
+    batchId: Optional[str] = Field(None, alias="batchId")
+    status: str
+    runBy: Optional[str] = Field(None, alias="runBy")
+
+
+class LiveProjectRun(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    batchId: str = Field(alias="batchId")
+    status: str
+    runBy: Optional[str] = Field(None, alias="runBy")
+
+
+class ProjectLiveActivity(BaseModel):
+    """Queued and running work for one project, shared by every open session."""
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    cases: list[LiveCaseRun] = Field(default_factory=list)
+    suites: list[LiveSuiteRun] = Field(default_factory=list)
+    project: Optional[LiveProjectRun] = None
+
+
 class LatestCaseRun(BaseModel):
     """Latest persisted result for one test case. No script, cookies, or job payload."""
 
@@ -45,6 +86,15 @@ class ReportRun(BaseModel):
     errorMessage: Optional[str] = Field(None, alias="errorMessage")
     runBy: Optional[str] = Field(None, alias="runBy")
     screenshotPath: Optional[str] = Field(None, alias="screenshotPath")
+    # Test-case record, filled on the single-run view. Older rows have no author.
+    createdBy: Optional[str] = Field(None, alias="createdBy")
+    createdAt: Optional[str] = Field(None, alias="createdAt")
+    lastModifiedBy: Optional[str] = Field(None, alias="lastModifiedBy")
+    lastModifiedAt: Optional[str] = Field(None, alias="lastModifiedAt")
+    firstRunBy: Optional[str] = Field(None, alias="firstRunBy")
+    firstRunAt: Optional[str] = Field(None, alias="firstRunAt")
+    lastRunBy: Optional[str] = Field(None, alias="lastRunBy")
+    lastRunAt: Optional[str] = Field(None, alias="lastRunAt")
 
 
 class GroupedRun(BaseModel):
@@ -57,6 +107,8 @@ class GroupedRun(BaseModel):
     title: str
     code: Optional[str] = None
     suite_category: Optional[str] = Field(None, alias="suiteCategory")
+    # Smoke / sanity / regression tags used by the Test Runs category filter.
+    categories: list[str] = Field(default_factory=list)
     environment_name: Optional[str] = Field(None, alias="environmentName")
     status: str
     started_at: Optional[str] = Field(None, alias="startedAt")

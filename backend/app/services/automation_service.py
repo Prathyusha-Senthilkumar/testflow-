@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import sys
@@ -9,6 +10,9 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from app.config import settings
+from app.logging_format import log_failure
+
+logger = logging.getLogger("testflow.automation")
 
 def _locate_repo_root() -> Path:
     here = Path(__file__).resolve()
@@ -61,6 +65,7 @@ def _ensure_playwright_browser_available() -> None:
             browser = playwright.chromium.launch(headless=True)
             browser.close()
     except Exception as exc:
+        log_failure(logger, "recording.browser", exc)
         raise HTTPException(
             status_code=400,
             detail=(
@@ -127,6 +132,7 @@ def _post_to_delegate(delegate_base: str, endpoint: str, body: dict) -> dict:
         with urllib.request.urlopen(request, timeout=60 * 60) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        log_failure(logger, "recording.delegate", exc)
         try:
             err_payload = json.loads(exc.read().decode("utf-8"))
             detail = err_payload.get("detail") or err_payload.get("message") or str(exc)
@@ -134,6 +140,7 @@ def _post_to_delegate(delegate_base: str, endpoint: str, body: dict) -> dict:
             detail = str(exc)
         raise HTTPException(status_code=400, detail=detail) from exc
     except urllib.error.URLError as exc:
+        log_failure(logger, "recording.delegate", exc, level=logging.WARNING)
         raise HTTPException(
             status_code=503,
             detail=(

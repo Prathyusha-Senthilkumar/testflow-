@@ -10,8 +10,8 @@ import {
   saveStorageState,
   stateChanged,
 } from "./authProfiles.js";
-import { applyEnvironment, retargetUrl, scriptBody } from "./playback.js";
-import { revealLocator } from "./reveal.js";
+import { applyEnvironment, retargetUrl, scriptBody, textIsListed } from "./playback.js";
+import { anyVisible, revealLocator } from "./reveal.js";
 
 async function accessibilityAudit(repoRoot: string): Promise<string> {
   const source = await readFile(path.join(repoRoot, "automation", "framework", "accessibility.py"), "utf8");
@@ -196,7 +196,7 @@ export async function runRecordedTest(repoRoot: string, configPath: string, opti
     const expected = String(meta.expectedResult || "").trim();
     if (expected) {
       const text = await page.locator("body").innerText({ timeout: 10000 });
-      if (!text.toLowerCase().includes(expected.toLowerCase())) {
+      if (!textIsListed(text, expected)) {
         throw new Error(`Expected text not found: ${expected}`);
       }
     }
@@ -305,7 +305,8 @@ function expectAssertion(target: Page | Locator) {
       if (!matches) throw new Error(`Expected title ${String(expected)} but received ${title}`);
     },
     async toBeVisible() {
-      const locator = (target as Locator).first();
+      const locator = target as Locator;
+      if (await anyVisible(locator)) return;
       const visible = await revealLocator(locator.page(), locator);
       if (!visible) {
         throw new Error("The text was not visible after scrolling the page.");

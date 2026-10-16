@@ -1,0 +1,20 @@
+{
+  "startPath": "/admin/assessments",
+  "environmentId": "env-default",
+  "authProfileId": "auth-1791470933283",
+  "resolvedStartUrl": "https://evolv-dev.revature.io/admin/assessments",
+  "assertions": [
+    {
+      "id": "expected-result",
+      "type": "text_visible",
+      "value": "The browser check card is shown."
+    }
+  ],
+  "storageSeeds": [],
+  "storageAssertions": [],
+  "accessibilityEnabled": false,
+  "networkCheckEnabled": false,
+  "expectedResult": "The browser check card is shown.",
+  "recordedModule": "test_recorded.ts",
+  "recordedTestName": "test_example"
+}

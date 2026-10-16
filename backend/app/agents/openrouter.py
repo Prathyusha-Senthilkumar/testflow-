@@ -42,6 +42,7 @@ def complete_json(messages: list[dict], schema: dict, *, model: str | None = Non
         "model": chosen,
         "messages": messages,
         "temperature": 0,
+        "max_tokens": 1800,
         "response_format": {"type": "json_schema", "json_schema": {"name": "agent", "strict": True, "schema": schema}},
     }
     try:
@@ -53,6 +54,8 @@ def complete_json(messages: list[dict], schema: dict, *, model: str | None = Non
         )
         response.raise_for_status()
         payload = response.json()
+        content = payload["choices"][0]["message"]["content"]
+        parsed = content if isinstance(content, dict) else _parse_json(content)
     except ModelError:
         raise
     except Exception as exc:
@@ -63,32 +66,59 @@ def complete_json(messages: list[dict], schema: dict, *, model: str | None = Non
         raise ModelError("The model call failed.") from exc
     usage = payload.get("usage") or {}
     spent = cost_usd(int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0))
-    content = payload["choices"][0]["message"]["content"]
-    if isinstance(content, str):
-        return json.loads(content), spent
-    if isinstance(content, dict):
-        return content, spent
-    raise ModelError("The model did not return JSON.")
+    return parsed, spent
 
+
+def _parse_json(content: object) -> dict:
+    if not isinstance(content, str):
+        raise ValueError("The model did not return JSON.")
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("The model did not return JSON.") from None
+        parsed = json.loads(text[start : end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("The model did not return JSON.")
+    return parsed
+
+
+_STEP_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "action": {"type": "string", "enum": ["goto", "click", "fill", "press"]},
+        "target": {"type": "string"},
+        "value": {"type": "string"},
+    },
+    "required": ["action", "target", "value"],
+}
 
 PLAN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "steps": {
+        "cases": {
             "type": "array",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "action": {"type": "string", "enum": ["goto", "click", "fill", "press"]},
-                    "target": {"type": "string"},
-                    "value": {"type": "string"},
+                    "name": {"type": "string"},
+                    "path": {"type": "string"},
+                    "steps": {"type": "array", "items": _STEP_SCHEMA},
+                    "expected": {"type": "string"},
                 },
-                "required": ["action", "target", "value"],
+                "required": ["name", "path", "steps", "expected"],
             },
-        },
-        "expected": {"type": "string"},
+        }
     },
-    "required": ["steps", "expected"],
+    "required": ["cases"],
 }

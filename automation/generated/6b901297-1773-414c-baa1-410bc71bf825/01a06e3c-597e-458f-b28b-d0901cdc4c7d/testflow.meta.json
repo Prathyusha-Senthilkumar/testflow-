@@ -1,0 +1,20 @@
+{
+  "startPath": "/admin",
+  "environmentId": "env-default",
+  "authProfileId": "auth-1791470933283",
+  "resolvedStartUrl": "https://evolv-dev.revature.io/admin",
+  "assertions": [
+    {
+      "id": "expected-result",
+      "type": "text_visible",
+      "value": "The Curricula list and the New curriculum button are visible."
+    }
+  ],
+  "storageSeeds": [],
+  "storageAssertions": [],
+  "accessibilityEnabled": false,
+  "networkCheckEnabled": false,
+  "expectedResult": "The Curricula list and the New curriculum button are visible.",
+  "recordedModule": "test_recorded.ts",
+  "recordedTestName": "test_example"
+}

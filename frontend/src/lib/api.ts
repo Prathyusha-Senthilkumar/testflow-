@@ -336,6 +336,35 @@ export async function finalScreenshotUrl(runId: string): Promise<string> {
   }
 }
 
+export type LiveCaseActivity = {
+  testCaseId: string;
+  suiteId?: string | null;
+  status: string;
+  runId?: string | null;
+  batchId?: string | null;
+  runBy?: string | null;
+  startedAt?: string | null;
+};
+
+export type LiveSuiteActivity = {
+  suiteId: string;
+  batchId?: string | null;
+  status: string;
+  runBy?: string | null;
+};
+
+export type LiveProjectActivity = {
+  batchId: string;
+  status: string;
+  runBy?: string | null;
+};
+
+export type ProjectLiveActivity = {
+  cases: LiveCaseActivity[];
+  suites: LiveSuiteActivity[];
+  project?: LiveProjectActivity | null;
+};
+
 export type TestRunHistoryItem = {
   id: string;
   testCaseId?: string | null;
@@ -717,13 +746,26 @@ export const api = {
     }),
   agentJob: (projectId: string, jobId: string) =>
     request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}`, {}, { live: true }),
-  approveAgentJob: (projectId: string, jobId: string, accepted: boolean) =>
+  approveAgentJob: (projectId: string, jobId: string, accepted: boolean, caseIds?: string[]) =>
     request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/approval`, {
       method: "POST",
-      body: JSON.stringify({ accepted }),
+      body: JSON.stringify({ accepted, caseIds: caseIds ?? [] }),
     }),
-  saveAgentDraft: (projectId: string, jobId: string) =>
-    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/save`, { method: "POST" }),
+  saveAgentDraft: (projectId: string, jobId: string, categories?: string[], caseIds?: string[]) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/save`, {
+      method: "POST",
+      body: JSON.stringify({ categories: categories ?? [], caseIds: caseIds ?? [] }),
+    }),
+  removeAgentCases: (projectId: string, jobId: string, caseIds: string[]) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/cases/remove`, {
+      method: "POST",
+      body: JSON.stringify({ caseIds }),
+    }),
+  chooseAgentPage: (projectId: string, jobId: string, path: string) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/page`, {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    }),
   createTestCase: (projectId: string, input: TestCaseInput) =>
     request<TestCaseSummary>(`/projects/${projectId}/test-cases`, {
       method: "POST",
@@ -839,9 +881,13 @@ export const api = {
   cancelScheduledExecution: (jobId: string) =>
     request<void>(`/executions/scheduled/${jobId}`, { method: "DELETE" }),
   groupedRuns: () => request<GroupedRun[]>("/test-runs/grouped", {}, { live: true }),
+  liveActivity: (projectId: string) =>
+    request<ProjectLiveActivity>(`/test-runs/live?projectId=${encodeURIComponent(projectId)}`, {}, { live: true }),
   latestCaseRuns: (projectId: string) =>
     request<Array<{ testCaseId: string; projectId?: string | null; status: string; startedAt?: string | null; completedAt?: string | null; runBy?: string | null }>>(
       `/test-runs/latest?projectId=${encodeURIComponent(projectId)}`,
+      {},
+      { live: true }
     ),
   testRuns: (limit = 50, testCaseId?: string) => {
     const params = new URLSearchParams({ limit: String(limit) });
@@ -902,11 +948,23 @@ export type AssertionConfig = {
 
 export type AgentStep = { action: string; target: string; value: string };
 
+export type AgentPageLink = { name: string; path: string };
+
+export type AgentCase = {
+  id: string;
+  name: string;
+  path: string;
+  steps: AgentStep[];
+  expected: string;
+  phase: string;
+  script: string;
+  testCaseId?: string | null;
+  error?: string | null;
+};
+
 export type AgentJobInput = {
   prompt: string;
-  startPath: string;
-  startUrl: string;
-  environmentId?: string;
+  environmentId: string;
   authProfileId?: string;
 };
 
@@ -915,11 +973,15 @@ export type AgentJob = {
   projectId: string;
   phase: string;
   prompt: string;
+  startPath?: string;
   steps: AgentStep[];
   expected: string;
+  pages?: AgentPageLink[];
   diary: { action: string; role: string; name: string; value: string; url: string }[];
   script: string;
   testCaseId?: string | null;
+  suiteId?: string | null;
+  cases?: AgentCase[];
   costUsd: number;
   error?: string | null;
 };

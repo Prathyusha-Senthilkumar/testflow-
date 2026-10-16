@@ -1,10 +1,14 @@
 import asyncio
+import logging
 import re
 from typing import List, Set, Optional, Dict, Any
 from urllib.parse import urljoin, urlparse
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
+from app.logging_format import log_failure
 from app.schemas.crawler import AuthConfig, DiscoveredPage, FormInfo, FormInputInfo
+
+logger = logging.getLogger("testflow.crawler")
 
 
 class CrawlerService:
@@ -32,7 +36,7 @@ class CrawlerService:
         Returns the captured storage state (cookies, tokens, storage).
         """
         try:
-            print(f"[CrawlerService] Authenticating via Approach A at: {auth.login_url}")
+            logger.info("crawler.auth started")
             await page.goto(auth.login_url, wait_until="networkidle", timeout=30000)
 
             # 1. Username / Email field locator
@@ -95,11 +99,10 @@ class CrawlerService:
 
             # Extract storage state
             storage_state = await page.context.storage_state()
-            print("[CrawlerService] Authentication successful, storage state captured.")
             return storage_state
 
         except Exception as e:
-            print(f"[CrawlerService] Authentication failed or timed out: {e}")
+            log_failure(logger, "crawler.auth", e)
             # Try capturing storage state anyway in case login still succeeded
             try:
                 return await page.context.storage_state()
@@ -236,6 +239,7 @@ class CrawlerService:
             )
 
         except Exception as e:
+            log_failure(logger, "crawler.page", e, level=logging.WARNING)
             return DiscoveredPage(
                 url=url,
                 title=url,

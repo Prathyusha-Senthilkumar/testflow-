@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Archive, FileCheck2, Play, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateDraftTestCase } from "@/hooks/useCreateDraftTestCase";
+import { useLiveActivity } from "@/hooks/useLiveActivity";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useNavigate, useParams } from "@/lib/navigation";
 import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
@@ -66,6 +67,14 @@ export function TestCasesPage() {
   const [runs, setRuns] = useState<CaseRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const activity = useLiveActivity(projectId);
+  const seenLive = useRef<Set<string>>(new Set());
+  const pendingFinish = useRef<Set<string>>(new Set());
+  const refreshingLatest = useRef(false);
+  const liveNow = useRef(activity);
+  const projectRef = useRef(projectId);
+  liveNow.current = activity;
+  projectRef.current = projectId;
 
   usePublishEntityName("project", projectId, projectName);
 
@@ -110,6 +119,54 @@ export function TestCasesPage() {
   const filtersActive = q.trim() !== "" || statusFilter !== "all" || suiteFilter !== "all" || typeFilter !== "all" || dateFilter !== "all";
 
   useEffect(() => {
+    if (!activity || !projectId) return;
+    const liveIds = new Set(activity.cases.map((item) => item.testCaseId));
+    setRuns((current) => {
+      const byId = new Map<string, CaseRun>();
+      for (const run of current) {
+        if (run.testCaseId) byId.set(run.testCaseId, run);
+      }
+      for (const item of activity.cases) {
+        const previous = byId.get(item.testCaseId);
+        byId.set(item.testCaseId, {
+          testCaseId: item.testCaseId,
+          projectId,
+          status: item.status,
+          startedAt: item.startedAt ?? previous?.startedAt ?? null,
+          completedAt: null,
+          runBy: item.runBy ?? previous?.runBy ?? null,
+        });
+      }
+      return [...byId.values()];
+    });
+    for (const id of seenLive.current) {
+      if (!liveIds.has(id)) pendingFinish.current.add(id);
+    }
+    for (const id of liveIds) pendingFinish.current.delete(id);
+    seenLive.current = liveIds;
+    if (pendingFinish.current.size === 0 || refreshingLatest.current) return;
+    refreshingLatest.current = true;
+    const requestedFor = projectId;
+    api
+      .latestCaseRuns(requestedFor)
+      .then((latest) => {
+        if (projectRef.current !== requestedFor) return;
+        setRuns(mergeLiveRuns(latest, liveNow.current, requestedFor));
+        const stillLive = new Set((liveNow.current?.cases ?? []).map((item) => item.testCaseId));
+        for (const id of [...pendingFinish.current]) {
+          const row = latest.find((run) => run.testCaseId === id);
+          if (stillLive.has(id) || !row || (row.status !== "Queued" && row.status !== "Running")) {
+            pendingFinish.current.delete(id);
+          }
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        refreshingLatest.current = false;
+      });
+  }, [activity, projectId]);
+
+  useEffect(() => {
     if (!projectId) return;
      
     setLoading(true);
@@ -123,7 +180,7 @@ export function TestCasesPage() {
       .then(([testCases, suiteSummaries, latestRuns]) => {
         setCases(testCases);
         setSuites(suiteSummaries);
-        setRuns(latestRuns);
+        setRuns(mergeLiveRuns(latestRuns, liveNow.current, projectId));
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
@@ -233,7 +290,7 @@ export function TestCasesPage() {
       caseColumns.accessor((t) => caseStatus(latestRunByCase.get(t.id)), {
         id: "status",
         header: "Status",
-        cell: ({ getValue }) => <RunStatusBadge status={getValue<string>()} />,
+        cell: ({ row }) => <RunStatusBadge status={caseStatus(latestRunByCase.get(row.original.id))} />,
       }),
       caseColumns.accessor((t) => runTime(latestRunByCase.get(t.id) ?? { status: "" }), {
         id: "lastRun",
@@ -250,7 +307,7 @@ export function TestCasesPage() {
       caseColumns.accessor((t) => latestRunByCase.get(t.id)?.runBy ?? "", {
         id: "runBy",
         header: "Run by",
-        cell: ({ getValue }) => <span className="text-[13px] text-muted-foreground">{getValue<string>() || "—"}</span>,
+        cell: ({ row }) => <span className="text-[13px] text-muted-foreground">{latestRunByCase.get(row.original.id)?.runBy || "—"}</span>,
       }),
       caseColumns.display({
         id: "delete",
@@ -385,7 +442,7 @@ export function TestCasesPage() {
         <DataTable
           columns={columns}
           data={rows}
-          getRowId={(t) => t.id}
+          getRowId={(t) => `${t.id}:${caseStatus(latestRunByCase.get(t.id))}:${latestRunByCase.get(t.id)?.startedAt ?? ""}`}
           loading={loading}
           loadingLabel="Loading test cases…"
           minWidth={1050}
@@ -450,7 +507,7 @@ export function TestCasesPage() {
             <DataTable
               columns={columns}
               data={archivedRows}
-              getRowId={(testCase) => testCase.id}
+              getRowId={(testCase) => `${testCase.id}:${caseStatus(latestRunByCase.get(testCase.id))}:${latestRunByCase.get(testCase.id)?.startedAt ?? ""}`}
               minWidth={1050}
               onRowClick={(testCase) => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
               rowLabel={(testCase) => `Open ${testCase.code} ${testCase.name}`}
@@ -460,6 +517,25 @@ export function TestCasesPage() {
       </div>
     </PageContainer>
   );
+}
+
+function mergeLiveRuns(latest: CaseRun[], activity: { cases: Array<{ testCaseId: string; status: string; startedAt?: string | null; runBy?: string | null }> } | null, projectId: string): CaseRun[] {
+  const byId = new Map<string, CaseRun>();
+  for (const run of latest) {
+    if (run.testCaseId) byId.set(run.testCaseId, run);
+  }
+  for (const item of activity?.cases ?? []) {
+    const previous = byId.get(item.testCaseId);
+    byId.set(item.testCaseId, {
+      testCaseId: item.testCaseId,
+      projectId,
+      status: item.status,
+      startedAt: item.startedAt ?? previous?.startedAt ?? null,
+      completedAt: null,
+      runBy: item.runBy ?? null,
+    });
+  }
+  return [...byId.values()];
 }
 
 type CaseRun = {

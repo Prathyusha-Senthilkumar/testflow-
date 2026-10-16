@@ -52,7 +52,7 @@ function translateJavaScript(source: string): string {
   const body = start >= 0 && end > start ? source.slice(start + 1, end) : source;
   return body
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => exactText(line.trim()))
     .filter((line) => line && !line.startsWith("import ") && !line.startsWith("//"))
     .join("\n");
 }
@@ -69,9 +69,34 @@ function toJavaScriptCall(line: string): string {
     .replace(/\bFalse\b/g, "false")
     .replace(/\bNone\b/g, "null");
   converted = keywordArguments(converted);
+  converted = exactText(converted);
   if (!converted.endsWith(";")) converted += ";";
   if (!converted.startsWith("await ")) converted = `await ${converted}`;
   return converted;
+}
+
+/**
+ * A listed label, case-insensitive, ignoring surrounding whitespace.
+ * "curr" matches a text node that is only curr. It does not match "Curricula" or "curr-1".
+ * A following underscore still matches, so "java" matches "JAVA_FSD_Test".
+ */
+export function textIsListed(visibleText: string, expected: string): boolean {
+  const needle = expected.trim();
+  if (!needle) return false;
+  return listedTextPattern(needle).test(visibleText);
+}
+
+export function listedTextPattern(text: string): RegExp {
+  const escaped = text.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^A-Za-z0-9-])${escaped}(?![A-Za-z0-9-])`, "i");
+}
+
+/** Option-less getByText("label") matches that listed label, not a longer name that contains it. */
+export function exactText(line: string): string {
+  return line.replace(/\.getByText\(\s*(['"])(.*?)\1\s*\)/g, (_full, _quote: string, text: string) => {
+    const pattern = listedTextPattern(text);
+    return `.getByText(/${pattern.source.replace(/\//g, "\\/")}/${pattern.flags})`;
+  });
 }
 
 function keywordArguments(value: string): string {

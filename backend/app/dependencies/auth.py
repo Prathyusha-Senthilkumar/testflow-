@@ -15,11 +15,15 @@ import jwt
 from fastapi import Depends, HTTPException, Request
 
 from app.config import settings
+from app.logging_format import bind_user, log_failure
 
 logger = logging.getLogger("testflow.auth")
 
 AUDIENCE = "authenticated"
 _ASYMMETRIC_ALGORITHMS = ["RS256", "ES256"]
+# Supabase stamps iat from its own clock. A container a few seconds behind
+# otherwise rejects a brand-new token as "not yet valid".
+_CLOCK_LEEWAY_SECONDS = 30
 DEMO_USER_ID = "00000000-0000-0000-0000-000000000000"
 
 
@@ -60,6 +64,7 @@ def decode_access_token(token: str) -> dict:
     try:
         header = jwt.get_unverified_header(token)
     except jwt.PyJWTError as exc:
+        log_failure(logger, "auth.token", exc, level=logging.WARNING)
         raise HTTPException(status_code=401, detail="Sign in required.") from exc
     alg = str(header.get("alg") or "")
     try:
@@ -67,11 +72,18 @@ def decode_access_token(token: str) -> dict:
             secret = (settings.SUPABASE_JWT_SECRET or "").strip()
             if not secret:
                 return _claims_from_auth_server(token)
-            return jwt.decode(token, secret, algorithms=["HS256"], audience=AUDIENCE, options=options)
+            return jwt.decode(
+                token,
+                secret,
+                algorithms=["HS256"],
+                audience=AUDIENCE,
+                options=options,
+                leeway=_CLOCK_LEEWAY_SECONDS,
+            )
         if alg in _ASYMMETRIC_ALGORITHMS:
             base = (settings.SUPABASE_URL or "").strip().rstrip("/")
             if not base:
-                logger.error("event=auth_misconfigured reason=no_jwt_secret_or_supabase_url")
+                log_failure(logger, "auth.config", level=logging.ERROR)
                 raise HTTPException(status_code=503, detail="Sign-in is not configured on the server.")
             signing_key = _jwks_client(f"{base}/auth/v1/.well-known/jwks.json").get_signing_key_from_jwt(token)
             return jwt.decode(
@@ -80,18 +92,19 @@ def decode_access_token(token: str) -> dict:
                 algorithms=_ASYMMETRIC_ALGORITHMS,
                 audience=AUDIENCE,
                 options=options,
+                leeway=_CLOCK_LEEWAY_SECONDS,
             )
         raise HTTPException(status_code=401, detail="Sign in required.")
     except jwt.ExpiredSignatureError as exc:
+        log_failure(logger, "auth.token", exc, level=logging.WARNING)
         raise HTTPException(status_code=401, detail="Your session has expired. Sign in again.") from exc
     except jwt.PyJWKClientConnectionError as exc:
-        logger.error("event=auth_jwks_unreachable")
+        log_failure(logger, "auth.jwks", exc)
         raise HTTPException(status_code=503, detail="Could not reach the sign-in service.") from exc
     except jwt.PyJWTError as exc:
+        log_failure(logger, "auth.token", exc, level=logging.WARNING)
         if alg in _ASYMMETRIC_ALGORITHMS:
-            logger.info("event=auth_token_local_verify_failed reason=%s", exc.__class__.__name__)
             return _claims_from_auth_server(token)
-        logger.info("event=auth_token_rejected reason=%s", exc.__class__.__name__)
         raise HTTPException(status_code=401, detail="Sign in required.") from exc
 
 
@@ -135,6 +148,7 @@ def current_user_id(user: AuthenticatedUser = Depends(require_user)) -> str:
 
 
 def current_actor(user: AuthenticatedUser = Depends(require_user)) -> Optional[tuple[str, str]]:
+    bind_user(user.id, user.email)
     """(user id, display name) for run attribution. None for the demo bypass user."""
     if user.is_demo_bypass:
         return None

@@ -19,7 +19,17 @@ import {
   reapOrphans,
   release,
 } from "./jobStore.js";
-import { markCancelled, markFinished, markRequeued, markRunning } from "./runs.js";
+import { markCancelled, markFinished, markRequeued, markRunning, noteRedisFull } from "./runs.js";
+import {
+  REDIS_FULL_MESSAGE,
+  isRedisOom,
+  leaseTtlSeconds,
+  noteRedisOom,
+  redisReapPaused,
+  redisWriteDelayMs,
+  redisWritesPaused,
+  setRedisFullHandler,
+} from "./redisOom.js";
 import { runRecordedTest, type RunOutcome } from "./runTest.js";
 import { consumeAgentQueue } from "./agentRecord.js";
 import {
@@ -50,7 +60,14 @@ const KEEPALIVE_INTERVAL_MS = 30 * 1000;
 // Unique per process; the processing list and lease key are named after it.
 const WORKER_ID = `${hostname()}-${process.pid}-${randomBytes(3).toString("hex")}`;
 
-const redis = new Redis(process.env.REDIS_URL || "redis://redis:6379/0");
+const redis = new Redis(process.env.REDIS_URL || "redis://redis:6379/0", {
+  // A maxmemory reply is not a dropped connection. Returning 2 would resend the rejected write.
+  // Connection blips still use ioredis' default retryStrategy and maxRetriesPerRequest.
+  reconnectOnError(error) {
+    if (isRedisOom(error)) return false;
+    return false;
+  },
+});
 let stopping = false;
 const shutdown = new AbortController();
 const inFlight = new Map<string, Promise<void>>();
@@ -81,21 +98,32 @@ async function consume(slotIndex: number): Promise<void> {
         await sleep(200);
         continue;
       }
+      const paused = redisWriteDelayMs();
+      if (paused > 0) {
+        await sleep(Math.min(paused, 5_000));
+        continue;
+      }
       let jobId: string | null = null;
       try {
         jobId = await claimNext(blocking, WORKER_ID, 5);
       } catch (error) {
         if (stopping) break;
-        console.error(`event=claim_failed error=${errorText(error)}`);
+        if (pauseAfterRedisOom(error, "claim") !== null) continue;
+        console.error(`event=claim_failed error=${publicError(error)}`);
         await sleep(1000);
         continue;
       }
       if (!jobId) continue;
       if (stopping) {
-        await release(redis, WORKER_ID, jobId);
+        await releaseQuietly(jobId);
         break;
       }
-      const task = runOne(jobId, slotIndex).finally(() => inFlight.delete(jobId!));
+      const task = runOne(jobId, slotIndex)
+        .catch((error) => {
+          if (error instanceof WorkerStopping || stopping) return;
+          console.error(`event=job_failed job=${jobId} error=${publicError(error)}`);
+        })
+        .finally(() => inFlight.delete(jobId));
       inFlight.set(jobId, task);
       await task;
     }
@@ -105,11 +133,11 @@ async function consume(slotIndex: number): Promise<void> {
 }
 
 async function runOne(jobId: string, slotIndex: number): Promise<void> {
-  const claimed = await claimJob(redis, jobId, WORKER_ID);
+  const claimed = await redisWrite("claim_job", () => claimJob(redis, jobId, WORKER_ID));
   if (!claimed.applied) {
     // Missing, cancelled or already finished: nothing to run.
     if (!claimed.current || claimed.current.state === "cancelled") await markCancelled(jobId);
-    await ack(redis, WORKER_ID, jobId);
+    await redisWrite("ack", () => ack(redis, WORKER_ID, jobId));
     return;
   }
   const payload = claimed.current!;
@@ -137,7 +165,14 @@ async function execute(jobId: string, payload: JobPayload): Promise<"passed" | "
     result = await runRecordedTest(REPO_ROOT, payload.configPath, {
       browser: await pool.getBrowser(),
       newContext: async (options) => (await pool.acquireContext(options)).context,
-      isCancelled: async () => (await readJob(redis, jobId))?.state === "cancelled",
+      isCancelled: async () => {
+        try {
+          return (await readJob(redis, jobId))?.state === "cancelled";
+        } catch (error) {
+          if (pauseAfterRedisOom(error, "read_job") !== null) return false;
+          throw error;
+        }
+      },
       environmentBaseUrl: payload.environmentBaseUrl,
       runId: jobId,
       testTimeoutMs: TEST_TIMEOUT_MS,
@@ -145,7 +180,8 @@ async function execute(jobId: string, payload: JobPayload): Promise<"passed" | "
       signal: shutdown.signal,
     });
   } catch (error) {
-    const message = errorText(error).slice(0, 3000);
+    if (isRedisOom(error)) pauseAfterRedisOom(error, "test");
+    const message = (isRedisOom(error) ? REDIS_FULL_MESSAGE : errorText(error)).slice(0, 3000);
     result = {
       success: false,
       status: "Fail",
@@ -162,25 +198,33 @@ async function execute(jobId: string, payload: JobPayload): Promise<"passed" | "
     };
   }
 
-  if (stopping && result.cancelled && (await readJob(redis, jobId))?.state === "running") {
+  let handBack = false;
+  try {
+    handBack = Boolean(stopping && result.cancelled && (await readJob(redis, jobId))?.state === "running");
+  } catch (error) {
+    if (pauseAfterRedisOom(error, "read_job") === null) throw error;
+  }
+  if (handBack) {
     // Interrupted by shutdown, not by the tester: hand it back for another worker.
-    await release(redis, WORKER_ID, jobId);
-    await markRequeued(jobId);
+    // One attempt. A full Redis must not turn shutdown into a requeue loop.
+    if (await releaseQuietly(jobId)) await markRequeued(jobId);
     console.log(`event=job_released job=${jobId}`);
     return "released";
   }
   if (result.screenshot_error) console.error(`event=screenshot_failed job=${jobId}`);
 
   const state = result.success ? "completed" : "failed";
-  const finished = await finishJob(redis, jobId, WORKER_ID, state, {
-    result,
-    error: result.success ? null : result.error_message,
-  });
+  const finished = await redisWrite("finish_job", () =>
+    finishJob(redis, jobId, WORKER_ID, state, {
+      result,
+      error: result.success ? null : result.error_message,
+    })
+  );
   if (!finished.applied) {
     // Cancelled (or reaped) while running: the cancel wins, never overwrite it with a result.
     if (finished.current?.state === "cancelled") await markCancelled(jobId);
     console.log(`event=job_result_discarded job=${jobId} state=${finished.current?.state || "missing"}`);
-    await ack(redis, WORKER_ID, jobId);
+    await redisWrite("ack", () => ack(redis, WORKER_ID, jobId));
     return "skipped";
   } else {
     await markFinished(jobId, result.success ? "Passed" : "Failed", {
@@ -190,7 +234,7 @@ async function execute(jobId: string, payload: JobPayload): Promise<"passed" | "
     });
     console.log(`event=job_${state} job=${jobId} duration_ms=${result.duration_ms}`);
   }
-  await ack(redis, WORKER_ID, jobId);
+  await redisWrite("ack", () => ack(redis, WORKER_ID, jobId));
   return result.success ? "passed" : "failed";
 }
 
@@ -239,11 +283,18 @@ async function publishStatus(status: "online" | "draining"): Promise<void> {
 /** Runs until shutdown finishes (not just until it starts), so draining workers stay visible. */
 async function statusLoop(): Promise<void> {
   while (!statusStopped) {
+    const paused = redisWriteDelayMs();
+    if (paused > 0) {
+      await sleep(Math.min(paused, STATUS_INTERVAL_MS));
+      continue;
+    }
     try {
       statusWrite = publishStatus(stopping ? "draining" : "online");
       await statusWrite;
     } catch (error) {
-      console.error(`event=worker_status_failed error=${errorText(error)}`);
+      if (pauseAfterRedisOom(error, "worker_status") === null) {
+        console.error(`event=worker_status_failed error=${publicError(error)}`);
+      }
     }
     await sleep(STATUS_INTERVAL_MS);
   }
@@ -271,14 +322,53 @@ async function every(intervalMs: number, task: () => Promise<void>): Promise<voi
     try {
       await task();
     } catch (error) {
-      console.error(`event=background_task_failed error=${errorText(error)}`);
+      console.error(`event=background_task_failed error=${publicError(error)}`);
     }
     await sleep(intervalMs);
   }
 }
 
+async function leaseLoop(): Promise<void> {
+  const interval = Math.max(1000, Math.floor((LEASE_SECONDS * 1000) / 3));
+  while (!stopping) {
+    const paused = redisWriteDelayMs();
+    if (paused > 0) {
+      await sleep(Math.min(paused, 5_000));
+      continue;
+    }
+    try {
+      await heartbeat(redis, WORKER_ID, leaseTtlSeconds(LEASE_SECONDS));
+    } catch (error) {
+      if (pauseAfterRedisOom(error, "lease") === null) {
+        console.error(`event=background_task_failed error=${publicError(error)}`);
+        await sleep(interval);
+      }
+      continue;
+    }
+    await sleep(interval);
+  }
+}
+
+async function promoteDue(): Promise<void> {
+  if (redisWritesPaused()) return;
+  try {
+    await promoteScheduled(redis);
+  } catch (error) {
+    if (pauseAfterRedisOom(error, "promote") !== null) return;
+    throw error;
+  }
+}
+
 async function reap(): Promise<void> {
-  for (const orphan of await reapOrphans(redis, WORKER_ID)) {
+  if (redisReapPaused() || redisWritesPaused()) return;
+  let orphans;
+  try {
+    orphans = await reapOrphans(redis, WORKER_ID);
+  } catch (error) {
+    if (pauseAfterRedisOom(error, "reap") !== null) return;
+    throw error;
+  }
+  for (const orphan of orphans) {
     if (orphan.action === "requeued") await markRequeued(orphan.jobId);
     if (orphan.action === "failed") {
       await markFinished(orphan.jobId, "Failed", { error_message: ORPHAN_FAILED_MESSAGE });
@@ -288,19 +378,27 @@ async function reap(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  setRedisFullHandler(() => {
+    for (const id of inFlight.keys()) void noteRedisFull(id, REDIS_FULL_MESSAGE).catch(() => undefined);
+  });
   console.log(
     `event=worker_start worker=${WORKER_ID} queue=${QUEUE_KEY} concurrency=${WORKER_CONCURRENCY} ` +
-      `test_timeout_ms=${TEST_TIMEOUT_MS} step_timeout_ms=${STEP_TIMEOUT_MS} lease_s=${LEASE_SECONDS}`
+      `test_timeout_ms=${TEST_TIMEOUT_MS} step_timeout_ms=${STEP_TIMEOUT_MS} lease_s=${LEASE_SECONDS} ` +
+      `lease_ttl_s=${leaseTtlSeconds(LEASE_SECONDS)}`
   );
-  await heartbeat(redis, WORKER_ID, LEASE_SECONDS);
+  try {
+    await heartbeat(redis, WORKER_ID, leaseTtlSeconds(LEASE_SECONDS));
+  } catch (error) {
+    if (pauseAfterRedisOom(error, "lease") === null) throw error;
+  }
   void statusLoop();
   // Recover anything this host left behind before taking new work.
   await reap();
   await warmUp();
   await Promise.all([
     every(KEEPALIVE_INTERVAL_MS, keepWarm),
-    every(Math.max(1000, Math.floor((LEASE_SECONDS * 1000) / 3)), () => heartbeat(redis, WORKER_ID, LEASE_SECONDS)),
-    every(1000, async () => void (await promoteScheduled(redis))),
+    leaseLoop(),
+    every(1000, promoteDue),
     every(REAPER_INTERVAL_MS, reap),
     ...Array.from({ length: WORKER_CONCURRENCY }, (_, index) => consume(index)),
     consumeAgentQueue(redis, () => pool.getBrowser(), () => stopping, REPO_ROOT),
@@ -320,16 +418,30 @@ async function stop(signal: string): Promise<void> {
     await Promise.race([drained, sleep(10_000)]);
   }
   // Anything still listed as ours goes back to the queue (e.g. claimed just before the signal).
-  for (const jobId of await redis.lrange(processingKey(WORKER_ID), 0, -1)) {
-    await release(redis, WORKER_ID, jobId);
-    await markRequeued(jobId);
+  // One attempt each. A full Redis must not turn shutdown into a requeue loop.
+  try {
+    for (const jobId of await redis.lrange(processingKey(WORKER_ID), 0, -1)) {
+      if (await releaseQuietly(jobId)) await markRequeued(jobId);
+    }
+  } catch (error) {
+    if (pauseAfterRedisOom(error, "shutdown_release") === null) {
+      console.error(`event=shutdown_release_failed error=${publicError(error)}`);
+    }
   }
   await pool.close();
   statusStopped = true;
   // Let an in-flight heartbeat land first so it cannot re-create the key after removal.
   await statusWrite.catch(() => undefined);
-  await removeHeartbeat(redis, WORKER_ID).catch(() => undefined);
-  await dropLease(redis, WORKER_ID);
+  await removeHeartbeat(redis, WORKER_ID).catch((error) => {
+    if (pauseAfterRedisOom(error, "worker_status") === null) {
+      console.error(`event=worker_status_remove_failed error=${publicError(error)}`);
+    }
+  });
+  await dropLease(redis, WORKER_ID).catch((error) => {
+    if (pauseAfterRedisOom(error, "drop_lease") === null) {
+      console.error(`event=drop_lease_failed error=${publicError(error)}`);
+    }
+  });
   redis.disconnect();
   console.log("event=worker_stopped");
   process.exit(0);
@@ -352,10 +464,58 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function publicError(error: unknown): string {
+  return errorText(error).split("\n")[0].replace(/rediss?:\/\/\S+/gi, "redis://redacted").slice(0, 180);
+}
+
+class WorkerStopping extends Error {
+  constructor() {
+    super("Worker is stopping");
+    this.name = "WorkerStopping";
+  }
+}
+
+/** Retry a Redis write only after a maxmemory pause. Connection errors still throw on the first failure. */
+async function redisWrite<T>(action: string, op: () => Promise<T>): Promise<T> {
+  for (;;) {
+    if (stopping) throw new WorkerStopping();
+    const paused = redisWriteDelayMs();
+    if (paused > 0) {
+      await sleep(Math.min(paused, 5_000));
+      continue;
+    }
+    try {
+      return await op();
+    } catch (error) {
+      if (pauseAfterRedisOom(error, action) === null) throw error;
+    }
+  }
+}
+
+/** One shutdown/release attempt. Returns false when Redis rejected the write, without queueing a retry. */
+async function releaseQuietly(jobId: string): Promise<boolean> {
+  if (redisWritesPaused()) return false;
+  try {
+    await release(redis, WORKER_ID, jobId);
+    return true;
+  } catch (error) {
+    if (pauseAfterRedisOom(error, "release") !== null) return false;
+    console.error(`event=release_failed job=${jobId} error=${publicError(error)}`);
+    return false;
+  }
+}
+
+function pauseAfterRedisOom(error: unknown, action: string): number | null {
+  if (!isRedisOom(error)) return null;
+  const waitMs = noteRedisOom();
+  console.error(`event=redis_full action=${action} wait_ms=${waitMs}`);
+  return waitMs;
+}
+
 process.on("SIGTERM", () => void stop("SIGTERM"));
 process.on("SIGINT", () => void stop("SIGINT"));
 
 main().catch((error) => {
-  console.error(error);
+  console.error(publicError(error));
   process.exit(1);
 });

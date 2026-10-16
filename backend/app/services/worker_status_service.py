@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from redis.exceptions import RedisError
 
 from app.config import settings
+from app.logging_format import log_failure
 from app.repositories.worker_status_repository import (
     BatchQueueDepthRepository,
     RegistrySnapshot,
@@ -91,11 +92,15 @@ class WorkerStatusService:
 
     def _read_snapshot(self) -> Optional[RegistrySnapshot]:
         try:
-            return self._repository.read_snapshot()
+            snapshot = self._repository.read_snapshot()
         except (RedisError, OSError, RuntimeError) as exc:
             # Class name only: connection errors can echo the Redis URL, which may hold a password.
-            logger.warning("event=worker_status_redis_unavailable error=%s", type(exc).__name__)
+            if not getattr(self, "_redis_error_logged", False):
+                self._redis_error_logged = True
+                logger.warning("worker.redis failed: %s", type(exc).__name__)
             return None
+        self._redis_error_logged = False
+        return snapshot
 
     def _classify(self, snapshot: RegistrySnapshot, now: float) -> List[WorkerStatus]:
         workers: List[WorkerStatus] = []
@@ -132,7 +137,7 @@ class WorkerStatusService:
                 self._repository.forget_workers(forget)
                 logger.info("event=workers_forgotten count=%d", len(forget))
             except (RedisError, OSError) as exc:
-                logger.warning("event=workers_forget_failed error=%s", type(exc).__name__)
+                logger.warning("worker.forget failed: %s", type(exc).__name__)
         order = {"online": 0, "draining": 1, "stale": 2}
         workers.sort(key=lambda worker: (order[worker.status], worker.hostname or "", worker.id))
         return workers
@@ -143,7 +148,7 @@ class WorkerStatusService:
         try:
             depth = self._batch_depth.read_depth()
         except Exception as exc:  # optional metric: a missing function or Supabase hiccup must not fail the page
-            logger.info("event=batch_queue_depth_unavailable error=%s", type(exc).__name__)
+            log_failure(logger, "worker.queue_depth", exc, level=logging.WARNING, dedupe_seconds=300)
             depth = None
         self._batch_cache = (now, depth)
         return depth

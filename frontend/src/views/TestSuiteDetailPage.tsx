@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, FileCheck2, ListMinus, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateDraftTestCase } from "@/hooks/useCreateDraftTestCase";
+import { runningTitle, useLiveActivity } from "@/hooks/useLiveActivity";
 import { useScheduledBatches } from "@/hooks/useScheduledBatches";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
@@ -42,6 +43,8 @@ export function TestSuiteDetailPage() {
   const [busy, setBusy] = useState(false);
   const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
   const [starting, setStarting] = useState(false);
+  const activity = useLiveActivity(projectId);
+  const remoteSuite = activity?.suites.find((item) => item.suiteId === suiteId) ?? null;
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const projectDefault = defaultEnvironment(environments);
   const scheduled = useScheduledBatches({ projectId, suiteId }, { enabled: Boolean(projectId && suiteId) });
@@ -124,7 +127,7 @@ export function TestSuiteDetailPage() {
 
   /** Runs now: the main button on the project default, a "Run on" item once on that environment. */
   async function runSuite(targetEnvironmentId: string | undefined) {
-    if (!projectId || !suiteId || starting) return;
+    if (!projectId || !suiteId || starting || remoteSuite) return;
     if (!targetEnvironmentId) {
       toast.error("No environments configured", {
         description: "Add an environment to this project before running tests.",
@@ -309,17 +312,21 @@ export function TestSuiteDetailPage() {
             </Button>
             <RunMenuButton
               label="Run suite"
-              runningLabel="Starting…"
+              runningLabel={remoteSuite ? "Running" : "Starting…"}
               onRun={() => void runSuite(projectDefault?.id)}
               environments={environments}
               selectedEnvironmentId={projectDefault?.id}
               defaultEnvironmentId={projectDefault?.id}
               onRunOn={(id) => void runSuite(id)}
               onSchedule={() => setScheduleOpen(true)}
-              running={starting}
-              disabled={starting}
+              running={starting || Boolean(remoteSuite)}
+              disabled={starting || Boolean(remoteSuite)}
               scheduleDisabled={environments.length === 0}
-              title={projectDefault ? `Run on ${projectDefault.name}` : "Add an environment to run this suite"}
+              title={runningTitle(
+                Boolean(remoteSuite),
+                remoteSuite?.runBy,
+                projectDefault ? `Run on ${projectDefault.name}` : "Add an environment to run this suite"
+              )}
             />
           </>
         }

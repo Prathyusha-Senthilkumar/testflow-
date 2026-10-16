@@ -28,6 +28,7 @@ export function pollWhileVisible(tick: () => Promise<boolean>, intervalMs: numbe
     if (stopped || finished || running) return;
     if (document.hidden) {
       missedWhileHidden = true;
+      schedule();
       return;
     }
     running = true;

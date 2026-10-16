@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { pollWhileVisible } from "@/hooks/useExecutionPolling";
 import { History } from "lucide-react";
 import { api, type ReportRun } from "@/lib/api";
 import { Link } from "@/lib/navigation";
@@ -42,9 +43,9 @@ export function ScopedRunHistory({ projectId, suiteId }: { projectId: string; su
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
-    api
-      .reportRuns()
-      .then((rows) => {
+    return pollWhileVisible(async () => {
+      try {
+        const rows = await api.reportRuns();
         const matched = rows.filter((run) => {
           if (run.projectId !== projectId) return false;
           if (suiteId && run.suiteId !== suiteId) return false;
@@ -52,9 +53,13 @@ export function ScopedRunHistory({ projectId, suiteId }: { projectId: string; su
         });
         matched.sort((a, b) => startedTime(b) - startedTime(a));
         setRuns(withCounts(matched).slice(0, 20));
-      })
-      .catch(() => setRuns([]))
-      .finally(() => setLoading(false));
+      } catch {
+        setRuns([]);
+      } finally {
+        setLoading(false);
+      }
+      return true;
+    }, 4000);
   }, [projectId, suiteId]);
 
   const columns = useMemo(

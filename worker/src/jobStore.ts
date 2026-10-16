@@ -1,4 +1,5 @@
 import type { Redis } from "ioredis";
+import { isRedisOom, noteRedisOom, redisReapPaused, redisWritesPaused, throwIfRedisOom } from "./redisOom.js";
 
 // Redis layout shared with backend/app/queue/job_store.py and app/services/run_sweep_service.py.
 export const QUEUE_KEY = "testflow:queue";
@@ -112,7 +113,8 @@ export async function release(redis: Redis, workerId: string, jobId: string): Pr
   await updateJob(redis, jobId, (job) =>
     TERMINAL_STATES.has(job.state) ? null : { ...job, state: "queued", claimedBy: null }
   );
-  await redis.multi().lrem(processingKey(workerId), 1, jobId).rpush(QUEUE_KEY, jobId).exec();
+  const released = await redis.multi().lrem(processingKey(workerId), 1, jobId).rpush(QUEUE_KEY, jobId).exec();
+  throwIfRedisOom(released);
 }
 
 export async function heartbeat(redis: Redis, workerId: string, leaseSeconds: number): Promise<void> {
@@ -123,18 +125,33 @@ export async function dropLease(redis: Redis, workerId: string): Promise<void> {
   await redis.del(LEASE_PREFIX + workerId);
 }
 
+// Removed from the schedule, but the queue write was rejected. Flushed on the next promote.
+const owedPromotion: string[] = [];
+
+async function deliverPromoted(redis: Redis, jobId: string, promoted: string[], retry: boolean): Promise<void> {
+  const { current } = await updateJob(redis, jobId, (job) =>
+    job.state === "scheduled" ? { ...job, state: "queued" } : null
+  );
+  if (!current || TERMINAL_STATES.has(current.state)) return;
+  if (retry && (await redis.lpos(QUEUE_KEY, jobId)) !== null) return;
+  await redis.lpush(QUEUE_KEY, jobId);
+  promoted.push(jobId);
+}
+
 /** Move due scheduled jobs onto the queue. ZREM decides which worker owns the promotion. */
 export async function promoteScheduled(redis: Redis): Promise<string[]> {
-  const due = await redis.zrangebyscore(SCHEDULE_KEY, 0, Date.now() / 1000);
   const promoted: string[] = [];
+  while (owedPromotion.length > 0) {
+    const jobId = owedPromotion[0];
+    await deliverPromoted(redis, jobId, promoted, true);
+    owedPromotion.shift();
+  }
+  const due = await redis.zrangebyscore(SCHEDULE_KEY, 0, Date.now() / 1000);
   for (const jobId of due) {
     if ((await redis.zrem(SCHEDULE_KEY, jobId)) !== 1) continue;
-    const { current } = await updateJob(redis, jobId, (job) =>
-      job.state === "scheduled" ? { ...job, state: "queued" } : null
-    );
-    if (!current || TERMINAL_STATES.has(current.state)) continue;
-    await redis.lpush(QUEUE_KEY, jobId);
-    promoted.push(jobId);
+    owedPromotion.push(jobId);
+    await deliverPromoted(redis, jobId, promoted, false);
+    owedPromotion.shift();
   }
   return promoted;
 }
@@ -147,6 +164,9 @@ export type OrphanOutcome = { jobId: string; action: "requeued" | "failed" | "dr
  * one reaper works at a time.
  */
 export async function reapOrphans(redis: Redis, selfId: string, lockSeconds = 30): Promise<OrphanOutcome[]> {
+  // A missing lease during a maxmemory rejection is not a crashed worker. Skip requeue until
+  // writes work again and owners have had time to refresh.
+  if (redisReapPaused() || redisWritesPaused()) return [];
   const locked = await redis.set(REAPER_LOCK_KEY, selfId, "EX", lockSeconds, "NX");
   if (locked !== "OK") return [];
   const outcomes: OrphanOutcome[] = [];
@@ -160,12 +180,26 @@ export async function reapOrphans(redis: Redis, selfId: string, lockSeconds = 30
         if (workerId === selfId) continue;
         if (await redis.exists(LEASE_PREFIX + workerId)) continue;
         const jobIds = await redis.lrange(key, 0, -1);
-        for (const jobId of jobIds) outcomes.push(await recoverOne(redis, key, jobId));
+        for (const jobId of jobIds) {
+          try {
+            outcomes.push(await recoverOne(redis, key, jobId));
+          } catch (error) {
+            if (!isRedisOom(error)) throw error;
+            const waitMs = noteRedisOom();
+            console.error(`event=redis_full action=reap wait_ms=${waitMs}`);
+            return outcomes;
+          }
+        }
         if ((await redis.llen(key)) === 0) await redis.del(key);
       }
     } while (cursor !== "0");
   } finally {
-    if ((await redis.get(REAPER_LOCK_KEY)) === selfId) await redis.del(REAPER_LOCK_KEY);
+    try {
+      if ((await redis.get(REAPER_LOCK_KEY)) === selfId) await redis.del(REAPER_LOCK_KEY);
+    } catch (error) {
+      if (!isRedisOom(error)) throw error;
+      noteRedisOom();
+    }
   }
   return outcomes;
 }
@@ -187,7 +221,8 @@ async function recoverOne(redis: Redis, listKey: string, jobId: string): Promise
   });
   const tx = redis.multi().lrem(listKey, 1, jobId);
   if (action === "requeued") tx.rpush(QUEUE_KEY, jobId);
-  await tx.exec();
+  const moved = await tx.exec();
+  throwIfRedisOom(moved);
   return { jobId, action };
 }
 
