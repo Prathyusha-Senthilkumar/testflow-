@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, FileCheck2, ListMinus, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateDraftTestCase } from "@/hooks/useCreateDraftTestCase";
@@ -43,6 +43,8 @@ export function TestSuiteDetailPage() {
   const [busy, setBusy] = useState(false);
   const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
   const [starting, setStarting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const cancelWanted = useRef(false);
   const activity = useLiveActivity(projectId);
   const remoteSuite = activity?.suites.find((item) => item.suiteId === suiteId) ?? null;
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -136,13 +138,51 @@ export function TestSuiteDetailPage() {
       return;
     }
     setStarting(true);
+    cancelWanted.current = false;
     setError("");
     try {
       const started = await api.startSuiteRun(projectId, suiteId, targetEnvironmentId);
+      if (cancelWanted.current) {
+        cancelWanted.current = false;
+        await api.cancelBatchRun(started.batchId);
+        toast.success("Cancellation requested");
+        setStarting(false);
+        setCancelling(false);
+        return;
+      }
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
+      cancelWanted.current = false;
+      setCancelling(false);
       toast.error(err instanceof Error ? err.message : "Could not start the suite run");
       setStarting(false);
+    }
+  }
+
+  async function cancelSuiteRun() {
+    const ok = await confirm({
+      title: "Cancel this run?",
+      tone: "danger",
+      confirmLabel: "Cancel run",
+      cancelLabel: "Keep running",
+      description: "Tests that have not finished will stop. Results already recorded are kept.",
+    });
+    if (!ok) return;
+    const batchId = remoteSuite?.batchId;
+    if (!batchId) {
+      cancelWanted.current = true;
+      setCancelling(true);
+      return;
+    }
+    setCancelling(true);
+    try {
+      await api.cancelBatchRun(batchId);
+      toast.success("Cancellation requested");
+      setStarting(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not cancel this run");
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -321,6 +361,8 @@ export function TestSuiteDetailPage() {
               onSchedule={() => setScheduleOpen(true)}
               running={starting || Boolean(remoteSuite)}
               disabled={starting || Boolean(remoteSuite)}
+              onCancel={starting || remoteSuite ? () => void cancelSuiteRun() : undefined}
+              cancelling={cancelling}
               scheduleDisabled={environments.length === 0}
               title={runningTitle(
                 Boolean(remoteSuite),

@@ -530,6 +530,8 @@ export type WorkerSlot = {
   /** The test case CODE (e.g. "TC-007"). */
   testName?: string | null;
   startedAt?: string | null;
+  /** Last finished step number, once the worker has reported one. */
+  step?: number | null;
   /** Client-side enrichment: resolved test case name (see useWorkers). */
   testCaseName?: string | null;
 };

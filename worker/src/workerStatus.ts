@@ -27,6 +27,8 @@ export type Slot = {
   projectId?: string;
   testName?: string;
   startedAt?: string;
+  /** Last step that finished. Absent until the first step reports. The label stays in the screenshot list. */
+  step?: number;
 };
 
 /**
@@ -49,6 +51,13 @@ export class SlotTracker {
     if (job.projectId) slot.projectId = String(job.projectId);
     if (job.testName) slot.testName = String(job.testName).slice(0, 200);
     this.slots[this.check(index)] = slot;
+  }
+
+  /** Latest step number for a running slot. The step text stays in the screenshot list, not the heartbeat. */
+  progress(index: number, step: number): void {
+    const slot = this.slots[this.check(index)];
+    if (slot.state !== "running") return;
+    slot.step = step;
   }
 
   /** outcome: counted runs only. "released" (handed back on shutdown) frees the slot without counting. */

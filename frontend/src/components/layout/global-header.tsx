@@ -14,8 +14,10 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { BreadcrumbTrail } from "@/components/layout/breadcrumb-trail";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { RunnersIndicator } from "@/components/runners/runners-indicator";
+import { useModifierKey } from "@/hooks/useModifierKey";
 
 function HelpMenu() {
+  const modKey = useModifierKey();
   return (
     <Popover>
       <Tooltip>
@@ -34,13 +36,13 @@ function HelpMenu() {
           <div className="flex items-center justify-between">
             <dt className="text-muted-foreground">Search</dt>
             <dd>
-              <Kbd>⌘</Kbd> <Kbd>K</Kbd>
+              <Kbd>{modKey}</Kbd> <Kbd>K</Kbd>
             </dd>
           </div>
           <div className="flex items-center justify-between">
             <dt className="text-muted-foreground">Quick actions</dt>
             <dd>
-              <Kbd>⌘</Kbd> <Kbd>K</Kbd> then <Kbd>&gt;</Kbd>
+              <Kbd>{modKey}</Kbd> <Kbd>K</Kbd> then <Kbd>&gt;</Kbd>
             </dd>
           </div>
           <div className="flex items-center justify-between">

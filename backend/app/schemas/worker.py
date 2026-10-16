@@ -19,6 +19,8 @@ class WorkerSlot(BaseModel):
     projectId: Optional[str] = None
     testName: Optional[str] = None
     startedAt: Optional[str] = None
+    # Last finished step number. Absent until the worker reports one.
+    step: Optional[int] = None
 
 
 class WorkerBrowser(BaseModel):

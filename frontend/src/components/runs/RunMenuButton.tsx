@@ -37,6 +37,9 @@ export type RunMenuButtonProps = {
   onSchedule?: () => void;
   running?: boolean;
   disabled?: boolean;
+  /** Shown beside the button while a suite or project run is starting or in progress. */
+  onCancel?: () => void;
+  cancelling?: boolean;
   /** Disables "Schedule run…" separately from Run. Defaults to `disabled`. */
   scheduleDisabled?: boolean;
   /** Tooltip for the main button, e.g. "Run on Staging". */
@@ -59,6 +62,8 @@ export function RunMenuButton({
   onSchedule,
   running = false,
   disabled = false,
+  onCancel,
+  cancelling = false,
   scheduleDisabled,
   title,
   variant = "default",
@@ -73,6 +78,12 @@ export function RunMenuButton({
   const listed = onRunOn && environments?.length ? environments : [];
   const actions = Boolean(onRunWithOptions || onSchedule);
   const hasMenu = listed.length > 0 || actions;
+
+  const cancel = running && onCancel ? (
+    <Button variant="outline" size={size} onClick={onCancel} loading={cancelling} disabled={cancelling} className="ml-2">
+      Cancel run
+    </Button>
+  ) : null;
 
   const main = (
     <Button
@@ -89,7 +100,7 @@ export function RunMenuButton({
     </Button>
   );
 
-  if (!hasMenu) return <div className={cn("inline-flex", className)}>{main}</div>;
+  if (!hasMenu) return <div className={cn("inline-flex", className)}>{main}{cancel}</div>;
 
   return (
     <div
@@ -154,6 +165,7 @@ export function RunMenuButton({
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+      {cancel}
     </div>
   );
 }

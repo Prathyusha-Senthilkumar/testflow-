@@ -750,11 +750,14 @@ class TestRunRepository:
         return candidate
 
     def screenshot_steps(self, run_id: str) -> list[dict]:
-        """Step images stored beside the final screenshot. No extra database column."""
-        final = self.screenshot_file(run_id)
-        if final is None:
+        """Step images stored beside the final screenshot. No extra database column.
+
+        A run that is still going has no final screenshot yet. Its step files are
+        still listed from results/<run id> so the runners panel can show them live.
+        """
+        directory = self._results_directory(run_id)
+        if directory is None:
             return []
-        directory = final.parent
         manifest = directory / "steps.json"
         entries: list[dict] = []
         if manifest.is_file():
@@ -776,6 +779,7 @@ class TestRunRepository:
                         entry["failed"] = True
                         entry["error"] = str(item.get("error") or "")[:800]
                     entries.append(entry)
+        final = directory / "final-screenshot.png"
         if not entries and final.is_file():
             entries.append({"file": "final-screenshot.png", "label": "Final screenshot"})
         return entries
@@ -783,11 +787,26 @@ class TestRunRepository:
     def screenshot_named(self, run_id: str, file_name: str) -> Optional[Path]:
         if not _screenshot_name(file_name):
             return None
-        final = self.screenshot_file(run_id)
-        if final is None:
+        directory = self._results_directory(run_id)
+        if directory is None:
             return None
-        candidate = (final.parent / file_name).resolve()
-        if candidate.parent != final.parent.resolve() or not candidate.is_file():
+        candidate = (directory / file_name).resolve()
+        if candidate.parent != directory.resolve() or not candidate.is_file():
+            return None
+        return candidate
+
+    def _results_directory(self, run_id: str) -> Optional[Path]:
+        """Directory of one run's images. The finished path wins; otherwise results/<run id>."""
+        final = self.screenshot_file(run_id)
+        if final is not None:
+            return final.parent
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", run_id):
+            return None
+        from app.services.automation_service import _REPO_ROOT
+
+        results = (Path(_REPO_ROOT).resolve() / "results").resolve()
+        candidate = (results / run_id).resolve()
+        if candidate.parent != results or not candidate.is_dir():
             return None
         return candidate
 

@@ -20,12 +20,13 @@ import { RunningNowTable } from "@/components/workers/running-now";
 import { QueuePanel } from "@/components/workers/queue-panel";
 import { WorkerCard, WORKER_STATUS_BADGE } from "@/components/workers/worker-card";
 import { WorkersEmpty } from "@/components/workers/workers-empty";
+import { WorkerLiveProgress } from "@/components/workers/worker-live";
 import { useNow } from "@/components/workers/use-now";
 import type { WorkersState } from "@/hooks/useWorkers";
 import { useRunners } from "@/components/runners/runners-context";
 
 const ALL = "__all__";
-type PanelTab = "overview" | "runner" | "running" | "queue";
+type PanelTab = "overview" | "runner" | "worker" | "running" | "queue";
 
 function RunnerListItem({ worker, selected, onSelect }: { worker: WorkerInfo; selected: boolean; onSelect: () => void }) {
   const status = WORKER_STATUS_BADGE[worker.status] ?? WORKER_STATUS_BADGE.stale;
@@ -77,7 +78,7 @@ export type RunnersPanelViewProps = {
 
 /**
  * Presentational runners slide-over body: header, a runner list on the left and
- * tabs (Overview / Runner / Running now / Queue) on the right. Reuses the
+ * tabs (Overview / Runner / Worker / Running now / Queue) on the right. Reuses the
  * Workers page components; no data fetching.
  */
 export function RunnersPanelView({ state, selected, onSelect, tab, onTabChange, onClose, onExpand, className }: RunnersPanelViewProps) {
@@ -194,6 +195,7 @@ export function RunnersPanelView({ state, selected, onSelect, tab, onTabChange, 
                   <TabsList variant="line" className="w-full justify-start gap-1 border-b border-border">
                     <TabsTrigger value="overview" className="flex-none px-3">Overview</TabsTrigger>
                     <TabsTrigger value="runner" className="flex-none px-3">Runner</TabsTrigger>
+                    <TabsTrigger value="worker" className="flex-none px-3">Worker</TabsTrigger>
                     <TabsTrigger value="running" className="flex-none px-3">
                       Running now
                       <span className="rounded-sm bg-elevated px-1.5 text-xs text-muted-foreground tabular-nums">{data.totals.busy}</span>
@@ -211,6 +213,13 @@ export function RunnersPanelView({ state, selected, onSelect, tab, onTabChange, 
                     ) : (
                       <p className="text-[13px] text-muted-foreground">Select a runner on the left.</p>
                     )}
+                  </TabsContent>
+                  <TabsContent value="worker" className="pt-4">
+                    <WorkerLiveProgress
+                      workers={selected === ALL ? workers : selectedWorker ? [selectedWorker] : []}
+                      projectNames={projectNames}
+                      scopeLabel={selected === ALL ? "A runner" : selectedWorker ? workerName(selectedWorker) : "This runner"}
+                    />
                   </TabsContent>
                   <TabsContent value="running" className="pt-4">
                     <RunningNowTable workers={data.workers} projectNames={projectNames} />

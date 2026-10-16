@@ -187,12 +187,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
     setPeek(false);
     clearPeekTimer();
     setCollapsed((current) => {
-      const open = !current || peek;
-      suppressPeek.current = open;
-      writeStorage(COLLAPSE_KEY, open ? "1" : "0");
-      return open;
+      const next = !current;
+      // A hover preview is not pinned. Collapsing under the pointer should not immediately open it again.
+      suppressPeek.current = next;
+      writeStorage(COLLAPSE_KEY, next ? "1" : "0");
+      return next;
     });
-  }, [clearPeekTimer, peek]);
+  }, [clearPeekTimer]);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -208,7 +209,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
             onSidebarLeave={hidePeek}
             brand={<SidebarBrand collapsed={visualCollapsed} />}
             header={<GlobalHeader onOpenMobileNav={() => setMobileOpen(true)} />}
-            sidebar={<Sidebar collapsed={visualCollapsed} onToggle={toggleCollapsed} />}
+            sidebar={<Sidebar collapsed={visualCollapsed} storedCollapsed={collapsed} onToggle={toggleCollapsed} />}
             resizer={
               collapsed ? null : (
                 <Sash

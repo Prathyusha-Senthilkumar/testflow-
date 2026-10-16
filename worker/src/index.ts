@@ -141,24 +141,30 @@ async function runOne(jobId: string, slotIndex: number): Promise<void> {
     return;
   }
   const payload = claimed.current!;
+  const runKey = typeof payload.runId === "string" && payload.runId ? payload.runId : jobId;
   slots.start(slotIndex, {
     jobId,
     // test_runs rows are linked by job_id; the job id doubles as the run id the UI links to.
-    runId: typeof payload.runId === "string" ? payload.runId : jobId,
+    runId: runKey,
     testCaseId: stringOrNull(payload.testCaseId),
     projectId: stringOrNull(payload.projectId),
     testName: stringOrNull(payload.testCaseName) || stringOrNull(payload.testCaseCode),
   });
   let outcome: "passed" | "failed" | "released" | "skipped" = "skipped";
   try {
-    outcome = await execute(jobId, payload);
+    outcome = await execute(jobId, payload, slotIndex, runKey);
   } finally {
     slots.finish(slotIndex, outcome);
     if (pool.needsRecycle()) void recycleWhenIdle("threshold");
   }
 }
 
-async function execute(jobId: string, payload: JobPayload): Promise<"passed" | "failed" | "released" | "skipped"> {
+async function execute(
+  jobId: string,
+  payload: JobPayload,
+  slotIndex: number,
+  runKey: string
+): Promise<"passed" | "failed" | "released" | "skipped"> {
   await markRunning(jobId);
   let result: RunOutcome;
   try {
@@ -174,10 +180,11 @@ async function execute(jobId: string, payload: JobPayload): Promise<"passed" | "
         }
       },
       environmentBaseUrl: payload.environmentBaseUrl,
-      runId: jobId,
+      runId: runKey,
       testTimeoutMs: TEST_TIMEOUT_MS,
       stepTimeoutMs: STEP_TIMEOUT_MS,
       signal: shutdown.signal,
+      onStep: (step) => slots.progress(slotIndex, step),
     });
   } catch (error) {
     if (isRedisOom(error)) pauseAfterRedisOom(error, "test");

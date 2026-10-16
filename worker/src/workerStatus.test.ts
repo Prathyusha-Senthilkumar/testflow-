@@ -60,6 +60,15 @@ test("slots start idle and track running jobs by index", () => {
   ]);
 });
 
+test("progress records the latest step and clears when the slot is freed", () => {
+  const slots = new SlotTracker(1);
+  slots.start(0, { jobId: "j" });
+  slots.progress(0, 2);
+  assert.equal(slots.snapshot()[0].step, 2);
+  slots.finish(0, "passed");
+  assert.equal(slots.snapshot()[0].step, undefined);
+});
+
 test("finish frees the slot and counts processed and failed runs", () => {
   const slots = new SlotTracker(2);
   slots.start(0, { jobId: "a" });

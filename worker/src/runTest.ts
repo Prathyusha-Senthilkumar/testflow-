@@ -54,6 +54,8 @@ export type RunOptions = {
   stepTimeoutMs: number;
   /** Set by the caller to abort (e.g. shutdown). */
   signal?: AbortSignal;
+  /** Called after each step so the runners panel can show live progress. */
+  onStep?: (step: number, label: string) => void;
 };
 
 export class TestNotStartedError extends Error {}
@@ -179,7 +181,7 @@ export async function runRecordedTest(repoRoot: string, configPath: string, opti
     });
 
     await seedStorage(page, meta);
-    shots = await startStepShots(page, repoRoot, options.runId || "");
+    shots = await startStepShots(page, repoRoot, options.runId || "", options.onStep);
     const run = new Function(
       "page",
       "expect",
@@ -252,7 +254,12 @@ function withStepShots(body: string): string {
     .join("\n");
 }
 
-async function startStepShots(page: Page, repoRoot: string, runId: string): Promise<StepShots> {
+async function startStepShots(
+  page: Page,
+  repoRoot: string,
+  runId: string,
+  onStep?: (step: number, label: string) => void
+): Promise<StepShots> {
   const key = runId.replace(/[^A-Za-z0-9_-]/g, "");
   const shots: { file: string; label: string; failed?: boolean; error?: string }[] = [];
   const directory = key ? path.join(repoRoot, "results", key) : "";
@@ -264,10 +271,12 @@ async function startStepShots(page: Page, repoRoot: string, runId: string): Prom
       try {
         await page.screenshot({ path: path.join(directory, file), fullPage: false });
         shots.push({ file, label: label.slice(0, 160) });
+        await persist();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`Step screenshot failed: ${message}`);
       }
+      onStep?.(step, label);
     },
     async fail(step: number, message: string) {
       const file = `step-${String(step).padStart(2, "0")}.png`;
@@ -276,14 +285,19 @@ async function startStepShots(page: Page, repoRoot: string, runId: string): Prom
       const text = message.trim().slice(0, 800);
       entry.failed = true;
       entry.error = text;
+      await persist();
     },
     async finish(includeFinal: boolean) {
       if (!directory) return;
       if (includeFinal) shots.push({ file: "final-screenshot.png", label: "Final screenshot" });
-      if (shots.length === 0) return;
-      await writeFile(path.join(directory, "steps.json"), JSON.stringify(shots), "utf8");
+      await persist();
     },
   };
+
+  async function persist() {
+    if (!directory || shots.length === 0) return;
+    await writeFile(path.join(directory, "steps.json"), JSON.stringify(shots), "utf8");
+  }
 }
 
 export async function captureFinalScreenshot(page: Page, repoRoot: string, runId: string): Promise<string | null> {

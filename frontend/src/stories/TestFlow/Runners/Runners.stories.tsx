@@ -79,7 +79,7 @@ export const Loading: Story = { args: { data: null, loading: true } };
 
 /* ------------------------------------------------------------- slide-over */
 
-function Panel({ initial, selected: initialSelected = "__all__", tab: initialTab = "overview" }: { initial: WorkersState; selected?: string; tab?: "overview" | "runner" | "running" | "queue" }) {
+function Panel({ initial, selected: initialSelected = "__all__", tab: initialTab = "overview" }: { initial: WorkersState; selected?: string; tab?: "overview" | "runner" | "worker" | "running" | "queue" }) {
   const [selected, setSelected] = useState(initialSelected);
   const [tab, setTab] = useState(initialTab);
   return (

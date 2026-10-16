@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
@@ -81,6 +81,10 @@ export function ProjectOverviewPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [error, setError] = useState("");
   const [startingProject, setStartingProject] = useState(false);
+  const [cancellingProject, setCancellingProject] = useState(false);
+  const [cancellingSuiteId, setCancellingSuiteId] = useState<string | null>(null);
+  const cancelWantedProject = useRef(false);
+  const cancelWantedSuite = useRef<string | null>(null);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [suiteCategory, setSuiteCategory] = useState<"all" | SuiteCategory>("all");
   const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
@@ -123,12 +127,24 @@ export function ProjectOverviewPage() {
       return;
     }
     setStartingProject(true);
+    cancelWantedProject.current = false;
     setError("");
     try {
       const started = await api.startProjectRun(projectId, category, targetEnvironmentId);
+      if (cancelWantedProject.current) {
+        cancelWantedProject.current = false;
+        await api.cancelBatchRun(started.batchId);
+        toast.success("Cancellation requested");
+        setStartingProject(false);
+        setCancellingProject(false);
+        setProjectDialogOpen(false);
+        return;
+      }
       setProjectDialogOpen(false);
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
+      cancelWantedProject.current = false;
+      setCancellingProject(false);
       const message = err instanceof Error ? err.message : "Could not start the project run";
       if (projectDialogOpen) setError(message);
       else toast.error(message);
@@ -143,13 +159,79 @@ export function ProjectOverviewPage() {
       return;
     }
     setStartingSuiteId(suiteId);
+    if (cancelWantedSuite.current === suiteId) cancelWantedSuite.current = null;
     setError("");
     try {
       const started = await api.startSuiteRun(projectId, suiteId, targetEnvironmentId);
+      if (cancelWantedSuite.current === suiteId) {
+        cancelWantedSuite.current = null;
+        await api.cancelBatchRun(started.batchId);
+        toast.success("Cancellation requested");
+        setStartingSuiteId(null);
+        setCancellingSuiteId(null);
+        return;
+      }
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
+      if (cancelWantedSuite.current === suiteId) cancelWantedSuite.current = null;
+      setCancellingSuiteId(null);
       toast.error(err instanceof Error ? err.message : "Could not start the suite run");
       setStartingSuiteId(null);
+    }
+  }
+
+  async function confirmCancel() {
+    return confirm({
+      title: "Cancel this run?",
+      tone: "danger",
+      confirmLabel: "Cancel run",
+      cancelLabel: "Keep running",
+      description: "Tests that have not finished will stop. Results already recorded are kept.",
+    });
+  }
+
+  async function cancelProjectRun() {
+    const ok = await confirmCancel();
+    if (!ok) return;
+    const batchId = remoteProject?.batchId;
+    if (!batchId) {
+      cancelWantedProject.current = true;
+      setCancellingProject(true);
+      return;
+    }
+    setCancellingProject(true);
+    try {
+      await api.cancelBatchRun(batchId);
+      toast.success("Cancellation requested");
+      setStartingProject(false);
+      setProjectDialogOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not cancel this run");
+    } finally {
+      setCancellingProject(false);
+    }
+  }
+
+  async function cancelSuiteRun(suiteId: string) {
+    const ok = await confirmCancel();
+    if (!ok) return;
+    const batchId = activity?.suites.find((item) => item.suiteId === suiteId)?.batchId;
+    if (!batchId) {
+      if (startingSuiteId === suiteId) {
+        cancelWantedSuite.current = suiteId;
+        setCancellingSuiteId(suiteId);
+      }
+      return;
+    }
+    setCancellingSuiteId(suiteId);
+    try {
+      await api.cancelBatchRun(batchId);
+      toast.success("Cancellation requested");
+      if (startingSuiteId === suiteId) setStartingSuiteId(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not cancel this run");
+    } finally {
+      setCancellingSuiteId(null);
     }
   }
 
@@ -279,6 +361,12 @@ export function ProjectOverviewPage() {
             onSchedule={() => setScheduleTarget({ kind: "suite", id: row.original.id, name: row.original.name })}
             running={startingSuiteId === row.original.id || Boolean(activity?.suites.some((item) => item.suiteId === row.original.id))}
             disabled={startingSuiteId === row.original.id || Boolean(activity?.suites.some((item) => item.suiteId === row.original.id))}
+            onCancel={
+              startingSuiteId === row.original.id || activity?.suites.some((item) => item.suiteId === row.original.id)
+                ? () => void cancelSuiteRun(row.original.id)
+                : undefined
+            }
+            cancelling={cancellingSuiteId === row.original.id}
             scheduleDisabled={environments.length === 0}
           />
         ),
@@ -286,7 +374,7 @@ export function ProjectOverviewPage() {
       }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run handlers are recreated each render but only read the state listed here
-    [startingSuiteId, environments, defaultEnvironment, activity]
+    [startingSuiteId, cancellingSuiteId, environments, defaultEnvironment, activity]
   );
 
   if (loading) return <OverviewSkeleton />;
@@ -347,6 +435,8 @@ export function ProjectOverviewPage() {
               )}
               running={Boolean(remoteProject) || (startingProject && !projectDialogOpen)}
               disabled={Boolean(remoteProject) || startingProject || project.cases === 0}
+              onCancel={remoteProject || (startingProject && !projectDialogOpen) ? () => void cancelProjectRun() : undefined}
+              cancelling={cancellingProject}
               scheduleDisabled={project.cases === 0 || environments.length === 0}
             />
           </>
@@ -435,8 +525,15 @@ export function ProjectOverviewPage() {
         description={project.name}
         footer={
           <>
-            <Button variant="outline" disabled={startingProject} onClick={() => setProjectDialogOpen(false)}>
-              Cancel
+            <Button
+              variant="outline"
+              disabled={cancellingProject}
+              onClick={() => {
+                if (startingProject) void cancelProjectRun();
+                else setProjectDialogOpen(false);
+              }}
+            >
+              {startingProject ? "Cancel run" : "Cancel"}
             </Button>
             <Button
               loading={startingProject}

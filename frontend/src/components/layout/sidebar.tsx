@@ -86,10 +86,13 @@ export function SidebarBrand({ collapsed }: { collapsed: boolean }) {
 /** Navigation content, shared by the desktop sidebar and the mobile sheet. */
 export function SidebarNav({
   collapsed = false,
+  storedCollapsed,
   onNavigate,
   onToggle,
 }: {
   collapsed?: boolean;
+  /** Persisted state. A hover preview looks open, but the button still expands until the user pins it. */
+  storedCollapsed?: boolean;
   onNavigate?: () => void;
   onToggle?: () => void;
 }) {
@@ -110,7 +113,7 @@ export function SidebarNav({
       <div className={cn("space-y-1 border-t border-border py-2", collapsed ? "flex flex-col items-center px-2.5" : "px-3")}>
         {onToggle ? (
           <div className={cn("flex", collapsed ? "justify-center" : "justify-end pr-0.5")}>
-            <SidebarCollapseButton collapsed={collapsed} onToggle={onToggle} />
+            <SidebarCollapseButton collapsed={storedCollapsed ?? collapsed} onToggle={onToggle} />
           </div>
         ) : null}
         <SidebarLink item={SETTINGS_NAV} active={isNavActive(SETTINGS_NAV, pathname)} collapsed={collapsed} onNavigate={onNavigate} />
@@ -121,6 +124,14 @@ export function SidebarNav({
 }
 
 /** Desktop sidebar navigation (the shell provides the column, border and sash). */
-export function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () => void }) {
-  return <SidebarNav collapsed={collapsed} onToggle={onToggle} />;
+export function Sidebar({
+  collapsed,
+  storedCollapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  storedCollapsed?: boolean;
+  onToggle?: () => void;
+}) {
+  return <SidebarNav collapsed={collapsed} storedCollapsed={storedCollapsed} onToggle={onToggle} />;
 }
