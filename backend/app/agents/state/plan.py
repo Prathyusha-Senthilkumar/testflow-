@@ -1,5 +1,6 @@
 """Turn the tester's sentence into a short step list. The page is not attached."""
 
+import re
 from urllib.parse import urlparse
 
 from app.agents.limits import PLAN_LIMITS, LimitReached, LoopState
@@ -11,13 +12,18 @@ MAX_CASES = 10
 
 SYSTEM = (
     "You write UI test plans. Return only the JSON object. "
-    "Each distinct check in the request is its own case. One check is one case. At most 10 cases. "
+    "Split the request into one case per thing that must be true. At most 10 cases. "
+    "A list of names, labels, buttons, or results is several cases, even when it is one sentence. "
+    "\"Check if Alpha, Beta, and Gamma are listed\" is three cases. Each expected is only that one visible name. "
+    "Do not join those names into one expected string. "
+    "Cases may share a path and the same steps. "
+    "A single sequence that proves one result stays one case. "
     "name is a short test title. "
     "path must be copied exactly from the page list. Do not invent a path. "
     "Each step is one action: goto, click, fill, or press. "
     "target is the visible button, link, or field name. "
     "value is what to type, or an empty string. "
-    "Do not include passwords. expected is the short visible text that proves the test passed, such as a name on the page, not a sentence. "
+    "Do not include passwords. expected is the short visible text that proves that one case, not a sentence. "
     "If the landing page is already the right page, use its path and do not add a goto."
 )
 
@@ -89,7 +95,11 @@ def build_cases(parsed: dict, pages: list[dict]) -> list[dict]:
         if not steps and not expected:
             continue
         name = " ".join(str(item.get("name") or expected or "Agent test").split())[:80] or "Agent test"
-        chosen.append({"name": name, "path": path, "steps": steps[:12], "expected": expected})
+        for label in _listed_names(expected) or [expected]:
+            if len(chosen) >= MAX_CASES:
+                break
+            title = label if label != expected else name
+            chosen.append({"name": title[:80] or name, "path": path, "steps": steps[:12], "expected": label})
     if not chosen:
         raise PlanRejected("None of the pages matched. Choose one below.")
     return chosen
@@ -101,6 +111,25 @@ def url_for_path(landing: str, path: str) -> str:
     origin = f"{parsed.scheme}://{parsed.netloc}"
     suffix = path if path.startswith("/") else f"/{path}"
     return origin + suffix
+
+
+_LIST_SPLIT = re.compile(r"\s*(?:,|;|\band\b|&)\s*", re.IGNORECASE)
+# A real sentence stays one case. A list of short names does not.
+_SENTENCE = re.compile(
+    r"\b(click|open|confirm|check|should|then|when|listed|shows|show|page|button|search|filter)\b",
+    re.IGNORECASE,
+)
+
+
+def _listed_names(expected: str) -> list[str]:
+    """Split an expected value that is only a list of visible names. Leave a sentence whole."""
+    text = re.sub(r"\s+(?:are|is)\s+(?:listed|shown|visible)\.?$", "", expected.strip(), flags=re.IGNORECASE)
+    parts = [part.strip(" .") for part in _LIST_SPLIT.split(text) if part.strip(" .")]
+    if len(parts) < 2:
+        return []
+    if any(len(part) > 40 or len(part.split()) > 3 or _SENTENCE.search(part) for part in parts):
+        return []
+    return parts
 
 
 def _norm(path: str) -> str:

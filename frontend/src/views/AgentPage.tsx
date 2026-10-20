@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, Check, ListChecks } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useNavigate, useParams } from "@/lib/navigation";
 import { api, type AgentCase, type AgentJob, type AuthProfileSummary, type EnvironmentSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,14 @@ import { CategoryMultiSelect } from "@/components/suites/CategoryMultiSelect";
 import { type SuiteCategory } from "@/lib/suiteCategory";
 
 const WAITING = new Set(["discovering", "planning", "recording"]);
+const STAGES = ["describe", "recommend", "record"] as const;
+type Stage = (typeof STAGES)[number];
+
+const STAGE_LABELS: Record<Stage, string> = {
+  describe: "Test description",
+  recommend: "Recommended cases",
+  record: "Record cases",
+};
 
 export function AgentPage() {
   const { id: projectId = "" } = useParams();
@@ -36,6 +45,8 @@ export function AgentPage() {
   const [suiteCategories, setSuiteCategories] = useState<SuiteCategory[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [runNotice, setRunNotice] = useState("");
+  const [stage, setStage] = useState<Stage>("describe");
+  const stageRank = useRef(0);
   const confirm = useConfirm();
 
   usePublishEntityName("project", projectId, projectName);
@@ -89,6 +100,18 @@ export function AgentPage() {
         job.phase === "saved" ||
         (job.phase === "failed" && (job.cases || []).some((item) => item.phase === "failed" || item.phase === "recorded")))
   );
+  const furthest = furthestStage(job, showRecording);
+
+  useEffect(() => {
+    if (!job) {
+      setStage("describe");
+      stageRank.current = 0;
+      return;
+    }
+    const rank = STAGES.indexOf(furthest);
+    if (rank > stageRank.current) setStage(furthest);
+    stageRank.current = rank;
+  }, [job, furthest]);
 
   async function plan() {
     if (!environment) {
@@ -266,86 +289,91 @@ export function AgentPage() {
     <PageContainer>
       <PageHeader
         title="Agent"
-        description="Describe one or more checks. Review the recommended cases, then watch them record."
+        description="Describe the test, approve the recommended cases, then approve the recording."
       />
       {error ? <Alert variant="error">{error}</Alert> : null}
       {loading ? <p className="text-[13px] text-muted-foreground">Loading environments…</p> : null}
 
-      <div className="grid items-stretch gap-4 lg:min-h-[calc(100dvh-10.5rem)] lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)]">
-      <Card className="flex h-full flex-col">
-        <CardHeader>
-          <CardTitle>What should this test do?</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-1 flex-col gap-3">
-          <div className="flex min-h-64 flex-1 flex-col">
-            <FieldLabel htmlFor="agent-prompt" required>
-              Description
-            </FieldLabel>
-            <Textarea
-              id="agent-prompt"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="On curricula, confirm Algebra is listed, and confirm Java is listed."
-              className="field-sizing-fixed min-h-64 flex-1"
-            />
-          </div>
-          <Select
-            label="Environment"
-            required
-            value={environmentId}
-            onChange={setEnvironmentId}
-            options={environments.map((item) => ({ value: item.id, label: item.name }))}
-            placeholder="Choose an environment"
-          />
-          <Select
-            label="Auth profile"
-            value={authProfileId}
-            onChange={setAuthProfileId}
-            options={[
-              { value: "", label: "No auth profile" },
-              ...profiles.map((item) => ({ value: item.id, label: item.name })),
-            ]}
-          />
-        </CardContent>
-        <CardFooter>
-          <Button onClick={() => void plan()} loading={busy || finding} disabled={!prompt.trim() || !environment || finding}>
-            {!busy && !finding ? <Sparkles /> : null} Plan the test
-          </Button>
-        </CardFooter>
-      </Card>
+      <AgentStepBar stage={stage} furthest={furthest} onChange={setStage} />
 
-      <div className="grid gap-4 lg:grid-rows-2">
-      <Card className="flex h-full flex-col">
-        <CardHeader>
-          <CardTitle>Recommended test cases</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-1 flex-col gap-3">
-          {!job ? (
-            <p className="text-[13px] text-muted-foreground">Plan a test to see the recommended cases here.</p>
-          ) : null}
-          {finding ? (
-            <LoadingSpinner compact label="Finding pages and writing the recommendations. Nothing is clicked yet." />
-          ) : null}
+      {stage === "describe" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>What should this test do?</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex flex-col">
+              <FieldLabel htmlFor="agent-prompt" required>
+                Description
+              </FieldLabel>
+              <Textarea
+                id="agent-prompt"
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="On curricula, check if Algebra, Java, and curr are listed."
+                className="field-sizing-fixed min-h-48"
+              />
+            </div>
+            <Select
+              label="Environment"
+              required
+              value={environmentId}
+              onChange={setEnvironmentId}
+              options={environments.map((item) => ({ value: item.id, label: item.name }))}
+              placeholder="Choose an environment"
+            />
+            <Select
+              label="Auth profile"
+              value={authProfileId}
+              onChange={setAuthProfileId}
+              options={[
+                { value: "", label: "No auth profile" },
+                ...profiles.map((item) => ({ value: item.id, label: item.name })),
+              ]}
+            />
+          </CardContent>
+          <CardFooter>
+            <Button onClick={() => void plan()} loading={busy || finding} disabled={!prompt.trim() || !environment || finding}>
+              Continue
+              {!busy && !finding ? <ArrowRight /> : null}
+            </Button>
+          </CardFooter>
+        </Card>
+      ) : null}
+
+      {stage === "recommend" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recommended test cases</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {finding ? (
+              <LoadingSpinner compact label="Finding pages and writing the recommendations. Nothing is clicked yet." />
+            ) : null}
             {job?.phase === "rejected" ? (
               <p className="text-[13px] text-muted-foreground">This plan was rejected. Change the description and plan again.</p>
             ) : null}
             {job && !finding && job.phase !== "rejected" && (job.cases || []).length > 1 ? (
               <p className="text-[13px] text-muted-foreground">
                 {job.phase === "review"
-                  ? `${job.cases?.length} test cases. Choose which ones to record.`
+                  ? `${job.cases?.length} test cases. Approve the ones to record.`
                   : `${job.cases?.length} test cases. Saved cases are grouped into one suite.`}
               </p>
             ) : null}
             {job && !finding && job.phase !== "rejected" && (job.cases || []).length > 0 ? (
-              <CaseList
+              <CaseMilestones
                 cases={job.cases || []}
+                mode="plan"
                 selected={job.phase === "review" ? selected : undefined}
                 onToggle={job.phase === "review" ? toggleSelected : undefined}
                 onToggleAll={job.phase === "review" ? toggleAll : undefined}
               />
             ) : null}
             {job && !finding && job.phase !== "rejected" && !(job.cases || []).length && job.steps.length > 0 ? (
-              <StepList steps={job.steps} expected={job.expected} path={job.startPath} />
+              <MilestoneList
+                title="Planned steps"
+                items={milestonesFor(job.steps, job.expected, "waiting")}
+              />
             ) : null}
             {job && (job.phase === "needs_choice" || (job.phase === "failed" && !showRecording)) ? (
               <Alert variant="error">{job.error || "The plan stopped."}</Alert>
@@ -356,6 +384,7 @@ export function AgentPage() {
                   <Button
                     key={`${page.path}-${page.name}`}
                     variant="outline"
+                    className="justify-start"
                     disabled={busy}
                     onClick={() => void choosePage(page.path)}
                   >
@@ -372,79 +401,79 @@ export function AgentPage() {
                 onClick={() => void decide(false)}
                 disabled={busy || ((job.cases || []).length > 0 && recommended.length === 0)}
               >
-                Reject
+                Disapprove
               </Button>
               <Button
                 onClick={() => void decide(true)}
                 loading={busy}
                 disabled={(job.cases || []).length > 0 && recommended.length === 0}
               >
-                Accept and record
+                Approve and record
               </Button>
             </CardFooter>
           ) : null}
-      </Card>
+        </Card>
+      ) : null}
 
-      <Card className="flex h-full flex-col">
-        <CardHeader>
-          <CardTitle>Recording</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-1 flex-col gap-3">
-          {!showRecording ? (
-            <p className="text-[13px] text-muted-foreground">Accept a plan to record the cases. Progress shows up here.</p>
-          ) : null}
-          {job?.phase === "recording" ? (
-            <LoadingSpinner compact label="Recording the accepted cases, up to 3 at a time." />
-          ) : null}
-          {showRecording && job ? (
-            <RecordingList
-              cases={job.cases || []}
-              running={job.phase === "recording"}
-              selected={selected}
-              onToggle={toggleSelected}
-              onToggleAll={toggleAll}
-            />
-          ) : null}
-          {job?.phase === "failed" && showRecording ? <Alert variant="error">{job.error || "Recording stopped."}</Alert> : null}
-          {runNotice ? (
-            <Alert
-              variant="success"
-              action={
-                runNotice.startsWith("/") ? (
-                  <Button variant="outline" onClick={() => navigate(runNotice)}>
-                    View run
-                  </Button>
-                ) : undefined
-              }
-            >
-              Saved the selected cases and started the run. The others are still here.
-            </Alert>
-          ) : null}
-          {needsCategory && (job?.phase === "draft" || job?.phase === "saved") ? (
-            <CategoryMultiSelect required value={suiteCategories} onChange={setSuiteCategories} />
-          ) : null}
-        </CardContent>
+      {stage === "record" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Record</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {job?.phase === "recording" ? (
+              <LoadingSpinner compact label="Recording the accepted cases, up to 3 at a time." />
+            ) : null}
+            {showRecording && job ? (
+              <CaseMilestones
+                cases={job.cases || []}
+                mode="record"
+                running={job.phase === "recording"}
+                selected={job.phase === "recording" ? undefined : selected}
+                onToggle={job.phase === "recording" ? undefined : toggleSelected}
+                onToggleAll={job.phase === "recording" ? undefined : toggleAll}
+              />
+            ) : null}
+            {job?.phase === "failed" && showRecording ? <Alert variant="error">{job.error || "Recording stopped."}</Alert> : null}
+            {runNotice ? (
+              <Alert
+                variant="success"
+                action={
+                  runNotice.startsWith("/") ? (
+                    <Button variant="outline" onClick={() => navigate(runNotice)}>
+                      View run
+                    </Button>
+                  ) : undefined
+                }
+              >
+                Saved the selected cases and started the run. The others are still here.
+              </Alert>
+            ) : null}
+            {needsCategory && (job?.phase === "draft" || job?.phase === "saved") ? (
+              <CategoryMultiSelect required value={suiteCategories} onChange={setSuiteCategories} />
+            ) : null}
+          </CardContent>
           {job && (job.phase === "draft" || job.phase === "saved" || (job.phase === "failed" && showRecording)) ? (
             <CardFooter className="flex-wrap">
               {job.phase === "draft" || job.phase === "saved" ? (
                 (job.cases || []).length > 0 ? (
                   <>
                     <Button variant="destructive" onClick={() => void deleteSelected()} disabled={busy || chosen.length === 0}>
-                      Delete
+                      Disapprove
                     </Button>
                     <Button
                       variant="outline"
                       onClick={() => void saveSelected(false)}
                       disabled={busy || runnable.length === 0 || (needsCategory && suiteCategories.length === 0)}
                     >
-                      Save
+                      Approve
                     </Button>
                     <Button
                       onClick={() => void saveSelected(true)}
                       loading={busy}
                       disabled={runnable.length === 0 || (needsCategory && suiteCategories.length === 0)}
                     >
-                      Save and run
+                      Approve and run
                     </Button>
                   </>
                 ) : (
@@ -460,93 +489,216 @@ export function AgentPage() {
             </CardFooter>
           ) : null}
         </Card>
-      </div>
-      </div>
+      ) : null}
     </PageContainer>
   );
 }
 
-function CaseList({
+function furthestStage(job: AgentJob | null, showRecording: boolean): Stage {
+  if (showRecording) return "record";
+  if (job) return "recommend";
+  return "describe";
+}
+
+function AgentStepBar({
+  stage,
+  furthest,
+  onChange,
+}: {
+  stage: Stage;
+  furthest: Stage;
+  onChange: (stage: Stage) => void;
+}) {
+  const far = STAGES.indexOf(furthest);
+  return (
+    <nav aria-label="Agent steps" className="overflow-x-auto rounded-full border border-border bg-card px-1.5 py-1.5">
+      <ol className="flex w-max min-w-full items-center gap-1">
+        {STAGES.map((id, index) => {
+          const active = stage === id;
+          const enabled = index <= far;
+          const done = index < far && !active;
+          return (
+            <li key={id}>
+              <button
+                type="button"
+                aria-current={active ? "step" : undefined}
+                disabled={!enabled}
+                onClick={() => onChange(id)}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                  active && "bg-primary text-primary-foreground",
+                  !active && enabled && "text-muted-foreground hover:bg-state-hover hover:text-foreground",
+                  !enabled && "cursor-default text-muted-foreground/45"
+                )}
+              >
+                <span className="inline-flex size-4 items-center justify-center text-xs font-semibold tabular-nums">
+                  {done ? <Check className="size-3.5" /> : index + 1}
+                </span>
+                {STAGE_LABELS[id]}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+type MilestoneState = "done" | "current" | "waiting" | "failed";
+
+type MilestoneItem = {
+  title: string;
+  detail?: string;
+  state: MilestoneState;
+  aside?: string;
+};
+
+function CaseMilestones({
   cases,
+  mode,
+  running = false,
   selected,
   onToggle,
   onToggleAll,
 }: {
   cases: AgentCase[];
+  mode: "plan" | "record";
+  running?: boolean;
   selected?: string[];
   onToggle?: (id: string) => void;
   onToggleAll?: () => void;
 }) {
+  if (cases.length === 0) {
+    return running ? null : <p className="text-[13px] text-muted-foreground">No cases were recorded.</p>;
+  }
   const choosing = Boolean(onToggle && selected);
-  const all = choosing && cases.length > 0 && cases.every((item) => selected?.includes(item.id));
+  const choosable = mode === "record" ? cases.filter(canChoose) : cases;
+  const all = choosing && choosable.length > 0 && choosable.every((item) => selected?.includes(item.id));
   return (
-    <div className="flex flex-col divide-y divide-border">
-      {choosing && cases.length > 1 ? (
-        <label className="flex items-center gap-2 pb-3 text-[13px] text-muted-foreground">
+    <div className="flex flex-col gap-5">
+      {choosing && choosable.length > 1 ? (
+        <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
           <Checkbox
-            aria-label="Select all recommended test cases"
-            checked={all ? true : selected?.some((id) => cases.some((item) => item.id === id)) ? "indeterminate" : false}
+            aria-label={mode === "plan" ? "Select all recommended test cases" : "Select all test cases"}
+            checked={all ? true : selected?.some((id) => choosable.some((item) => item.id === id)) ? "indeterminate" : false}
             onCheckedChange={onToggleAll}
           />
           Select all
         </label>
       ) : null}
-      {cases.map((item, index) => (
-        <div key={item.id || `${item.path}-${index}`} className="flex items-start gap-2 py-3 first:pt-0 last:pb-0">
-          {choosing ? (
-            <Checkbox
-              className="mt-0.5"
-              aria-label={`Select ${item.name}`}
-              checked={selected?.includes(item.id)}
-              onCheckedChange={() => onToggle?.(item.id)}
-            />
-          ) : null}
-          <div className="flex min-w-0 flex-col gap-1">
-          <p className="text-sm font-medium">
-            {index + 1}. {item.name}
-          </p>
-          <p className="text-[13px] text-muted-foreground">Page: {item.path}</p>
-          {item.steps.length > 0 ? (
-            <ol className="list-decimal space-y-1 pl-5 text-sm">
-              {item.steps.map((step, stepIndex) => (
-                <li key={`${step.action}-${stepIndex}`}>
-                  {step.action} {step.target}
-                  {step.value ? ` “${step.value}”` : ""}
-                </li>
-              ))}
-            </ol>
-          ) : null}
-          {item.expected ? <p className="text-[13px] text-muted-foreground">Expected: {item.expected}</p> : null}
-          </div>
-        </div>
-      ))}
+      {cases.map((item, index) => {
+        const recorded = item.phase === "recorded" || item.phase === "draft" || item.phase === "saved";
+        const failed = item.phase === "failed";
+        const pending = mode === "record" && running && !recorded && !failed;
+        const status: MilestoneState = recorded ? "done" : failed ? "failed" : pending ? "current" : "waiting";
+        const choice = choosing && (mode === "plan" || canChoose(item));
+        return (
+          <section key={item.id || `${item.path}-${index}`} className="flex flex-col gap-3">
+            <div className="flex items-start gap-2">
+              {choice ? (
+                <Checkbox
+                  className="mt-0.5"
+                  aria-label={`Select ${item.name}`}
+                  checked={selected?.includes(item.id)}
+                  onCheckedChange={() => onToggle?.(item.id)}
+                />
+              ) : null}
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{item.name}</p>
+                <p className="truncate text-[13px] text-muted-foreground">{item.path}</p>
+                {item.error ? <p className="text-[13px] text-destructive">{item.error}</p> : null}
+              </div>
+            </div>
+            <MilestoneList title="Steps" items={milestonesFor(item.steps, item.expected, status)} />
+          </section>
+        );
+      })}
     </div>
   );
 }
 
-function StepList({
-  steps,
-  expected,
-  path,
-}: {
-  steps: AgentJob["steps"];
-  expected?: string;
-  path?: string;
-}) {
+function MilestoneList({ title, items }: { title: string; items: MilestoneItem[] }) {
+  const done = items.filter((item) => item.state === "done").length;
   return (
-    <div className="flex flex-col gap-1">
-      {path ? <p className="text-[13px] text-muted-foreground">Page: {path}</p> : null}
-      <ol className="list-decimal space-y-1 pl-5 text-sm">
-        {steps.map((step, index) => (
-          <li key={`${step.action}-${index}`}>
-            {step.action} {step.target}
-            {step.value ? ` “${step.value}”` : ""}
+    <div className="rounded-lg border border-border">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <ListChecks className="size-4 text-muted-foreground" />
+          {title}
+        </div>
+        <p className="text-[13px] text-muted-foreground">
+          {done} of {items.length} done
+        </p>
+      </div>
+      <ol className="px-4 py-4">
+        {items.map((item, index) => (
+          <li key={`${item.title}-${index}`} className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <MilestoneMark state={item.state} index={index} />
+              {index < items.length - 1 ? (
+                <span className={cn("my-1 w-px flex-1", item.state === "done" ? "bg-success/70" : "bg-border")} />
+              ) : null}
+            </div>
+            <div className={cn("flex min-w-0 flex-1 items-start justify-between gap-4", index < items.length - 1 && "pb-5")}>
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{item.title}</p>
+                {item.detail ? <p className="text-[13px] text-muted-foreground">{item.detail}</p> : null}
+              </div>
+              {item.aside ? <p className="shrink-0 text-[13px] text-muted-foreground">{item.aside}</p> : null}
+            </div>
           </li>
         ))}
       </ol>
-      {expected ? <p className="text-[13px] text-muted-foreground">Expected: {expected}</p> : null}
     </div>
   );
+}
+
+function MilestoneMark({ state, index }: { state: MilestoneState; index: number }) {
+  return (
+    <span
+      className={cn(
+        "grid size-6 shrink-0 place-items-center rounded-full border text-[11px] font-semibold",
+        state === "done" && "border-success bg-success/15 text-success",
+        state === "current" && "border-primary text-primary",
+        state === "waiting" && "border-border text-muted-foreground",
+        state === "failed" && "border-destructive bg-destructive/10 text-destructive"
+      )}
+    >
+      {state === "done" ? <Check className="size-3.5" /> : index + 1}
+    </span>
+  );
+}
+
+const STEP_VERB: Record<string, string> = {
+  goto: "Open",
+  click: "Click",
+  fill: "Fill",
+  press: "Press",
+};
+
+function milestonesFor(steps: AgentJob["steps"], expected: string | undefined, status: MilestoneState): MilestoneItem[] {
+  const items: MilestoneItem[] = steps.map((step, index) => ({
+    title: `${index + 1}. ${STEP_VERB[step.action] || step.action}${step.target ? ` ${step.target}` : ""}`,
+    detail: step.action === "fill" && step.value ? `Type “${step.value}”` : step.action === "goto" ? "" : step.value || "",
+    state: status === "current" ? (index === 0 ? "current" : "waiting") : status,
+    aside: status === "failed" ? "Failed" : status === "current" && index === 0 ? "Recording" : "",
+  }));
+  if (expected) {
+    items.push({
+      title: `${items.length + 1}. Confirm the result`,
+      detail: expected,
+      state: status === "current" ? "waiting" : status,
+      aside: status === "failed" ? "Failed" : "",
+    });
+  }
+  if (items.length === 0) {
+    items.push({
+      title: "1. Run the check",
+      state: status === "current" ? "current" : status,
+      aside: status === "failed" ? "Failed" : status === "current" ? "Recording" : "",
+    });
+  }
+  return items;
 }
 
 function canChoose(item: AgentCase) {
@@ -555,67 +707,4 @@ function canChoose(item: AgentCase) {
 
 function canSave(item: AgentCase) {
   return item.phase === "draft" || item.phase === "saved";
-}
-
-function RecordingList({
-  cases,
-  running,
-  selected,
-  onToggle,
-  onToggleAll,
-}: {
-  cases: AgentCase[];
-  running: boolean;
-  selected: string[];
-  onToggle: (id: string) => void;
-  onToggleAll: () => void;
-}) {
-  if (cases.length === 0) {
-    return running ? null : <p className="text-[13px] text-muted-foreground">No cases were recorded.</p>;
-  }
-  const choosable = cases.filter(canChoose);
-  const all = choosable.length > 0 && choosable.every((item) => selected.includes(item.id));
-  return (
-    <div className="flex flex-col divide-y divide-border">
-      {!running && choosable.length > 1 ? (
-        <label className="flex items-center gap-2 pb-3 text-[13px] text-muted-foreground">
-          <Checkbox
-            aria-label="Select all test cases"
-            checked={all ? true : selected.some((id) => choosable.some((item) => item.id === id)) ? "indeterminate" : false}
-            onCheckedChange={onToggleAll}
-          />
-          Select all
-        </label>
-      ) : null}
-      {cases.map((item, index) => {
-        const pending = running && item.phase !== "failed" && item.phase !== "recorded" && item.phase !== "draft" && item.phase !== "saved";
-        const done = item.phase === "recorded" || item.phase === "draft" || item.phase === "saved";
-        const choice = !running && canChoose(item);
-        return (
-          <div key={item.id || `${item.path}-${index}`} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-            <div className="flex min-w-0 items-start gap-2">
-              {choice ? (
-                <Checkbox
-                  className="mt-0.5"
-                  aria-label={`Select ${item.name}`}
-                  checked={selected.includes(item.id)}
-                  onCheckedChange={() => onToggle(item.id)}
-                />
-              ) : null}
-              <div className="min-w-0">
-                <p className="text-sm font-medium">
-                  {index + 1}. {item.name}
-                </p>
-                <p className="truncate text-[13px] text-muted-foreground">{item.path}</p>
-                {item.error ? <p className="text-[13px] text-muted-foreground">{item.error}</p> : null}
-              </div>
-            </div>
-            {pending ? <LoadingSpinner compact label="Recording…" /> : null}
-            {done ? <p className="shrink-0 text-[13px] text-muted-foreground">Recorded</p> : null}
-            {item.phase === "failed" ? <p className="shrink-0 text-[13px] text-muted-foreground">Failed</p> : null}
-          </div>
-        );
-      })}
-    </div>
-  );
 }

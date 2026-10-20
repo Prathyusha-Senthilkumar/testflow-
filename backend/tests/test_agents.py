@@ -46,6 +46,34 @@ def test_path_must_be_one_the_browser_found():
         pass
 
 
+def test_a_listed_expected_becomes_one_case_per_name():
+    pages = [{"name": "Curricula", "path": "/admin/curricula"}]
+    parsed = {
+        "cases": [
+            {
+                "name": "Names are listed",
+                "path": "/admin/curricula",
+                "steps": [{"action": "click", "target": "Curricula", "value": ""}],
+                "expected": "curr, curr-1, and java are listed",
+            }
+        ]
+    }
+    chosen = build_cases(parsed, pages)
+    assert [item["expected"] for item in chosen] == ["curr", "curr-1", "java"]
+    assert [item["name"] for item in chosen] == ["curr", "curr-1", "java"]
+    assert all(item["steps"] == parsed["cases"][0]["steps"] for item in chosen)
+
+
+def test_a_sentence_expected_stays_one_case():
+    pages = [{"name": "Curricula", "path": "/admin/curricula"}]
+    chosen = build_cases(
+        {"cases": [{"name": "Search", "path": "/admin/curricula", "steps": [], "expected": "Search, then confirm Algebra is listed"}]},
+        pages,
+    )
+    assert len(chosen) == 1
+    assert chosen[0]["expected"] == "Search, then confirm Algebra is listed"
+
+
 def test_one_prompt_keeps_several_cases_and_drops_unknown_paths():
     pages = [{"name": "Curricula", "path": "/admin/curricula"}, {"name": "Home", "path": "/admin"}]
     parsed = {

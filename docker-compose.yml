@@ -45,6 +45,8 @@ services:
       # Must match the worker's heartbeat period; used to flag stale workers on the Workers page.
       WORKER_STATUS_INTERVAL_MS: ${WORKER_STATUS_INTERVAL_MS:-5000}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # 1 uses the free model chain. 0 uses DeepSeek, then GLM.
+      OPENROUTER_USE_FREE_MODELS: ${OPENROUTER_USE_FREE_MODELS:-0}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v4.1-flash}
       OPENROUTER_FALLBACK_MODEL: ${OPENROUTER_FALLBACK_MODEL:-z-ai/glm-5.3-flash}
       AGENT_MAX_COST_USD: ${AGENT_MAX_COST_USD:-0.50}

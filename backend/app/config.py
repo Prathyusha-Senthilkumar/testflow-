@@ -25,9 +25,11 @@ class Settings(BaseSettings):
     GITHUB_API_URL: str = "https://api.github.com"
     GITHUB_ISSUE_POLL_SECONDS: int = 30
 
-    # In-app test agent. Chinese models only; DeepSeek V4.1 Flash is the default.
+    # In-app test agent. OPENROUTER_USE_FREE_MODELS=1 uses the free chain.
+    # Otherwise DeepSeek V4.1 Flash is used, then GLM 5.3 Flash.
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_USE_FREE_MODELS: bool = False
     OPENROUTER_MODEL: str = "deepseek/deepseek-v4.1-flash"
     OPENROUTER_FALLBACK_MODEL: str = "z-ai/glm-5.3-flash"
     AGENT_MAX_COST_USD: float = 0.50
