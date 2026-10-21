@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "@/lib/navigation";
 import { api, type DashboardData, type GroupedRun, type ProjectSummary, type ReportRun } from "@/lib/api";
+import { watchRun } from "@/lib/watchedRuns";
 import {
   DASHBOARD_RANGES,
   filterByProject,
@@ -209,6 +210,16 @@ function DashboardContent() {
     api
       .rerunTestRun(item.runId)
       .then((started) => {
+        if (item.projectId && item.testCaseId) {
+          watchRun({
+            jobId: started.jobId,
+            projectId: item.projectId,
+            testCaseId: item.testCaseId,
+            code: item.code || "",
+            name: item.name,
+            testRunId: started.testRunId,
+          });
+        }
         toast.success(`Rerun started: ${item.code ? `${item.code} ` : ""}${item.name}`);
         setRerun((current) => ({ ...current, [item.testKey]: started.state === "running" ? "running" : "queued" }));
         const stop = pollWhileVisible(async () => {

@@ -18,6 +18,7 @@ import { usePublishEntityName } from "@/components/layout/shell-context";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { CategoryMultiSelect } from "@/components/suites/CategoryMultiSelect";
 import { type SuiteCategory } from "@/lib/suiteCategory";
+import { watchBatch, watchRun } from "@/lib/watchedRuns";
 
 const WAITING = new Set(["discovering", "planning", "recording"]);
 const STAGES = ["describe", "recommend", "record"] as const;
@@ -232,22 +233,32 @@ export function AgentPage() {
   async function startSavedRun(saved: AgentJob, savedCases: AgentCase[], previousSuite?: string | null) {
     if (savedCases.length > 1 && saved.suiteId && saved.suiteId !== previousSuite) {
       const started = await api.startSuiteRun(projectId, saved.suiteId, environmentId);
+      watchBatch({ kind: "batch", batchId: started.batchId, projectId, label: `${started.suiteName || "Suite"} run` });
       return `/runs/batches/${started.batchId}`;
     }
     if (savedCases.length > 1 && saved.suiteId && (saved.cases || []).filter((item) => item.testCaseId).length === savedCases.length) {
       const started = await api.startSuiteRun(projectId, saved.suiteId, environmentId);
+      watchBatch({ kind: "batch", batchId: started.batchId, projectId, label: `${started.suiteName || "Suite"} run` });
       return `/runs/batches/${started.batchId}`;
     }
     for (const item of savedCases) {
       if (!item.testCaseId) continue;
       const testCase = await api.testCase(projectId, item.testCaseId);
       if (!testCase.testFile) throw new Error("This test case has no recorded steps yet.");
-      await api.startExecution({
+      const execution = await api.startExecution({
         projectId,
         testCaseId: testCase.id,
         testCaseCode: testCase.code,
         scriptPath: testCase.testFile,
         environmentId: environmentId || undefined,
+      });
+      watchRun({
+        jobId: execution.jobId,
+        projectId,
+        testCaseId: testCase.id,
+        code: testCase.code,
+        name: testCase.name,
+        testRunId: execution.testRunId,
       });
     }
     if (savedCases.length === 1 && savedCases[0].testCaseId) {

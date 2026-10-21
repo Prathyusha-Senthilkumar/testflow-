@@ -18,6 +18,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { CardArrow } from "@/components/ui/card";
 import { api, type EnvironmentSummary, type ProjectDetail, type ProjectInput, type SuiteSummary } from "@/lib/api";
+import { watchBatch } from "@/lib/watchedRuns";
 import { SUITE_CATEGORIES, SUITE_CATEGORY_LABELS, type SuiteCategory } from "@/lib/suiteCategory";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
@@ -141,6 +142,12 @@ export function ProjectOverviewPage() {
         return;
       }
       setProjectDialogOpen(false);
+      watchBatch({
+        kind: "batch",
+        batchId: started.batchId,
+        projectId,
+        label: `${started.projectName || project?.name || "Project"} run`,
+      });
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
       cancelWantedProject.current = false;
@@ -171,6 +178,12 @@ export function ProjectOverviewPage() {
         setCancellingSuiteId(null);
         return;
       }
+      watchBatch({
+        kind: "batch",
+        batchId: started.batchId,
+        projectId,
+        label: `${started.suiteName || "Suite"} run`,
+      });
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
       if (cancelWantedSuite.current === suiteId) cancelWantedSuite.current = null;

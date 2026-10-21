@@ -9,6 +9,7 @@ import { useScheduledBatches } from "@/hooks/useScheduledBatches";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { api, type EnvironmentSummary, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
+import { watchBatch } from "@/lib/watchedRuns";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -150,6 +151,12 @@ export function TestSuiteDetailPage() {
         setCancelling(false);
         return;
       }
+      watchBatch({
+        kind: "batch",
+        batchId: started.batchId,
+        projectId,
+        label: `${started.suiteName || suite?.name || "Suite"} run`,
+      });
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
       cancelWanted.current = false;

@@ -8,6 +8,7 @@ import { ArrowLeft, CheckCircle2, FileCheck2, FileText, FolderKanban, History, L
 import { toast } from "sonner";
 import { Link, useNavigate, useSearchParams } from "@/lib/navigation";
 import { api, type GroupedRun, type ProjectDetail, type ReportRun, type ScheduledExecution, type SuiteSummary, type TestCaseSummary, type TestSuiteDetail } from "@/lib/api";
+import { watchBatch, watchRun } from "@/lib/watchedRuns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScheduledRuns, type ScheduledRunRow } from "@/components/runs/ScheduledRuns";
 import { useScheduledBatches } from "@/hooks/useScheduledBatches";
@@ -314,11 +315,25 @@ function RunActions({ run }: { run: HistoryRun }) {
     setBusy(true);
     try {
       if (run.runType === "individual") {
-        await api.rerunTestRun(run.id);
+        const started = await api.rerunTestRun(run.id);
+        if (run.projectId && run.testCaseId) {
+          watchRun({
+            jobId: started.jobId,
+            projectId: run.projectId,
+            testCaseId: run.testCaseId,
+            code: run.code || "",
+            name: run.title,
+            testRunId: started.testRunId,
+          });
+        }
         toast.success("Run started", { description: run.title });
         return;
       }
-      await api.rerunBatch(run.id);
+      const started = await api.rerunBatch(run.id);
+      if (started.projectId) {
+        const name = started.batchType === "suite" ? started.suiteName || run.title : started.projectName || run.title;
+        watchBatch({ kind: "batch", batchId: started.batchId, projectId: started.projectId, label: `${name} run` });
+      }
       toast.success("Run started", { description: run.title });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not rerun");

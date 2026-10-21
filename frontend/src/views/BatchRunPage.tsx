@@ -7,6 +7,7 @@ import { ArrowLeft, FolderKanban, Layers, RotateCcw, Square } from "lucide-react
 import { toast } from "sonner";
 import { Link, useNavigate, useParams } from "@/lib/navigation";
 import { api, type BatchCaseResult, type BatchExecutionStatus } from "@/lib/api";
+import { watchBatch } from "@/lib/watchedRuns";
 import { suiteCategoryLabel } from "@/lib/suiteCategory";
 import { pollWhileVisible } from "@/hooks/useExecutionPolling";
 import { PageContainer, PageHeader, SectionHeader } from "@/components/layout/page-header";
@@ -239,6 +240,8 @@ export function BatchRunPage() {
     setBusy(true);
     try {
       const started = await api.rerunBatch(run!.batchId);
+      const name = started.batchType === "suite" ? started.suiteName || "Suite" : started.projectName || "Project";
+      watchBatch({ kind: "batch", batchId: started.batchId, projectId: started.projectId, label: `${name} run` });
       navigate(`/runs/batches/${started.batchId}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not rerun");

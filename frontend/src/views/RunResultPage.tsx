@@ -10,6 +10,7 @@ import { ArrowLeft, ChevronDown, Download, FileCode2, FileText, RotateCcw, Squar
 import { toast } from "sonner";
 import { Link, useNavigate, useParams, useSearchParams } from "@/lib/navigation";
 import { api, type ReportRun, type RunScreenshot, type TestRunHistoryItem } from "@/lib/api";
+import { watchRun } from "@/lib/watchedRuns";
 import { RunsTab } from "@/components/test-cases/RunsTab";
 import { formatDuration, formatExecutedAt } from "@/lib/reportCsv";
 import { downloadRunPdf, downloadRunReport, splitFailure } from "@/lib/runReport";
@@ -172,9 +173,20 @@ export function RunResultPage() {
     setBusy(true);
     try {
       const started = await api.rerunTestRun(runId);
+      const caseProjectId = projectId || run?.projectId;
+      if (caseProjectId && run?.testCaseId) {
+        watchRun({
+          jobId: started.jobId,
+          projectId: caseProjectId,
+          testCaseId: run.testCaseId,
+          code: run.testCaseCode || "",
+          name: run.testName || "Test case",
+          testRunId: started.testRunId,
+        });
+      }
       if (started.testRunId) {
         const from = fromRuns ? "?from=runs" : "";
-        navigate(`/projects/${projectId || run?.projectId}/results/${started.testRunId}${from}`);
+        navigate(`/projects/${caseProjectId}/results/${started.testRunId}${from}`);
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not rerun");

@@ -49,7 +49,8 @@ import { RunsTab, type RunRow } from "@/components/test-cases/RunsTab";
 import { RunMenuButton } from "@/components/runs/RunMenuButton";
 import { defaultEnvironment } from "@/lib/environments";
 import { RunSummaryStrip } from "@/components/test-cases/RunSummaryStrip";
-import { resolveExpectedResult, testCaseStatusLabel, whenVisible } from "@/components/test-cases/testCaseFormat";
+import { resolveExpectedResult, testCaseStatusLabel } from "@/components/test-cases/testCaseFormat";
+import { readWatchedRuns, watchRun, WATCHED_RUNS_EVENT } from "@/lib/watchedRuns";
 
 // Only needed on demand; keep them out of the initial bundle.
 const ScriptEditorModal = dynamic(() => import("@/components/test-cases/ScriptEditorModal"), { ssr: false });
@@ -63,24 +64,12 @@ type DetailTab = (typeof TABS)[number];
 /** Old tab names (Overview / Script / Versions / Settings) map onto the new layout. */
 const LEGACY_TABS: Record<string, DetailTab> = { overview: "steps", script: "steps", versions: "history", settings: "steps" };
 
-const RUN_POLL_MS = 2000;
 const HISTORY_POLL_MS = 4000;
 
 const isLive = (status: string) => status === "Queued" || status === "Running";
 
 /** PATCH payload plus fields the backend may not accept yet (sent; persistence is verified). */
 type ExtendedUpdate = UpdateTestCaseInput & { assertions?: AssertionConfig[]; name?: string; description?: string };
-
-/** Waits for the queued run to finish, reporting tester-facing progress only. Pauses while the tab is hidden. */
-async function waitForExecution(jobId: string, onPhase: (phase: string) => void) {
-  for (;;) {
-    await whenVisible();
-    const status = await api.getExecution(jobId);
-    if (status.state === "completed" || status.state === "failed") return status;
-    onPhase(status.state === "running" ? "Running test..." : "Preparing test...");
-    await new Promise((resolve) => setTimeout(resolve, RUN_POLL_MS));
-  }
-}
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
@@ -167,6 +156,8 @@ export function TestCaseDetailPage() {
   const [saving, setSaving] = useState(false);
   const [recording, setRecording] = useState(false);
   const [running, setRunning] = useState(false);
+  /** Job just handed to the worker. Keeps Run disabled until live status or history catches up. */
+  const [queuedJobId, setQueuedJobId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   /** Bumped to restart history polling (e.g. right after a run is queued). */
   const [historyKey, setHistoryKey] = useState(0);
@@ -289,6 +280,22 @@ export function TestCaseDetailPage() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [editing]);
+
+  useEffect(() => {
+    if (!queuedJobId) return;
+    const match = caseRuns.find((run) => run.jobId === queuedJobId);
+    if (match && !isLive(match.status)) setQueuedJobId(null);
+  }, [queuedJobId, caseRuns]);
+
+  useEffect(() => {
+    if (!queuedJobId) return;
+    const releaseIfFinished = () => {
+      if (!readWatchedRuns().some((run) => run.jobId === queuedJobId)) setQueuedJobId(null);
+    };
+    releaseIfFinished();
+    window.addEventListener(WATCHED_RUNS_EVENT, releaseIfFinished);
+    return () => window.removeEventListener(WATCHED_RUNS_EVENT, releaseIfFinished);
+  }, [queuedJobId]);
 
   // Run history + upcoming schedules. Keeps polling while the tab is visible so a
   // run started in another session shows up here. Pauses while the tab is hidden.
@@ -671,13 +678,13 @@ export function TestCaseDetailPage() {
     }
   }
 
-  /** Starts a run in place: the live row shows in the Runs tab and the user stays on the page. */
+  /** Queues a run and returns. The worker keeps going if this page is closed. */
   async function handleRun(environmentOverride?: string) {
-    if (!projectId || !testCaseId || !hasScript || remoteRunningRef.current) return;
+    if (!projectId || !testCaseId || !hasScript || remoteRunningRef.current || queuedJobId) return;
     setRunning(true);
     setError("");
     setLastResult(null);
-    setRunPhase("Preparing test...");
+    setRunPhase("");
     setTab("runs");
     try {
       // A run picked from "Run on" is one-off: the test keeps its own environment.
@@ -694,30 +701,22 @@ export function TestCaseDetailPage() {
         scriptPath: scriptFile,
         environmentId: environmentOverride,
       });
+      watchRun({
+        jobId: execution.jobId,
+        projectId,
+        testCaseId: updated.id,
+        code: updated.code,
+        name: updated.name,
+        testRunId: execution.testRunId,
+      });
+      setQueuedJobId(execution.jobId);
       toast("Run queued", { description: `${updated.code} · ${updated.name}` });
-      // Pick up the queued run in the history (polling continues while it is live).
       setHistoryKey((key) => key + 1);
-      const finished = await waitForExecution(execution.jobId, setRunPhase);
-      setRunPhase("Retrieving result...");
-      const payload = finished.result;
-      const result: TestRunResult = {
-        status: finished.state === "completed" && payload?.success ? "Passed" : "Failed",
-        duration: (payload?.durationMs ?? 0) / 1000,
-        error: payload?.errorMessage ?? finished.error ?? null,
-        testRunId: finished.testRunId ?? null,
-      };
-      setLastResult(result);
-      const viewResult = result.testRunId
-        ? { label: "View result", onClick: () => navigate(`/projects/${projectId}/results/${result.testRunId}`) }
-        : undefined;
-      if (result.status === "Passed") toast.success(`Passed in ${result.duration.toFixed(1)}s`, { action: viewResult });
-      else toast.error("Run failed", { description: result.error?.split(/\r?\n/)[0] ?? undefined, action: viewResult });
     } catch (err) {
+      setQueuedJobId(null);
       reportError(errorMessage(err, "Test run failed"));
     } finally {
       setRunning(false);
-      setRunPhase("");
-      setHistoryKey((key) => key + 1);
     }
   }
 
@@ -927,15 +926,16 @@ export function TestCaseDetailPage() {
   const remoteCase = activity?.cases.find((item) => item.testCaseId === testCaseId) ?? null;
   const historyLive = caseRuns.some((run) => isLive(run.status));
   const hasLiveRun = historyLive || Boolean(remoteCase);
-  remoteRunningRef.current = hasLiveRun;
+  const runHeld = running || hasLiveRun || Boolean(queuedJobId);
+  remoteRunningRef.current = hasLiveRun || Boolean(queuedJobId);
   const runRows: RunRow[] =
-    running && !historyLive
+    (running || queuedJobId) && !historyLive && !remoteCase
       ? [
           {
             id: "live",
             live: true,
-            status: runPhase.startsWith("Running") ? "Running" : "Queued",
-            phase: runPhase || "Preparing test...",
+            status: "Queued",
+            phase: "Queued",
             startedAt: new Date().toISOString(),
           },
           ...caseRuns,
@@ -1057,9 +1057,9 @@ export function TestCaseDetailPage() {
               defaultEnvironmentId={projectDefaultEnvironment?.id}
               onRunOn={(envId) => void handleRun(envId)}
               onSchedule={openSchedule}
-              running={running || hasLiveRun}
-              runningLabel={hasLiveRun && !running ? "Running" : "Running…"}
-              disabled={!hasScript || recording || running || hasLiveRun}
+              running={runHeld}
+              runningLabel={hasLiveRun ? "Running" : "Queued"}
+              disabled={!hasScript || recording || runHeld}
               title={runningTitle(hasLiveRun, remoteCase?.runBy, environmentName ? `Run on ${environmentName}` : "Run test")}
             />
           </>
@@ -1081,7 +1081,7 @@ export function TestCaseDetailPage() {
                 {value === "runs" && caseRuns.length > 0 ? (
                   <span className="rounded-sm bg-elevated px-1.5 text-xs text-muted-foreground tabular-nums">{caseRuns.length}</span>
                 ) : null}
-                {value === "runs" && (running || hasLiveRun) ? (
+                {value === "runs" && runHeld ? (
                   <span aria-label="Run in progress" className="size-1.5 rounded-full bg-brand-accent motion-safe:animate-pulse" />
                 ) : null}
               </TabsTrigger>
@@ -1104,7 +1104,7 @@ export function TestCaseDetailPage() {
               onExpectedResultChange={setExpectedResult}
               editing={editing}
               recording={recording}
-              canRecord={!recording && !running}
+              canRecord={!recording && !runHeld}
               onRecord={() => void handleRecord()}
               onEditCode={() => void openScriptEditor()}
               scriptMissing={scriptMissing}
@@ -1120,7 +1120,7 @@ export function TestCaseDetailPage() {
                 runs={runRows}
                 loading={!historyLoaded}
                 onRun={() => void handleRun()}
-                canRun={hasScript && !recording && !running && !hasLiveRun}
+                canRun={hasScript && !recording && !runHeld}
                 header={
                   <ResultPanel
                     running={running}
@@ -1208,7 +1208,7 @@ export function TestCaseDetailPage() {
                     setScheduleZone(zone);
                   }}
                   onSchedule={handleSchedule}
-                  canSchedule={hasScript && !running}
+                  canSchedule={hasScript && !runHeld}
                   scheduling={scheduling}
                   validationError={scheduleError}
                   scheduled={scheduled}
