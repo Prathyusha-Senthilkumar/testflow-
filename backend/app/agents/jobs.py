@@ -76,6 +76,7 @@ def _public_case(case: dict) -> dict[str, Any]:
         "expected": case.get("expected") or "",
         "phase": case.get("phase") or "",
         "script": case.get("script") or "",
+        "diary": case.get("diary") or [],
         "testCaseId": case.get("testCaseId"),
         "error": case.get("error"),
         "diary": case.get("diary") or [],

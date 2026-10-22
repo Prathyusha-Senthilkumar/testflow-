@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, Check, Copy, ListChecks } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNavigate, useParams } from "@/lib/navigation";
-import { api, type AgentCase, type AgentJob, type AuthProfileSummary, type EnvironmentSummary } from "@/lib/api";
+import { api, type AgentCase, type AgentJob, type AgentPageLink, type AuthProfileSummary, type EnvironmentSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FieldLabel } from "@/components/ui/input";
@@ -16,6 +16,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { PageContainer, PageHeader } from "@/components/layout/page-header";
 import { usePublishEntityName } from "@/components/layout/shell-context";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import { RunStatusBadge } from "@/components/runs/RunStatusBadge";
 import { CategoryMultiSelect } from "@/components/suites/CategoryMultiSelect";
 import { type SuiteCategory } from "@/lib/suiteCategory";
 import { watchBatch, watchRun } from "@/lib/watchedRuns";
@@ -47,6 +48,7 @@ export function AgentPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [runNotice, setRunNotice] = useState("");
   const [reply, setReply] = useState("");
+  const [pageNote, setPageNote] = useState("");
   const [stage, setStage] = useState<Stage>("describe");
   const stageRank = useRef(0);
   const confirm = useConfirm();
@@ -74,9 +76,10 @@ export function AgentPage() {
       api
         .agentJob(projectId, job.id)
         .then((next) => {
-          const before = (job.cases || []).map((item) => `${item.phase}:${item.error || ""}`).join("|");
-          const after = (next.cases || []).map((item) => `${item.phase}:${item.error || ""}`).join("|");
-          if (next.phase !== job.phase || next.error !== job.error || before !== after) setJob(next);
+          const before = (job.cases || []).map((item) => `${item.phase}:${item.error || ""}:${item.diary?.length || 0}:${item.script?.length || 0}`).join("|");
+          const after = (next.cases || []).map((item) => `${item.phase}:${item.error || ""}:${item.diary?.length || 0}:${item.script?.length || 0}`).join("|");
+          const diaryChanged = (next.diary || []).length !== (job.diary || []).length || next.script !== job.script;
+          if (next.phase !== job.phase || next.error !== job.error || before !== after || diaryChanged) setJob(next);
         })
         .catch((err: Error) => setError(err.message));
     }, 2000);
@@ -115,22 +118,29 @@ export function AgentPage() {
     stageRank.current = rank;
   }, [job, furthest]);
 
-  async function plan() {
+  async function plan(description = prompt) {
     if (!environment) {
       setError("Choose an environment.");
       return;
     }
+    const text = description.trim();
+    if (!text) {
+      setError("Describe what to test.");
+      return;
+    }
     setBusy(true);
     setError("");
+    setPrompt(text);
     try {
       const created = await api.createAgentJob(projectId, {
-        prompt: prompt.trim(),
+        prompt: text,
         environmentId: environment.id,
         authProfileId: authProfileId || undefined,
       });
       setJob(created);
       setSelected([]);
       setRunNotice("");
+      setPageNote("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "The planner did not start.");
     } finally {
@@ -314,7 +324,7 @@ export function AgentPage() {
   }
 
   return (
-    <PageContainer>
+    <PageContainer className="min-h-full">
       <PageHeader
         title="Agent"
         description="Describe the test, correct the recommendations in the conversation, then approve the recording."
@@ -325,11 +335,17 @@ export function AgentPage() {
       <AgentStepBar stage={stage} furthest={furthest} onChange={setStage} />
 
       {stage === "describe" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>What should this test do?</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+        <StepFrame
+          title="What should this test do?"
+          placement="bottom"
+          action={
+            <Button onClick={() => void plan()} loading={busy || finding} disabled={!prompt.trim() || !environment || finding}>
+              Continue
+              {!busy && !finding ? <ArrowRight /> : null}
+            </Button>
+          }
+        >
+          <div className="flex flex-col gap-3">
             <div className="flex flex-col">
               <FieldLabel htmlFor="agent-prompt" required>
                 Description
@@ -359,22 +375,46 @@ export function AgentPage() {
                 ...profiles.map((item) => ({ value: item.id, label: item.name })),
               ]}
             />
-          </CardContent>
-          <CardFooter>
-            <Button onClick={() => void plan()} loading={busy || finding} disabled={!prompt.trim() || !environment || finding}>
-              Continue
-              {!busy && !finding ? <ArrowRight /> : null}
-            </Button>
-          </CardFooter>
-        </Card>
+          </div>
+        </StepFrame>
       ) : null}
 
       {stage === "recommend" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Recommended test cases</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+        <StepFrame
+          title="Choose cases to record"
+          description="This step only chooses what to record. Nothing is recorded yet."
+          placement="bottom"
+          fill
+          action={
+            job?.phase === "review" ? (
+              <>
+                <Button
+                  variant="destructive"
+                  onClick={() => void decide(false)}
+                  disabled={busy || ((job.cases || []).length > 0 && recommended.length === 0)}
+                >
+                  Disapprove
+                </Button>
+                <Button
+                  onClick={() => void decide(true)}
+                  loading={busy}
+                  disabled={(job.cases || []).length > 0 && recommended.length === 0}
+                >
+                  Approve and record
+                </Button>
+              </>
+            ) : job?.phase === "needs_choice" ? (
+              <Button onClick={() => void plan(`${prompt.trim()}\n${pageNote.trim()}`)} loading={busy} disabled={busy || !pageNote.trim()}>
+                Plan again
+              </Button>
+            ) : (
+              <Button disabled loading={finding || busy}>
+                {finding ? "Finding pages…" : "Continue"}
+              </Button>
+            )
+          }
+        >
+          <div className="flex flex-col gap-4">
             {finding ? (
               <LoadingSpinner compact label="Finding pages and writing the recommendations. Nothing is clicked yet." />
             ) : null}
@@ -384,7 +424,7 @@ export function AgentPage() {
             {job && !finding && job.phase !== "rejected" && (job.cases || []).length > 1 ? (
               <p className="text-[13px] text-muted-foreground">
                 {job.phase === "review"
-                  ? `${job.cases?.length} test cases. Approve the ones to record.`
+                  ? `${job.cases?.length} test cases. Select the ones to record.`
                   : `${job.cases?.length} test cases. Saved cases are grouped into one suite.`}
               </p>
             ) : null}
@@ -404,7 +444,7 @@ export function AgentPage() {
                 items={milestonesFor(job.steps, job.expected, "waiting")}
               />
             ) : null}
-            {job && (job.phase === "needs_choice" || (job.phase === "failed" && !showRecording)) ? (
+            {job && job.phase === "failed" && !showRecording ? (
               <Alert variant="error">{job.error || "The plan stopped."}</Alert>
             ) : null}
             {job && (job.phase === "review" || job.phase === "needs_choice") ? (
@@ -417,51 +457,69 @@ export function AgentPage() {
               />
             ) : null}
             {job?.error && job.phase === "review" ? <Alert variant="error">{job.error}</Alert> : null}
-            {job?.phase === "needs_choice" && job.pages && job.pages.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                {job.pages.map((page) => (
-                  <Button
-                    key={`${page.path}-${page.name}`}
-                    variant="outline"
-                    className="justify-start"
-                    disabled={busy}
-                    onClick={() => void choosePage(page.path)}
-                  >
-                    {page.name} · {page.path}
-                  </Button>
-                ))}
-              </div>
+            {job?.phase === "needs_choice" ? (
+              <PageChoices
+                prompt={prompt}
+                pages={job.pages || []}
+                note={pageNote}
+                busy={busy}
+                onNote={setPageNote}
+                onChoose={(path) => void choosePage(path)}
+              />
             ) : null}
-          </CardContent>
-          {job?.phase === "review" ? (
-            <CardFooter className="flex-wrap">
-              <Button
-                variant="destructive"
-                onClick={() => void decide(false)}
-                disabled={busy || ((job.cases || []).length > 0 && recommended.length === 0)}
-              >
-                Disapprove
-              </Button>
-              <Button
-                onClick={() => void decide(true)}
-                loading={busy}
-                disabled={(job.cases || []).length > 0 && recommended.length === 0}
-              >
-                Approve and record
-              </Button>
-            </CardFooter>
-          ) : null}
-        </Card>
+          </div>
+        </StepFrame>
       ) : null}
 
       {stage === "record" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Record</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {job?.phase === "recording" ? (
-              <LoadingSpinner compact label="Recording the accepted cases, up to 3 at a time." />
+        <StepFrame
+          title="Review the result"
+          description="This step shows the result of each case. The steps stay on Recommended cases."
+          placement="bottom"
+          fill
+          action={
+            job && (job.phase === "draft" || job.phase === "saved" || (job.phase === "failed" && showRecording)) ? (
+              job.phase === "draft" || job.phase === "saved" ? (
+                (job.cases || []).length > 0 ? (
+                  <>
+                    <Button
+                      onClick={() => void saveSelected(true)}
+                      loading={busy}
+                      disabled={runnable.length === 0 || (needsCategory && suiteCategories.length === 0)}
+                    >
+                      Approve and run
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => void saveSelected(false)}
+                      disabled={busy || runnable.length === 0 || (needsCategory && suiteCategories.length === 0)}
+                    >
+                      Approve
+                    </Button>
+                    <Button variant="destructive" onClick={() => void deleteSelected()} disabled={busy || chosen.length === 0}>
+                      Disapprove
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="outline" onClick={() => setJob(null)}>
+                    Start over
+                  </Button>
+                )
+              ) : (
+                <Button variant="outline" onClick={() => setJob(null)}>
+                  Start over
+                </Button>
+              )
+            ) : (
+              <Button disabled loading={job?.phase === "recording"}>
+                {job?.phase === "recording" ? "Recording…" : "Approve and run"}
+              </Button>
+            )
+          }
+        >
+          <div className="flex flex-col gap-4">
+            {job?.phase === "recording" && !(job.cases || []).length ? (
+              <p className="text-[13px] text-muted-foreground">Recording. The result shows here when it finishes.</p>
             ) : null}
             {showRecording && job ? (
               <CaseMilestones
@@ -473,6 +531,9 @@ export function AgentPage() {
                 onToggle={job.phase === "recording" ? undefined : toggleSelected}
                 onToggleAll={job.phase === "recording" ? undefined : toggleAll}
               />
+            ) : null}
+            {job && job.phase !== "recording" && !(job.cases || []).length && job.script ? (
+              <ScriptBlock script={job.script} />
             ) : null}
             {job?.phase === "failed" && showRecording ? <Alert variant="error">{job.error || "Recording stopped."}</Alert> : null}
             {runNotice ? (
@@ -492,43 +553,8 @@ export function AgentPage() {
             {needsCategory && (job?.phase === "draft" || job?.phase === "saved") ? (
               <CategoryMultiSelect required value={suiteCategories} onChange={setSuiteCategories} />
             ) : null}
-          </CardContent>
-          {job && (job.phase === "draft" || job.phase === "saved" || (job.phase === "failed" && showRecording)) ? (
-            <CardFooter className="flex-wrap">
-              {job.phase === "draft" || job.phase === "saved" ? (
-                (job.cases || []).length > 0 ? (
-                  <>
-                    <Button variant="destructive" onClick={() => void deleteSelected()} disabled={busy || chosen.length === 0}>
-                      Disapprove
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => void saveSelected(false)}
-                      disabled={busy || runnable.length === 0 || (needsCategory && suiteCategories.length === 0)}
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      onClick={() => void saveSelected(true)}
-                      loading={busy}
-                      disabled={runnable.length === 0 || (needsCategory && suiteCategories.length === 0)}
-                    >
-                      Approve and run
-                    </Button>
-                  </>
-                ) : (
-                  <Button variant="outline" onClick={() => setJob(null)}>
-                    Start over
-                  </Button>
-                )
-              ) : (
-                <Button variant="outline" onClick={() => setJob(null)}>
-                  Start over
-                </Button>
-              )}
-            </CardFooter>
-          ) : null}
-        </Card>
+          </div>
+        </StepFrame>
       ) : null}
     </PageContainer>
   );
@@ -551,21 +577,21 @@ function AgentStepBar({
 }) {
   const far = STAGES.indexOf(furthest);
   return (
-    <nav aria-label="Agent steps" className="overflow-x-auto rounded-full border border-border bg-card px-1.5 py-1.5">
-      <ol className="flex w-max min-w-full items-center gap-1">
+    <nav aria-label="Agent steps" className="w-full rounded-lg border border-border bg-card px-2 py-2">
+      <ol className="grid w-full grid-cols-3 gap-1">
         {STAGES.map((id, index) => {
           const active = stage === id;
           const enabled = index <= far;
           const done = index < far && !active;
           return (
-            <li key={id}>
+            <li key={id} className="min-w-0">
               <button
                 type="button"
                 aria-current={active ? "step" : undefined}
                 disabled={!enabled}
                 onClick={() => onChange(id)}
                 className={cn(
-                  "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                  "flex w-full items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
                   active && "bg-primary text-primary-foreground",
                   !active && enabled && "text-muted-foreground hover:bg-state-hover hover:text-foreground",
                   !enabled && "cursor-default text-muted-foreground/45"
@@ -574,13 +600,166 @@ function AgentStepBar({
                 <span className="inline-flex size-4 items-center justify-center text-xs font-semibold tabular-nums">
                   {done ? <Check className="size-3.5" /> : index + 1}
                 </span>
-                {STAGE_LABELS[id]}
+                <span className="truncate">{STAGE_LABELS[id]}</span>
               </button>
             </li>
           );
         })}
       </ol>
     </nav>
+  );
+}
+
+function StepFrame({
+  title,
+  description,
+  action,
+  placement = "side",
+  fill = false,
+  children,
+}: {
+  title: string;
+  description?: string;
+  action: ReactNode;
+  placement?: "side" | "bottom";
+  fill?: boolean;
+  children: ReactNode;
+}) {
+  const body = (
+    <Card className={cn(fill && "flex h-full min-h-0 flex-1 flex-col")}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        {description ? <p className="text-[13px] text-muted-foreground">{description}</p> : null}
+      </CardHeader>
+      <CardContent className={cn(fill && "min-h-0 flex-1")}>{children}</CardContent>
+      {placement === "bottom" ? (
+        <CardFooter className={cn(fill && "sticky bottom-0 z-10 mt-auto bg-card")}>{action}</CardFooter>
+      ) : null}
+    </Card>
+  );
+  if (placement === "bottom") {
+    return fill ? <div className="flex min-h-0 flex-1 flex-col">{body}</div> : body;
+  }
+  return (
+    <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(13rem,1fr)]">
+      {body}
+      <div className="flex flex-col gap-2 lg:sticky lg:top-4">{action}</div>
+    </div>
+  );
+}
+
+function pageMatch(prompt: string, page: AgentPageLink): number {
+  const words = prompt.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2);
+  if (words.length === 0) return 0;
+  const haystack = `${page.name} ${page.path}`.toLowerCase();
+  const hits = words.filter((word) => haystack.includes(word)).length;
+  return Math.round((hits / words.length) * 100);
+}
+
+function PageChoices({
+  prompt,
+  pages,
+  note,
+  busy,
+  onNote,
+  onChoose,
+}: {
+  prompt: string;
+  pages: AgentPageLink[];
+  note: string;
+  busy: boolean;
+  onNote: (value: string) => void;
+  onChoose: (path: string) => void;
+}) {
+  const ranked = [...pages].sort((a, b) => pageMatch(prompt, b) - pageMatch(prompt, a));
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="text-sm font-medium">Pages found</p>
+        <p className="text-[13px] text-muted-foreground">
+          Match is how many words from your description appear in the page name. Choose the page this test should use.
+        </p>
+      </div>
+      {ranked.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">No pages were found. Add a detail below and plan again.</p>
+      ) : (
+        ranked.map((page) => (
+          <Button
+            key={`${page.path}-${page.name}`}
+            variant="outline"
+            className="h-auto justify-between gap-3 py-2"
+            disabled={busy}
+            onClick={() => onChoose(page.path)}
+          >
+            <span className="min-w-0 truncate text-left">
+              {page.name} · {page.path}
+            </span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">{pageMatch(prompt, page)}% match</span>
+          </Button>
+        ))
+      )}
+      <div className="flex flex-col">
+        <FieldLabel htmlFor="agent-page-note">Add a detail</FieldLabel>
+        <Textarea
+          id="agent-page-note"
+          value={note}
+          onChange={(event) => onNote(event.target.value)}
+          placeholder="The curricula list is under the Curricula tab."
+          className="field-sizing-fixed min-h-20"
+        />
+      </div>
+    </div>
+  );
+}
+
+function CaseResult({ item, running }: { item: AgentCase; running: boolean }) {
+  const passed = item.phase === "recorded" || item.phase === "draft" || item.phase === "saved";
+  const failed = item.phase === "failed";
+  const status = running ? "running" : failed ? "failed" : passed ? "passed" : "running";
+  const label = running ? "Recording" : failed ? "Failed" : passed ? "Passed" : "Recording";
+  const page = [...(item.diary || [])].reverse().find((line) => line.url)?.url;
+  return (
+    <div className="rounded-lg border border-border">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <p className="text-sm font-semibold">Result</p>
+        <RunStatusBadge status={status} label={label} />
+      </div>
+      <dl className="grid gap-3 px-4 py-3 sm:grid-cols-2">
+        <div className="min-w-0">
+          <dt className="text-xs text-muted-foreground">Path</dt>
+          <dd className="mt-0.5 truncate text-[13px] font-medium">{item.path || "—"}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs text-muted-foreground">Expected result</dt>
+          <dd className="mt-0.5 text-[13px] font-medium">{item.expected || "—"}</dd>
+        </div>
+        {page ? (
+          <div className="min-w-0 sm:col-span-2">
+            <dt className="text-xs text-muted-foreground">Page</dt>
+            <dd className="mt-0.5 truncate text-[13px] font-medium">{page}</dd>
+          </div>
+        ) : null}
+        {item.error ? (
+          <div className="min-w-0 sm:col-span-2">
+            <dt className="text-xs text-muted-foreground">Error</dt>
+            <dd className="mt-0.5 text-[13px] font-medium text-destructive">{item.error}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {item.script ? (
+        <pre className="max-h-72 overflow-auto border-t border-border px-4 py-3 font-mono text-xs whitespace-pre-wrap">{item.script}</pre>
+      ) : null}
+    </div>
+  );
+}
+
+function ScriptBlock({ script }: { script: string }) {
+  if (!script.trim()) return null;
+  return (
+    <div className="rounded-lg border border-border">
+      <p className="border-b border-border px-4 py-3 text-sm font-semibold">Generated code</p>
+      <pre className="max-h-72 overflow-auto px-4 py-3 font-mono text-xs whitespace-pre-wrap">{script}</pre>
+    </div>
   );
 }
 
@@ -723,7 +902,6 @@ function CaseMilestones({
         const recorded = item.phase === "recorded" || item.phase === "draft" || item.phase === "saved";
         const failed = item.phase === "failed";
         const pending = mode === "record" && running && !recorded && !failed;
-        const status: MilestoneState = recorded ? "done" : failed ? "failed" : pending ? "current" : "waiting";
         const choice = choosing && (mode === "plan" || canChoose(item));
         return (
           <section key={item.id || `${item.path}-${index}`} className="flex flex-col gap-3">
@@ -738,12 +916,16 @@ function CaseMilestones({
               ) : null}
               <div className="min-w-0">
                 <p className="text-sm font-medium">{item.name}</p>
-                <p className="truncate text-[13px] text-muted-foreground">{item.path}</p>
-                {item.error ? <p className="text-[13px] text-destructive">{item.error}</p> : null}
+                {mode === "plan" ? <p className="truncate text-[13px] text-muted-foreground">{item.path}</p> : null}
+                {mode === "plan" && item.error ? <p className="text-[13px] text-destructive">{item.error}</p> : null}
               </div>
             </div>
-            <MilestoneList title="Steps" items={milestonesFor(item.steps, item.expected, status, item.diary?.length ?? 0)} />
-            {failed && job ? <ErrorJson value={debugRecord(job, item)} /> : null}
+            {mode === "plan" ? (
+              <MilestoneList title="Steps" items={milestonesFor(item.steps, item.expected, "waiting", item.diary?.length ?? 0)} />
+            ) : (
+              <CaseResult item={item} running={pending} />
+            )}
+            {mode === "record" && failed && job ? <ErrorJson value={debugRecord(job, item)} /> : null}
           </section>
         );
       })}

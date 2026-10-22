@@ -961,6 +961,8 @@ export type AgentPageLink = {
   controls?: { role: string; name: string; path?: string }[];
 };
 
+export type AgentDiaryLine = { action: string; role: string; name: string; value: string; url: string };
+
 export type AgentCase = {
   id: string;
   name: string;
@@ -969,6 +971,7 @@ export type AgentCase = {
   expected: string;
   phase: string;
   script: string;
+  diary?: AgentDiaryLine[];
   testCaseId?: string | null;
   error?: string | null;
   diary?: { action: string; role: string; name: string; value: string; url: string }[];

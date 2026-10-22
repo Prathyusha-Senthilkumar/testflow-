@@ -32,6 +32,8 @@ export type AuthProfileRecord = {
   refresh: RefreshConfig | null;
   storageState: StorageState | null;
   credentials: Credentials | null;
+  /** The password blob is present but was saved with a different key. */
+  credentialsUnreadable?: boolean;
 };
 
 export class AuthProfileError extends Error {}
@@ -46,11 +48,14 @@ const USERNAME_SELECTORS = [
   'input[type="text"]',
 ];
 const SUBMIT_SELECTORS = [
-  'button[type="submit"]',
-  'input[type="submit"]',
+  'button[type="submit"]:has-text("Sign in")',
+  'button[type="submit"]:has-text("Log in")',
+  'button[type="submit"]:has-text("Login")',
+  'button:has-text("Sign in")',
   'button:has-text("Log in")',
   'button:has-text("Login")',
-  'button:has-text("Sign in")',
+  'input[type="submit"]',
+  'button[type="submit"]',
 ];
 const NAV_TIMEOUT_MS = 30_000;
 
@@ -71,15 +76,25 @@ function asCredentials(value: unknown): Credentials | null {
   return username && password ? { username, password } : null;
 }
 
-function decryptField(token: string, label: string): Record<string, unknown> | null {
-  if (!token.trim()) return null;
+function readEncrypted(token: string): { value: Record<string, unknown> | null; unreadable: boolean } {
+  if (!token.trim()) return { value: null, unreadable: false };
   try {
-    return decryptMapping(token, secretKeyFromEnv());
+    return { value: decryptMapping(token, secretKeyFromEnv()), unreadable: false };
   } catch (error) {
     if (error instanceof SecretKeyError) throw new AuthProfileError(error.message);
-    if (error instanceof DecryptError) throw new AuthProfileError(`The Auth Profile ${label} could not be decrypted. ${error.message}`);
+    if (error instanceof DecryptError) return { value: null, unreadable: true };
     throw error;
   }
+}
+
+function decryptField(token: string, label: string): Record<string, unknown> | null {
+  const read = readEncrypted(token);
+  if (read.unreadable) {
+    throw new AuthProfileError(
+      `The Auth Profile ${label} could not be decrypted. Saved value could not be decrypted. TESTFLOW_SECRET_KEY must match the key it was saved with.`
+    );
+  }
+  return read.value;
 }
 
 /** Load and decrypt one profile. Supabase in normal mode; local files in demo mode (upstream behaviour). */
@@ -94,13 +109,21 @@ export async function loadAuthProfile(repoRoot: string, projectId: string, profi
     .maybeSingle();
   if (error) throw new AuthProfileError("The Auth Profile could not be loaded.");
   if (!data) throw new AuthProfileError("The Auth Profile attached to this test no longer exists.");
+  const session = readEncrypted(String(data.storage_state_enc || ""));
+  const creds = readEncrypted(String(data.credentials_enc || ""));
+  if (session.unreadable && creds.unreadable) {
+    throw new AuthProfileError(
+      "The Auth Profile credentials could not be decrypted. Saved value could not be decrypted. TESTFLOW_SECRET_KEY must match the key it was saved with."
+    );
+  }
   return {
     projectId,
     profileId,
     loginUrl: String(data.login_url || ""),
     refresh: data.refresh && typeof data.refresh === "object" ? (data.refresh as RefreshConfig) : null,
-    storageState: asState(decryptField(String(data.storage_state_enc || ""), "session")),
-    credentials: asCredentials(decryptField(String(data.credentials_enc || ""), "credentials")),
+    storageState: asState(session.value),
+    credentials: asCredentials(creds.value),
+    credentialsUnreadable: creds.unreadable,
   };
 }
 
@@ -190,12 +213,16 @@ export async function ensureAuthenticatedSession(
   }
 
   if (!profile.credentials) {
+    const stalePassword = profile.credentialsUnreadable
+      ? "The saved password on this Auth Profile cannot be read. Open Auth Profiles and save the username and password again."
+      : "";
     throw new AuthProfileError(
-      refreshAttempted
-        ? "The saved session is no longer usable, refresh could not restore it, and this Auth Profile has no stored credentials. Add credentials to the Auth Profile (or use Record Login) so TestFlow can sign in automatically."
-        : profile.storageState
-          ? "The saved session is no longer usable and this Auth Profile has no stored credentials. Add credentials to the Auth Profile (or use Record Login) so TestFlow can sign in automatically."
-          : "This Auth Profile has no saved session and no stored credentials. Use Record Login or add credentials."
+      stalePassword ||
+        (refreshAttempted
+          ? "The saved session is no longer usable, refresh could not restore it, and this Auth Profile has no stored credentials. Add credentials to the Auth Profile (or use Record Login) so TestFlow can sign in automatically."
+          : profile.storageState
+            ? "The saved session is no longer usable and this Auth Profile has no stored credentials. Add credentials to the Auth Profile (or use Record Login) so TestFlow can sign in automatically."
+            : "This Auth Profile has no saved session and no stored credentials. Use Record Login or add credentials.")
     );
   }
   log("stage=credential_login");
@@ -343,6 +370,32 @@ export function dig(payload: unknown, dotted: string): unknown {
   return current;
 }
 
+async function buttonLabel(button: import("playwright").Locator): Promise<string> {
+  return ((await button.innerText().catch(() => "")) || "").trim();
+}
+
+function isContinueLabel(label: string): boolean {
+  return /^(continue|next)$/i.test(label);
+}
+
+async function clickContinue(page: Page): Promise<void> {
+  const button = page.locator('button[type="submit"]').filter({ hasText: /^(continue|next)$/i }).first();
+  if ((await button.count().catch(() => 0)) > 0 && (await button.isVisible().catch(() => false))) {
+    await button.click();
+  }
+}
+
+async function clickSignIn(page: Page): Promise<boolean> {
+  for (const selector of SUBMIT_SELECTORS) {
+    const button = page.locator(selector).first();
+    if ((await button.count().catch(() => 0)) === 0 || !(await button.isVisible().catch(() => false))) continue;
+    if (isContinueLabel(await buttonLabel(button))) continue;
+    await button.click();
+    return true;
+  }
+  return false;
+}
+
 async function loginWithCredentials(
   browser: Browser,
   loginUrl: string,
@@ -372,17 +425,14 @@ async function loginWithCredentials(
     }
     if (!username) throw new AuthProfileError("No username/email field was found on the login page.");
     await username.fill(credentials.username);
-    await password.fill(credentials.password);
-    let submitted = false;
-    for (const selector of SUBMIT_SELECTORS) {
-      const button = page.locator(selector).first();
-      if ((await button.count().catch(() => 0)) > 0 && (await button.isVisible().catch(() => false))) {
-        await button.click();
-        submitted = true;
-        break;
-      }
+    if (!(await password.isVisible().catch(() => false))) {
+      await clickContinue(page);
+      await password.waitFor({ state: "visible", timeout: 8_000 }).catch(() => undefined);
     }
+    await password.fill(credentials.password);
+    const submitted = await clickSignIn(page);
     if (!submitted) await password.press("Enter");
+    await page.waitForURL((url) => !/\/login\/?$/i.test(url.pathname), { timeout: 15_000 }).catch(() => undefined);
     await page.waitForLoadState("networkidle", { timeout: NAV_TIMEOUT_MS }).catch(() => undefined);
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
     if (await landedOnLogin(page)) {

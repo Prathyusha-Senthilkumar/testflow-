@@ -13,6 +13,7 @@ Runs inside the existing worker/Playwright stack; it starts no new framework.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
@@ -35,11 +36,14 @@ _USERNAME_SELECTORS = (
     'input[type="text"]',
 )
 _SUBMIT_SELECTORS = (
-    'button[type="submit"]',
-    'input[type="submit"]',
+    'button[type="submit"]:has-text("Sign in")',
+    'button[type="submit"]:has-text("Log in")',
+    'button[type="submit"]:has-text("Login")',
+    'button:has-text("Sign in")',
     'button:has-text("Log in")',
     'button:has-text("Login")',
-    'button:has-text("Sign in")',
+    'input[type="submit"]',
+    'button[type="submit"]',
 )
 
 _NAV_TIMEOUT_MS = 30_000
@@ -152,6 +156,45 @@ def _refresh_and_revalidate(
         return None
 
 
+def _left_login(url: str) -> bool:
+    path = urlparse(str(url)).path.rstrip("/").lower()
+    return path != "/login"
+
+
+def _visible(locator) -> bool:
+    try:
+        return locator.count() > 0 and locator.is_visible()
+    except PlaywrightError:
+        return False
+
+
+def _click_continue(page) -> None:
+    button = page.locator('button[type="submit"]').filter(
+        has_text=re.compile(r"^(continue|next)$", re.I)
+    ).first
+    try:
+        if button.count() > 0 and button.is_visible():
+            button.click()
+    except PlaywrightError:
+        return
+
+
+def _click_sign_in(page) -> bool:
+    for selector in _SUBMIT_SELECTORS:
+        button = page.locator(selector).first
+        try:
+            if button.count() == 0 or not button.is_visible():
+                continue
+            label = (button.inner_text() or "").strip()
+            if re.fullmatch(r"continue|next", label, flags=re.I):
+                continue
+            button.click()
+            return True
+        except PlaywrightError:
+            continue
+    return False
+
+
 def _login_with_credentials(
     login_url: str,
     username: str,
@@ -192,21 +235,21 @@ def _login_with_credentials(
                 raise AuthRecoveryError("No username/email field was found on the login page.")
 
             username_field.fill(username)
+            if not _visible(password_field):
+                _click_continue(page)
+                try:
+                    password_field.wait_for(state="visible", timeout=8_000)
+                except PlaywrightError:
+                    pass
             password_field.fill(password)
 
-            submitted = False
-            for selector in _SUBMIT_SELECTORS:
-                button = page.locator(selector).first
-                try:
-                    if button.count() > 0 and button.is_visible():
-                        button.click()
-                        submitted = True
-                        break
-                except PlaywrightError:
-                    continue
-            if not submitted:
+            if not _click_sign_in(page):
                 password_field.press("Enter")
 
+            try:
+                page.wait_for_url(_left_login, timeout=15_000)
+            except PlaywrightError:
+                pass
             try:
                 page.wait_for_load_state("networkidle", timeout=_NAV_TIMEOUT_MS)
             except PlaywrightError:

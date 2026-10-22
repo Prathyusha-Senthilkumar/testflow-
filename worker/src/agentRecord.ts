@@ -245,6 +245,7 @@ async function recordJob(redis: Redis, jobId: string, browser: Browser, repoRoot
           timeout: 20_000,
         });
         diary.push({ action: "goto", role: "", name: "", value: "", url: page.url() });
+        await writePhase(redis, jobId, "recording", null, diary);
         continue;
       }
       let controls = await listControls(page);
@@ -307,6 +308,7 @@ async function recordCase(
   const context = await openContext(browser, repoRoot, scoped);
   try {
     const page = await context.newPage();
+    await updateCase(redis, job.id, planned.id, { phase: "recording", error: null, diary: [] });
     const outcome = await playSteps(page, planned.startUrl || "", planned.steps || [], job.pages || [], planned.expected || "");
     await updateCase(redis, job.id, planned.id, {
       phase: outcome.phase,
@@ -610,10 +612,16 @@ export function openDiscoveredPage(step: Step, pages: AgentPageLink[], currentPa
 
 export function pick(step: Step, controls: Control[]): Control | null {
   const wanted = step.target.trim().toLowerCase();
-  const exact = controls.filter((item) => item.name.trim().toLowerCase() === wanted);
-  if (exact.length === 1) return exact[0];
-  const partial = controls.filter((item) => item.name.toLowerCase().includes(wanted));
-  return partial.length === 1 ? partial[0] : null;
+  const named = controls.map((item) => ({ item, name: item.name.trim().toLowerCase() }));
+  const exact = named.filter((entry) => entry.name === wanted);
+  if (exact.length === 1) return exact[0].item;
+  const partial = named.filter((entry) => entry.name.includes(wanted));
+  if (partial.length === 1) return partial[0].item;
+  if (partial.length > 1) return null;
+  // "List view" has no control by that name; the toolbar button is named "List".
+  const tokens = wanted.split(/[^a-z0-9]+/).filter((word) => word.length >= 3);
+  const tokenHits = named.filter((entry) => tokens.includes(entry.name));
+  return tokenHits.length === 1 ? tokenHits[0].item : null;
 }
 
 async function rememberAgentFailure(redis: Redis, jobId: string, stopping: () => boolean): Promise<void> {
