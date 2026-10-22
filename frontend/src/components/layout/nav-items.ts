@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   Plug,
   Server,
-  Sparkles,
   Settings,
   ShieldCheck,
   type LucideIcon,
@@ -41,7 +40,6 @@ export function projectNav(projectId: string): NavItem[] {
   return [
     { to: base, label: "Overview", icon: LayoutDashboard, exact: true },
     { to: `${base}/test-cases`, label: "Test Cases", icon: FileCheck2 },
-    { to: `${base}/agent`, label: "Agent", icon: Sparkles },
     { to: `${base}/suites`, label: "Suites", icon: Layers },
     { to: `${base}/environments`, label: "Environments", icon: Globe },
     { to: `${base}/auth-profiles`, label: "Auth Profiles", icon: ShieldCheck },

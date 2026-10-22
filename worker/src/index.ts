@@ -31,7 +31,6 @@ import {
   setRedisFullHandler,
 } from "./redisOom.js";
 import { runRecordedTest, type RunOutcome } from "./runTest.js";
-import { consumeAgentQueue } from "./agentRecord.js";
 import {
   SlotTracker,
   buildHeartbeat,
@@ -408,7 +407,6 @@ async function main(): Promise<void> {
     every(1000, promoteDue),
     every(REAPER_INTERVAL_MS, reap),
     ...Array.from({ length: WORKER_CONCURRENCY }, (_, index) => consume(index)),
-    consumeAgentQueue(redis, () => pool.getBrowser(), () => stopping, REPO_ROOT),
   ]);
 }
 

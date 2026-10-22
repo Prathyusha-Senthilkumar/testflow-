@@ -30,7 +30,6 @@ from app.routers.search import router as search_router
 from app.routers.notifications import router as notifications_router
 from app.routers.workers import router as workers_router
 from app.routers.github import router as github_router
-from app.routers.agents import router as agents_router
 from app.dependencies.auth import auth_bypass_enabled, require_user
 
 logger = logging.getLogger("testflow.api")
@@ -161,7 +160,6 @@ api_router.include_router(search_router)
 api_router.include_router(notifications_router)
 api_router.include_router(workers_router)
 api_router.include_router(github_router)
-api_router.include_router(agents_router)
 
 app.include_router(public_api_router)
 app.include_router(api_router)

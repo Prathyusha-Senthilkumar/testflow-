@@ -741,33 +741,6 @@ export const api = {
     request<TestCaseSummary[]>(`/projects/${projectId}/test-cases`),
   testCase: (projectId: string, testCaseId: string) =>
     request<TestCaseSummary>(`/projects/${projectId}/test-cases/${testCaseId}`),
-  createAgentJob: (projectId: string, input: AgentJobInput) =>
-    request<AgentJob>(`/projects/${projectId}/agent-jobs`, {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  agentJob: (projectId: string, jobId: string) =>
-    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}`, {}, { live: true }),
-  approveAgentJob: (projectId: string, jobId: string, accepted: boolean, caseIds?: string[]) =>
-    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/approval`, {
-      method: "POST",
-      body: JSON.stringify({ accepted, caseIds: caseIds ?? [] }),
-    }),
-  saveAgentDraft: (projectId: string, jobId: string, categories?: string[], caseIds?: string[]) =>
-    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/save`, {
-      method: "POST",
-      body: JSON.stringify({ categories: categories ?? [], caseIds: caseIds ?? [] }),
-    }),
-  removeAgentCases: (projectId: string, jobId: string, caseIds: string[]) =>
-    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/cases/remove`, {
-      method: "POST",
-      body: JSON.stringify({ caseIds }),
-    }),
-  chooseAgentPage: (projectId: string, jobId: string, path: string) =>
-    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/page`, {
-      method: "POST",
-      body: JSON.stringify({ path }),
-    }),
   createTestCase: (projectId: string, input: TestCaseInput) =>
     request<TestCaseSummary>(`/projects/${projectId}/test-cases`, {
       method: "POST",
@@ -946,46 +919,6 @@ export type AssertionConfig = {
   id: string;
   type: AssertionType;
   value: string;
-};
-
-export type AgentStep = { action: string; target: string; value: string };
-
-export type AgentPageLink = { name: string; path: string };
-
-export type AgentCase = {
-  id: string;
-  name: string;
-  path: string;
-  steps: AgentStep[];
-  expected: string;
-  phase: string;
-  script: string;
-  testCaseId?: string | null;
-  error?: string | null;
-};
-
-export type AgentJobInput = {
-  prompt: string;
-  environmentId: string;
-  authProfileId?: string;
-};
-
-export type AgentJob = {
-  id: string;
-  projectId: string;
-  phase: string;
-  prompt: string;
-  startPath?: string;
-  steps: AgentStep[];
-  expected: string;
-  pages?: AgentPageLink[];
-  diary: { action: string; role: string; name: string; value: string; url: string }[];
-  script: string;
-  testCaseId?: string | null;
-  suiteId?: string | null;
-  cases?: AgentCase[];
-  costUsd: number;
-  error?: string | null;
 };
 
 export type EnvironmentInput = {
