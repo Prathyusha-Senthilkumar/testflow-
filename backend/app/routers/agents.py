@@ -16,6 +16,10 @@ class CreateAgentJob(BaseModel):
     authProfileId: str = ""
 
 
+class AgentReply(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
 class Approval(BaseModel):
     accepted: bool
     caseIds: list[str] = Field(default_factory=list, max_length=10)
@@ -56,6 +60,16 @@ def create_agent_job(
 @router.get("/{job_id}")
 def get_agent_job(project_id: str, job_id: str, _: Optional[tuple[str, str]] = Depends(current_actor)):
     return agent_service.get(project_id, job_id)
+
+
+@router.post("/{job_id}/messages")
+def reply_to_agent(
+    project_id: str,
+    job_id: str,
+    body: AgentReply,
+    _: Optional[tuple[str, str]] = Depends(current_actor),
+):
+    return agent_service.reply(project_id, job_id, body.text)
 
 
 @router.post("/{job_id}/page")

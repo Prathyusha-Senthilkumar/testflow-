@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, ListChecks } from "lucide-react";
+import { ArrowRight, Check, Copy, ListChecks } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNavigate, useParams } from "@/lib/navigation";
 import { api, type AgentCase, type AgentJob, type AuthProfileSummary, type EnvironmentSummary } from "@/lib/api";
@@ -46,6 +46,7 @@ export function AgentPage() {
   const [suiteCategories, setSuiteCategories] = useState<SuiteCategory[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [runNotice, setRunNotice] = useState("");
+  const [reply, setReply] = useState("");
   const [stage, setStage] = useState<Stage>("describe");
   const stageRank = useRef(0);
   const confirm = useConfirm();
@@ -132,6 +133,22 @@ export function AgentPage() {
       setRunNotice("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "The planner did not start.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendReply() {
+    if (!job || !reply.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const next = await api.replyToAgent(projectId, job.id, reply.trim());
+      setJob(next);
+      setReply("");
+      setSelected((next.cases || []).map((item) => item.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The correction could not be applied.");
     } finally {
       setBusy(false);
     }
@@ -300,7 +317,7 @@ export function AgentPage() {
     <PageContainer>
       <PageHeader
         title="Agent"
-        description="Describe the test, approve the recommended cases, then approve the recording."
+        description="Describe the test, correct the recommendations in the conversation, then approve the recording."
       />
       {error ? <Alert variant="error">{error}</Alert> : null}
       {loading ? <p className="text-[13px] text-muted-foreground">Loading environments…</p> : null}
@@ -373,6 +390,7 @@ export function AgentPage() {
             ) : null}
             {job && !finding && job.phase !== "rejected" && (job.cases || []).length > 0 ? (
               <CaseMilestones
+                job={job}
                 cases={job.cases || []}
                 mode="plan"
                 selected={job.phase === "review" ? selected : undefined}
@@ -389,6 +407,16 @@ export function AgentPage() {
             {job && (job.phase === "needs_choice" || (job.phase === "failed" && !showRecording)) ? (
               <Alert variant="error">{job.error || "The plan stopped."}</Alert>
             ) : null}
+            {job && (job.phase === "review" || job.phase === "needs_choice") ? (
+              <AgentThread
+                note={(job.messages || []).filter((message) => message.role === "assistant").at(-1)?.text}
+                reply={reply}
+                onReply={setReply}
+                sending={busy || finding}
+                onSend={() => void sendReply()}
+              />
+            ) : null}
+            {job?.error && job.phase === "review" ? <Alert variant="error">{job.error}</Alert> : null}
             {job?.phase === "needs_choice" && job.pages && job.pages.length > 0 ? (
               <div className="flex flex-col gap-2">
                 {job.pages.map((page) => (
@@ -437,6 +465,7 @@ export function AgentPage() {
             ) : null}
             {showRecording && job ? (
               <CaseMilestones
+                job={job}
                 cases={job.cases || []}
                 mode="record"
                 running={job.phase === "recording"}
@@ -564,7 +593,99 @@ type MilestoneItem = {
   aside?: string;
 };
 
+function debugRecord(job: AgentJob, item: AgentCase) {
+  const diary = item.diary ?? [];
+  const failedStep = item.steps[diary.length] ?? null;
+  const openedUrl = [...diary].reverse().find((line) => line.url)?.url ?? null;
+  let openedPath = item.path;
+  try {
+    if (openedUrl) openedPath = new URL(openedUrl).pathname;
+  } catch {
+    openedPath = item.path;
+  }
+  const pages = (job.pages ?? []).map((page) => ({
+    name: page.name,
+    path: page.path,
+    controls: (page.controls ?? []).map((control) => ({
+      role: control.role,
+      name: control.name,
+      ...(control.path ? { path: control.path } : {}),
+    })),
+  }));
+  const openedPage = pages.filter((page) => page.path === openedPath || page.path === item.path);
+  return {
+    summary: failedStep
+      ? `Step ${diary.length + 1} failed: ${failedStep.action} "${failedStep.target}". ${item.error ?? ""}`.trim()
+      : item.error ?? "Recording failed.",
+    error: item.error ?? null,
+    jobError: job.error ?? null,
+    diagnosis: diagnosisFor(item, failedStep, openedUrl),
+    prompt: job.prompt,
+    case: {
+      id: item.id,
+      name: item.name,
+      phase: item.phase,
+      path: item.path,
+      expected: item.expected,
+    },
+    failedStep: failedStep
+      ? {
+          number: diary.length + 1,
+          action: failedStep.action,
+          target: failedStep.target,
+          value: failedStep.value,
+          valueWasEmpty: !failedStep.value.trim(),
+        }
+      : null,
+    completedStepCount: diary.length,
+    openedUrl,
+    openedPage,
+    discoveredPages: pages,
+    steps: item.steps,
+    diary,
+  };
+}
+
+function diagnosisFor(item: AgentCase, failedStep: AgentCase["steps"][number] | null, openedUrl: string | null): string {
+  if (item.error === "Nothing on this page can be used as the search text.") {
+    return "The prompt did not name the text to type, so the fill value is empty. After the goto, the recorder looked for an item title on the opened page that is not the current screen. It found none, so the fill did not run. The expected text is the screen name taken from the prompt. Steps after the diary did not run.";
+  }
+  if (!failedStep) {
+    return "Every stored step completed. The failure is the result check, not one of the actions. The diary is the list of actions that ran.";
+  }
+  const failedNumber = (item.diary?.length ?? 0) + 1;
+  return `The diary has the actions that finished. Step ${failedNumber} is the one that threw. The page at that moment was ${openedUrl ?? item.path}. Later steps did not run. The case error is the recorder exception, not a separate failure for each red row.`;
+}
+
+function ErrorJson({ value }: { value: unknown }) {
+  const text = JSON.stringify(value, null, 2);
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="rounded-lg border border-border">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+        <p className="text-sm font-semibold">Error</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            void navigator.clipboard.writeText(text).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 2000);
+            });
+          }}
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <pre className="max-h-80 overflow-auto bg-muted/40 p-3 font-mono text-xs leading-5 text-foreground">{text}</pre>
+    </div>
+  );
+}
+
 function CaseMilestones({
+  job,
   cases,
   mode,
   running = false,
@@ -572,6 +693,7 @@ function CaseMilestones({
   onToggle,
   onToggleAll,
 }: {
+  job?: AgentJob;
   cases: AgentCase[];
   mode: "plan" | "record";
   running?: boolean;
@@ -620,7 +742,8 @@ function CaseMilestones({
                 {item.error ? <p className="text-[13px] text-destructive">{item.error}</p> : null}
               </div>
             </div>
-            <MilestoneList title="Steps" items={milestonesFor(item.steps, item.expected, status)} />
+            <MilestoneList title="Steps" items={milestonesFor(item.steps, item.expected, status, item.diary?.length ?? 0)} />
+            {failed && job ? <ErrorJson value={debugRecord(job, item)} /> : null}
           </section>
         );
       })}
@@ -687,19 +810,29 @@ const STEP_VERB: Record<string, string> = {
   press: "Press",
 };
 
-function milestonesFor(steps: AgentJob["steps"], expected: string | undefined, status: MilestoneState): MilestoneItem[] {
-  const items: MilestoneItem[] = steps.map((step, index) => ({
-    title: `${index + 1}. ${STEP_VERB[step.action] || step.action}${step.target ? ` ${step.target}` : ""}`,
-    detail: step.action === "fill" && step.value ? `Type “${step.value}”` : step.action === "goto" ? "" : step.value || "",
-    state: status === "current" ? (index === 0 ? "current" : "waiting") : status,
-    aside: status === "failed" ? "Failed" : status === "current" && index === 0 ? "Recording" : "",
-  }));
+function milestonesFor(
+  steps: AgentJob["steps"],
+  expected: string | undefined,
+  status: MilestoneState,
+  diaryCount = 0
+): MilestoneItem[] {
+  const items: MilestoneItem[] = steps.map((step, index) => {
+    const failedHere = status === "failed" && index === diaryCount;
+    const finished = status === "done" || (status === "failed" && index < diaryCount);
+    return {
+      title: `${index + 1}. ${STEP_VERB[step.action] || step.action}${step.target ? ` ${step.target}` : ""}`,
+      detail: step.action === "fill" && step.value ? `Type “${step.value}”` : step.action === "goto" ? "" : step.value || "",
+      state: finished ? "done" : failedHere ? "failed" : status === "current" && index === 0 ? "current" : "waiting",
+      aside: failedHere ? "Failed" : status === "current" && index === 0 ? "Recording" : "",
+    };
+  });
   if (expected) {
+    const confirmFailed = status === "failed" && diaryCount >= steps.length;
     items.push({
       title: `${items.length + 1}. Confirm the result`,
       detail: expected,
-      state: status === "current" ? "waiting" : status,
-      aside: status === "failed" ? "Failed" : "",
+      state: status === "done" ? "done" : confirmFailed ? "failed" : "waiting",
+      aside: confirmFailed ? "Failed" : "",
     });
   }
   if (items.length === 0) {
@@ -718,4 +851,36 @@ function canChoose(item: AgentCase) {
 
 function canSave(item: AgentCase) {
   return item.phase === "draft" || item.phase === "saved";
+}
+
+function AgentThread({
+  note,
+  reply,
+  onReply,
+  sending,
+  onSend,
+}: {
+  note?: string;
+  reply: string;
+  onReply: (value: string) => void;
+  sending: boolean;
+  onSend: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {note ? <p className="text-[13px] text-muted-foreground">{note}</p> : null}
+      <Textarea
+        value={reply}
+        onChange={(event) => onReply(event.target.value)}
+        placeholder="These steps are one test case. Keep the click and the search together, and confirm only the item name."
+        className="field-sizing-fixed min-h-20"
+        disabled={sending}
+      />
+      <div className="flex justify-end">
+        <Button variant="outline" onClick={onSend} disabled={sending || !reply.trim()} loading={sending}>
+          Send correction
+        </Button>
+      </div>
+    </div>
+  );
 }

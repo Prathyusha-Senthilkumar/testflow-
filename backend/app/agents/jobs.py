@@ -48,6 +48,11 @@ def public_view(job: dict) -> dict[str, Any]:
         "projectId": job.get("projectId"),
         "phase": job.get("phase"),
         "prompt": job.get("prompt"),
+        "messages": [
+            {"role": item.get("role") or "assistant", "text": str(item.get("text") or "")}
+            for item in (job.get("messages") or [])
+            if isinstance(item, dict) and str(item.get("text") or "").strip()
+        ],
         "startPath": job.get("startPath") or "",
         "steps": job.get("steps") or [],
         "expected": job.get("expected") or "",
@@ -73,4 +78,5 @@ def _public_case(case: dict) -> dict[str, Any]:
         "script": case.get("script") or "",
         "testCaseId": case.get("testCaseId"),
         "error": case.get("error"),
+        "diary": case.get("diary") or [],
     }

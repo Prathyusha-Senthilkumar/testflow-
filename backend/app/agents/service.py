@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from app.agents.jobs import claim_plan, enqueue_record, load, new_id, public_view, release_plan, save
 from app.agents.limits import LoopState
 from app.agents.openrouter import ModelError
-from app.agents.state.plan import PlanRejected, intake, known_page, plan, url_for_path
+from app.agents.state.plan import PlanRejected, correction_brief, intake, known_page, plan, url_for_path
 from app.agents.state.script import compile_script
 from app.config import settings
 from app.logging_format import log_failure
@@ -44,6 +44,7 @@ class AgentService:
             "userId": user_id,
             "phase": "discovering",
             "prompt": text,
+            "messages": [{"role": "user", "text": text}],
             "startPath": "",
             "startUrl": landing,
             "environmentId": environment_id.strip(),
@@ -64,6 +65,30 @@ class AgentService:
     def get(self, project_id: str, job_id: str) -> dict[str, Any]:
         job = self._materialize(self._owned(project_id, job_id))
         return public_view(job)
+
+    def reply(self, project_id: str, job_id: str, text: str) -> dict[str, Any]:
+        """Revise the current recommendations from one follow-up. The original description stays."""
+        job = self._owned(project_id, job_id)
+        if job.get("phase") not in {"review", "needs_choice"}:
+            raise HTTPException(status_code=409, detail="Send a correction while the recommendations are visible.")
+        try:
+            correction = intake(text)
+        except PlanRejected as exc:
+            raise HTTPException(status_code=400, detail=exc.reason) from exc
+        messages = [item for item in (job.get("messages") or []) if isinstance(item, dict)]
+        if not messages:
+            messages = [{"role": "user", "text": str(job.get("prompt") or "")}]
+        if sum(1 for item in messages if item.get("role") == "user") >= 7:
+            raise HTTPException(status_code=400, detail="This conversation is full. Start again with a new description.")
+        if not claim_plan(str(job["id"])):
+            raise HTTPException(status_code=409, detail="The planner is still working.")
+        messages.append({"role": "user", "text": correction})
+        job["messages"] = messages
+        job["error"] = None
+        try:
+            return public_view(self._plan(job, claimed=True))
+        finally:
+            release_plan(str(job["id"]))
 
     def choose_page(self, project_id: str, job_id: str, path: str) -> dict[str, Any]:
         job = self._owned(project_id, job_id)
@@ -248,9 +273,11 @@ class AgentService:
             save(job)
         return job
 
-    def _plan(self, job: dict) -> dict:
-        if not claim_plan(str(job["id"])):
+    def _plan(self, job: dict, *, claimed: bool = False) -> dict:
+        if not claimed and not claim_plan(str(job["id"])):
             return load(str(job["id"])) or job
+        previous_cases = [item for item in (job.get("cases") or []) if isinstance(item, dict)]
+        previous_phase = "review" if previous_cases else str(job.get("phase") or "needs_choice")
         job["phase"] = "planning"
         save(job)
         try:
@@ -261,6 +288,7 @@ class AgentService:
                 job.get("pages") or [],
                 loop,
                 job_cost_cap=settings.AGENT_MAX_COST_USD,
+                revision=correction_brief(job.get("messages") or [], previous_cases),
             )
             landing = str(job.get("startUrl") or "")
             stored = []
@@ -288,16 +316,36 @@ class AgentService:
             job["iterations"] = loop.iterations
             job["phase"] = "review"
             job["error"] = None
+            self._remember_plan(job, stored)
         except PlanRejected as exc:
-            job["phase"] = "needs_choice"
+            if previous_cases:
+                job["cases"] = previous_cases
+                job["phase"] = previous_phase
+            else:
+                job["phase"] = "needs_choice"
             job["error"] = exc.reason
         except ModelError as exc:
             log_failure(logger, "agent.plan", exc)
-            job["phase"] = "failed"
+            if previous_cases:
+                job["cases"] = previous_cases
+                job["phase"] = previous_phase
+            else:
+                job["phase"] = "failed"
             job["error"] = "The planner is unavailable. Try again."
         save(job)
-        release_plan(str(job["id"]))
+        if not claimed:
+            release_plan(str(job["id"]))
         return job
+
+    def _remember_plan(self, job: dict, cases: list[dict]) -> None:
+        messages = [item for item in (job.get("messages") or []) if isinstance(item, dict)]
+        if len(cases) == 1:
+            text = f"One test case: {cases[0].get('name') or 'Case'}."
+        else:
+            names = "; ".join(str(item.get("name") or "Case") for item in cases)
+            text = f"{len(cases)} test cases: {names}."
+        messages.append({"role": "assistant", "text": text})
+        job["messages"] = messages[-12:]
 
     def _store_case(self, project_id: str, job: dict, item: dict, actor: tuple[str, str] | None) -> str:
         script = str(item.get("script") or "")

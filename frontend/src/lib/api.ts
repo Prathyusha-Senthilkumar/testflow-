@@ -768,6 +768,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ path }),
     }),
+  replyToAgent: (projectId: string, jobId: string, text: string) =>
+    request<AgentJob>(`/projects/${projectId}/agent-jobs/${jobId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
   createTestCase: (projectId: string, input: TestCaseInput) =>
     request<TestCaseSummary>(`/projects/${projectId}/test-cases`, {
       method: "POST",
@@ -950,7 +955,11 @@ export type AssertionConfig = {
 
 export type AgentStep = { action: string; target: string; value: string };
 
-export type AgentPageLink = { name: string; path: string };
+export type AgentPageLink = {
+  name: string;
+  path: string;
+  controls?: { role: string; name: string; path?: string }[];
+};
 
 export type AgentCase = {
   id: string;
@@ -962,6 +971,7 @@ export type AgentCase = {
   script: string;
   testCaseId?: string | null;
   error?: string | null;
+  diary?: { action: string; role: string; name: string; value: string; url: string }[];
 };
 
 export type AgentJobInput = {
@@ -970,11 +980,14 @@ export type AgentJobInput = {
   authProfileId?: string;
 };
 
+export type AgentMessage = { role: "user" | "assistant"; text: string };
+
 export type AgentJob = {
   id: string;
   projectId: string;
   phase: string;
   prompt: string;
+  messages?: AgentMessage[];
   startPath?: string;
   steps: AgentStep[];
   expected: string;

@@ -149,15 +149,19 @@ def _call_model(key: str, model: str, messages: list[dict], schema: dict) -> tup
             "model": model,
             "messages": messages,
             "temperature": 0,
-            "max_tokens": 1800,
+            "max_tokens": 4000,
+            "reasoning": {"effort": "none"},
             "response_format": {"type": "json_schema", "json_schema": {"name": "agent", "strict": True, "schema": schema}},
         },
-        timeout=_ATTEMPT_TIMEOUT_SECONDS,
+        timeout=25,
     )
     response.raise_for_status()
     payload = response.json()
-    content = payload["choices"][0]["message"]["content"]
-    parsed = content if isinstance(content, dict) else _parse_json(content)
+    message = payload["choices"][0]["message"]
+    if not isinstance(message, dict):
+        raise ValueError("The model did not return JSON.")
+    content = message.get("content")
+    parsed = content if isinstance(content, dict) else _parse_json(_message_text(message))
     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
     return parsed, usage
 
@@ -167,6 +171,26 @@ def _is_quota(exc: Exception) -> bool:
         return True
     text = str(exc).lower()
     return any(token in text for token in ("rate limit", "quota", "too many requests"))
+
+
+def _message_text(message: dict) -> str:
+    """Read the plan JSON. A reasoning model may leave content empty and put the text elsewhere."""
+    content = message.get("content")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                parts.append(str(part.get("text") or part.get("content") or ""))
+        content = "".join(parts)
+    if isinstance(content, str) and content.strip():
+        return content
+    for key in ("reasoning", "reasoning_content"):
+        reasoning = message.get(key)
+        if isinstance(reasoning, str) and reasoning.strip():
+            return reasoning
+    return content if isinstance(content, str) else ""
 
 
 def _parse_json(content: object) -> dict:

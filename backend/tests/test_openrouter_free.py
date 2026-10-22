@@ -11,6 +11,12 @@ def _status(code: int, body: str = "") -> httpx.HTTPStatusError:
     return httpx.HTTPStatusError("failed", request=request, response=response)
 
 
+def test_empty_content_can_still_hold_json_in_reasoning():
+    text = openrouter._message_text({"content": None, "reasoning": '{"cases": []}'})
+    assert openrouter._parse_json(text) == {"cases": []}
+    assert openrouter._message_text({"content": [{"type": "text", "text": "{\"cases\": []}"}]}) == '{"cases": []}'
+
+
 def test_chain_starts_with_the_free_router_and_skips_paid_models():
     chain = model_chain("deepseek/deepseek-v4.1-flash")
     assert chain[0] == "openrouter/free"
